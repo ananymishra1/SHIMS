@@ -533,6 +533,7 @@ async def _omni_lifespan(_app):
     if BRAIN_BACKGROUND_ENABLED and _brain_background_task is None:
         _brain_background_task = asyncio.create_task(_brain_background_loop())
     _register_scheduler_runners()
+    asyncio.create_task(_preload_voice_model())
     try:
         from shared.background_jobs import ensure_default_jobs
         ensure_default_jobs()
@@ -3766,10 +3767,10 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     req.message = (req.message or "").strip()
     session_hint = req.session_id or str(uuid.uuid4())
 
-    # vC: If a voice correction is pending, try to use it before planning.
+    # vC: If a voice correction is pending, try to use it without blocking the turn.
     raw_voice_message = req.message
     if req.source == "voice" and req.voice_correction_id:
-        correction = await _await_stt_correction(req.voice_correction_id, timeout=0.6)
+        correction = await _await_stt_correction(req.voice_correction_id, timeout=0.15)
         if correction and correction.get("ok"):
             corrected = (correction.get("corrected") or raw_voice_message).strip()
             confidence = float(correction.get("confidence") or 0)
@@ -6512,7 +6513,11 @@ async def agents_list() -> dict[str, Any]:
 
 @app.get("/voice/config")
 async def voice_config() -> dict[str, Any]:
-    return {"ok": True, "config": _settings["voice"]}
+    cfg = dict(_settings["voice"])
+    cfg["voice_mode"] = settings.voice_mode
+    cfg["server_stt_chunk_ms"] = 900
+    cfg["stt_correction_enabled"] = False
+    return {"ok": True, "config": cfg}
 
 @app.post("/voice/config")
 async def set_voice_config(req: VoiceConfigRequest) -> dict[str, Any]:
@@ -6533,6 +6538,19 @@ def _server_stt_available() -> bool:
         return True
     except Exception:
         return False
+
+
+async def _preload_voice_model() -> None:
+    """Warm the faster-whisper model cache during startup so first transcription is fast."""
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.getenv("SHIMS_DISABLE_WHISPER", "").lower() in {"1", "true", "yes"}:
+        return
+    if not _server_stt_available():
+        return
+    try:
+        await asyncio.to_thread(_get_whisper_model)
+        log_event("voice.warmup_complete", route="voice:startup", provider="local", model=_active_whisper_model(), ok=True)
+    except Exception as exc:
+        log_event("voice.warmup_error", route="voice:startup", provider="local", model=_active_whisper_model(), ok=False, message=str(exc)[:200])
 
 
 _WHISPER_MODEL = None          # cached faster-whisper model instance (load is expensive)
@@ -6922,6 +6940,24 @@ async def voice_speak(req: SpeakRequest) -> dict[str, Any]:
         raise HTTPException(400, "No text to speak")
     filename = _safe_name("tts", "wav")
     path = AUDIO_DIR / filename
+    backend = (_settings["media"].get("audio_backend") or "auto").lower()
+    voice_mode = settings.voice_mode
+
+    # 1. Cloud / OpenAI TTS first when configured or in cloud voice mode.
+    if voice_mode == "cloud" or backend in {"auto", "openai", "openai-tts", "cloud"}:
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                cloud = await asyncio.wait_for(_create_audio(text[:1200]), timeout=12)
+                if cloud.get("ok"):
+                    cloud["voice_profile"] = selected_profile
+                    cloud["spoken"] = True
+                    return cloud
+            except asyncio.TimeoutError:
+                pass
+            except Exception as exc:
+                pass
+
+    # 2. Local pyttsx3 TTS.
     tts_error = ""
     try:
         timeout = max(3.0, float(os.getenv("SHIMS_TTS_TIMEOUT_SECONDS", "18")))
@@ -6937,9 +6973,10 @@ async def voice_speak(req: SpeakRequest) -> dict[str, Any]:
         tts_error = "server TTS timed out before producing speech audio"
     except Exception as exc:
         tts_error = str(exc)[:240]
-    # Guaranteed audible fallback tone so frontend still has a playable file and never hangs silently.
-    result = await _create_audio("tts fallback " + text[:40])
-    result["engine"] = "tone-fallback"
+
+    # 3. Guaranteed audible fallback tone so frontend still has a playable file and never hangs silently.
+    result = await _create_audio(text[:1200])
+    result["engine"] = result.get("provider") or "tone-fallback"
     result["spoken"] = False
     result["tts_error"] = tts_error
     result["voice_profile"] = selected_profile

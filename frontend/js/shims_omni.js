@@ -39,8 +39,12 @@ state.wakeLatchUntil = 0;
 state.wakeAckTimer = null;
 state.lastWakeAckAt = 0;
 state.serverSttBackoffUntil = 0;
-const SERVER_STT_CHUNK_MS = Math.max(900, Number(localStorage.shimsServerSttChunkMs || 1800) || 1800);
-const VOICE_CORRECTION_ENABLED = localStorage.shimsVoiceCorrection === 'true';
+
+// Frozen voice provider mode: 'cloud' (fastest, requires keys), 'fast' (browser + local fallback), 'local' (local only), 'offline' (no cloud ever).
+const VOICE_MODE = (localStorage.shimsVoiceMode || 'fast').toLowerCase();
+const SERVER_STT_CHUNK_MS = Math.max(600, Math.min(1200, Number(localStorage.shimsServerSttChunkMs || (VOICE_MODE==='local'||VOICE_MODE==='offline'?1000:900)) || 900));
+const VOICE_CORRECTION_ENABLED = localStorage.shimsVoiceCorrection === 'true' || VOICE_MODE === 'cloud';
+
 window.SHIMS_V13_STATE = state; window.SHIMS_V11_STATE = state;
 
 /* ========================================================================
@@ -1396,7 +1400,7 @@ async function speakViaBrowser(text){
         if(voices && voices.length){ pickVoice(); res(); return; }
         const handler = () => { pickVoice(); res(); };
         if(speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', handler, {once:true});
-        setTimeout(() => { pickVoice(); res(); }, 1200);
+        setTimeout(() => { pickVoice(); res(); }, 600);
       });
     };
     chooseVoice().then(() => {
@@ -1413,15 +1417,15 @@ async function speakViaBrowser(text){
         try{
           if(!speechSynthesis.speaking && !speechSynthesis.pending) settle(false, new Error('browser speech did not start'));
         }catch(e){}
-      }, 1800);
+      }, 800);
       const doneTimer = setTimeout(()=>settle(false, new Error('browser speech timed out')), estimateSpeechMs(text));
-      const resumeTimer = setInterval(()=>{ try{ if(!settled) speechSynthesis.resume(); }catch(e){} }, 900);
+      const resumeTimer = setInterval(()=>{ try{ if(!settled && speechSynthesis.paused) speechSynthesis.resume(); }catch(e){} }, 2000);
       u.onend = () => settle(true);
       u.onerror = (ev) => settle(false, new Error(ev && ev.error ? ev.error : 'speech synthesis error'));
       try{
         speechSynthesis.speak(u);
-        // Chrome can occasionally pause synthesis after starting; resume keeps the output alive.
-        setTimeout(()=>{ try{ speechSynthesis.resume(); }catch(e){} }, 250);
+        // Chrome can occasionally pause synthesis after starting; one gentle resume keeps it alive.
+        setTimeout(()=>{ try{ if(!settled && speechSynthesis.paused) speechSynthesis.resume(); }catch(e){} }, 500);
       }catch(e){
         settle(false, e);
       }

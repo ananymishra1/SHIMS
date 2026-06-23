@@ -89,6 +89,9 @@ class Settings:
     code_timeout_seconds: int = env_int('SHIMS_CODE_TIMEOUT_SECONDS', 15)
     max_output_tokens: int = env_int('SHIMS_MAX_OUTPUT_TOKENS', 64000)
 
+    # Voice provider freeze: 'cloud' (OpenAI Whisper/TTS), 'fast' (browser + local fallback), 'local' (local only), 'offline' (no cloud).
+    voice_mode: str = os.getenv('SHIMS_VOICE_MODE', 'fast').lower()
+
     # Manufacturing mode: 'api_only' (no formulation unit) or 'formulation' (tablets/capsules/etc)
     manufacturing_mode: str = os.getenv('SHIMS_MANUFACTURING_MODE', 'api_only')
     # Site phase: 'setup' (draft-friendly) or 'gmp' (21 CFR locked down)
