@@ -748,8 +748,8 @@
       });
     })();
   </script>
-  <script src="/static/js/shims_omni.js?v=20260619-aurora" defer></script>
-  <script src="/static/js/shims_agent.js?v=20260619-aurora" defer></script>
+  <script src="/static/js/shims_omni.js?v=20260619-aurora" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_omni.js'"></script>
+  <script src="/static/js/shims_agent.js?v=20260619-aurora" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_agent.js'"></script>
 <div class="nav-row" onclick="window.open('/school','_blank')" style="cursor:pointer"><span>🏢</span>Stanford International School</div>
 </body>
 </html>
