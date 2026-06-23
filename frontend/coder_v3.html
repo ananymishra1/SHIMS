@@ -1,0 +1,1843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHIMS Coder v3 — Full Power IDE</title>
+<link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/editor/editor.main.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/loader.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/css/xterm.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+<style>
+:root{--bg:#0b1220;--bg2:#0f172a;--bg3:#1e293b;--bg4:#1a2234;--line:#334155;--line2:#475569;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--cyan:#22d3ee;--green:#4ade80;--yellow:#facc15;--red:#f87171;--blue:#60a5fa;--purple:#a78bfa;--orange:#fb923c}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+/* Toolbar */
+.toolbar{height:40px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 10px;gap:6px;flex-shrink:0;z-index:10}
+.toolbar button,.toolbar select{background:var(--bg3);border:1px solid var(--line);color:var(--text);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap}
+.toolbar button:hover{background:var(--line)}
+.toolbar button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+.toolbar button.primary:hover{background:#3b82f6}
+.toolbar button.danger{background:var(--red);border-color:var(--red);color:#000;font-weight:600}
+.toolbar button.danger:hover{background:#ef4444}
+.toolbar .spacer{flex:1}
+.toolbar label{font-size:10px;color:var(--text2)}
+
+/* Activity Bar */
+.activity-bar{width:44px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:4px;flex-shrink:0;z-index:5}
+.activity-btn{width:32px;height:32px;border-radius:6px;border:none;background:transparent;color:var(--text2);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative}
+.activity-btn:hover{background:var(--bg3);color:var(--text)}
+.activity-btn.active{background:var(--bg3);color:var(--cyan);box-shadow:inset 2px 0 0 var(--cyan)}
+.activity-btn .badge{position:absolute;top:-2px;right:-2px;background:var(--red);color:#fff;font-size:9px;border-radius:8px;padding:1px 4px;min-width:14px;text-align:center}
+
+/* Main layout */
+.main{flex:1;display:flex;overflow:hidden}
+.sidebar{width:260px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.sidebar-header{padding:8px 10px;border-bottom:1px solid var(--line);font-size:11px;font-weight:600;color:var(--cyan);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.sidebar-header button{font-size:14px;background:none;border:none;color:var(--text);cursor:pointer;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:4px}
+.sidebar-header button:hover{background:var(--bg3)}
+.sidebar-content{flex:1;overflow:auto;font-size:12px}
+.sidebar-footer{padding:6px 8px;border-top:1px solid var(--line);font-size:10px;color:var(--text3);flex-shrink:0}
+
+/* File Tree */
+.file-tree{padding:4px}
+.file-tree .item{padding:3px 6px;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;user-select:none}
+.file-tree .item:hover{background:var(--bg3)}
+.file-tree .item.active{background:var(--blue);color:#000}
+.file-tree .item.selected{background:rgba(96,165,250,.25)}
+.file-tree .item .checkbox{width:14px;height:14px;cursor:pointer;flex-shrink:0}
+.file-tree .item .icon{font-size:12px;width:16px;text-align:center;flex-shrink:0}
+.file-tree .item .name{flex:1;overflow:hidden;text-overflow:ellipsis}
+.file-tree .item .actions{display:none;gap:3px}
+.file-tree .item:hover .actions{display:flex}
+.file-tree .item .actions button{background:none;border:none;color:var(--text2);cursor:pointer;font-size:10px;padding:0 2px}
+.file-tree .item .actions button:hover{color:var(--red)}
+.file-tree .folder{margin-left:0}
+.file-tree .folder .children{margin-left:14px;border-left:1px solid var(--line);padding-left:3px}
+.file-tree .folder-toggle{cursor:pointer;width:12px;text-align:center;color:var(--text3);font-size:10px;flex-shrink:0}
+
+/* Center */
+.center{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.editor-tabs{height:30px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 2px;gap:1px;overflow:auto;flex-shrink:0}
+.editor-tab{padding:5px 12px;font-size:11px;border-radius:5px 5px 0 0;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;border:1px solid transparent;border-bottom:none;position:relative}
+.editor-tab:hover{background:var(--bg3)}
+.editor-tab.active{background:var(--bg);border-color:var(--line)}
+.editor-tab .close{font-size:12px;color:var(--text2);cursor:pointer;width:14px;height:14px;display:flex;align-items:center;justify-content:center;border-radius:3px}
+.editor-tab .close:hover{background:var(--red);color:#fff}
+.editor-tab .dirty{color:var(--yellow);margin-left:-2px}
+.editor-tab .split-btn{font-size:10px;color:var(--text3);cursor:pointer;margin-left:2px}
+.editor-tab .split-btn:hover{color:var(--cyan)}
+
+#monaco-container{flex:1;overflow:hidden;display:flex}
+.monaco-pane{flex:1;overflow:hidden;border-right:1px solid var(--line)}
+.monaco-pane:last-child{border-right:none}
+
+.breadcrumbs{height:24px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 10px;gap:4px;font-size:11px;color:var(--text2);flex-shrink:0;overflow:auto;white-space:nowrap}
+.breadcrumbs span{cursor:pointer;padding:2px 6px;border-radius:3px}
+.breadcrumbs span:hover{background:var(--bg3);color:var(--text)}
+.breadcrumbs .sep{color:var(--text3);padding:0 2px}
+
+/* Panels */
+.panels{height:200px;background:var(--bg2);border-top:1px solid var(--line);display:flex;flex-shrink:0;flex-direction:column}
+.panel-tabs-row{height:28px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 4px;gap:1px;flex-shrink:0}
+.panel-tab-btn{padding:4px 10px;font-size:10px;border-radius:4px;cursor:pointer;color:var(--text2);border:1px solid transparent;white-space:nowrap}
+.panel-tab-btn:hover{background:var(--bg3);color:var(--text)}
+.panel-tab-btn.active{background:var(--bg3);color:var(--cyan);font-weight:600;border-color:var(--line)}
+.panel-body{flex:1;overflow:hidden;display:flex}
+.panel-sidebar{width:140px;border-right:1px solid var(--line);padding:4px;display:flex;flex-direction:column;gap:2px;flex-shrink:0;overflow:auto}
+.panel-sidebar-btn{padding:4px 8px;font-size:10px;border-radius:3px;cursor:pointer;color:var(--text2);text-align:left;background:none;border:none}
+.panel-sidebar-btn:hover{background:var(--bg3);color:var(--text)}
+.panel-sidebar-btn.active{background:var(--bg3);color:var(--cyan)}
+.panel-content{flex:1;overflow:auto;padding:6px 8px;font-size:12px;font-family:'Cascadia Mono','Fira Code',monospace}
+.panel-content pre{white-space:pre-wrap;word-break:break-all}
+.panel-content .output-line{padding:1px 0}
+.panel-content .output-line.stdout{color:var(--text)}
+.panel-content .output-line.stderr{color:var(--red)}
+.panel-content .output-line.info{color:var(--text3)}
+.panel-content .output-line.success{color:var(--green)}
+.panel-content .output-line.warn{color:var(--yellow)}
+
+#terminal-container{height:100%;padding:4px}
+
+/* Rightbar */
+.rightbar{width:320px;background:var(--bg2);border-left:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.rightbar-header{padding:8px 10px;border-bottom:1px solid var(--line);font-size:11px;font-weight:600;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.rightbar-content{flex:1;overflow:auto;padding:6px;font-size:11px}
+.rightbar-footer{padding:6px;border-top:1px solid var(--line);flex-shrink:0}
+
+/* AI Chat */
+.ai-chat{display:flex;flex-direction:column;gap:6px}
+.ai-message{padding:6px 8px;border-radius:6px;background:var(--bg3);font-size:11px;line-height:1.45;max-width:100%}
+.ai-message.user{background:var(--blue);color:#000}
+.ai-message.assistant{background:var(--bg4);border:1px solid var(--line)}
+.ai-message pre{background:var(--bg);padding:4px;border-radius:4px;overflow:auto;font-size:10px;margin-top:4px}
+.ai-message code{background:var(--bg);padding:1px 3px;border-radius:3px;font-size:10px}
+.ai-input{display:flex;gap:4px;padding:4px}
+.ai-input textarea{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:5px;color:var(--text);font-size:11px;resize:none;height:50px;font-family:inherit}
+.ai-input button{align-self:flex-end;background:var(--blue);border:none;color:#000;border-radius:5px;padding:5px 12px;font-weight:600;cursor:pointer;font-size:11px}
+.context-tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:1px 5px;font-size:9px;margin:1px}
+.context-tag .remove{cursor:pointer;color:var(--red);margin-left:3px}
+
+/* Status Bar */
+.status-bar{height:22px;background:var(--bg3);border-top:1px solid var(--line);display:flex;align-items:center;padding:0 10px;gap:12px;font-size:10px;color:var(--text2);flex-shrink:0;z-index:10}
+.status-bar .item{display:flex;align-items:center;gap:4px;cursor:pointer;padding:2px 6px;border-radius:3px}
+.status-bar .item:hover{background:var(--line);color:var(--text)}
+.status-bar .branch{color:var(--yellow)}
+.status-bar .lang{color:var(--cyan)}
+.status-bar .position{color:var(--text3)}
+
+/* Modals */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000}
+.modal.show{display:flex}
+.modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:360px;max-width:92vw;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal-box h3{margin-bottom:10px;font-size:13px;color:var(--cyan)}
+.modal-box input,.modal-box select,.modal-box textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:6px;color:var(--text);font-size:11px;margin-bottom:8px;font-family:inherit}
+.modal-box textarea{min-height:60px;resize:vertical}
+.modal-box .buttons{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
+.modal-box button{padding:5px 12px;border-radius:5px;border:1px solid var(--line);background:var(--bg3);color:var(--text);cursor:pointer;font-size:11px}
+.modal-box button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+.modal-box button.danger{background:var(--red);border-color:var(--red);color:#000;font-weight:600}
+
+/* Command Palette */
+.cmd-palette{position:fixed;top:15%;left:50%;transform:translateX(-50%);width:560px;max-width:90vw;background:var(--bg2);border:1px solid var(--line);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.6);z-index:1001;overflow:hidden;display:none;flex-direction:column}
+.cmd-palette.show{display:flex}
+.cmd-palette input{width:100%;background:var(--bg);border:none;border-bottom:1px solid var(--line);padding:10px 14px;color:var(--text);font-size:13px;outline:none}
+.cmd-palette .results{max-height:400px;overflow:auto;padding:4px}
+.cmd-palette .result-item{padding:6px 10px;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px}
+.cmd-palette .result-item:hover,.cmd-palette .result-item.selected{background:var(--bg3)}
+.cmd-palette .result-item .shortcut{margin-left:auto;color:var(--text3);font-size:10px}
+.cmd-palette .result-item .category{color:var(--text3);font-size:10px;min-width:60px}
+
+/* Search Panel */
+.search-box{display:flex;gap:4px;margin-bottom:6px;align-items:center}
+.search-box input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;color:var(--text);font-size:11px}
+.search-box button{padding:4px 8px;font-size:10px}
+.search-options{display:flex;gap:8px;margin-bottom:6px;font-size:10px;color:var(--text2)}
+.search-options label{display:flex;align-items:center;gap:3px;cursor:pointer}
+.search-result{padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--line)}
+.search-result:hover{background:var(--bg3)}
+.search-result .file{color:var(--cyan);font-size:10px}
+.search-result .line-num{color:var(--text3);font-size:10px;margin-right:6px}
+
+/* Permission Dialog */
+.permission-toast{position:fixed;bottom:16px;right:16px;background:var(--bg2);border:1px solid var(--yellow);border-radius:8px;padding:12px;max-width:300px;z-index:999;box-shadow:0 10px 40px rgba(0,0,0,.5);animation:slideIn .3s ease}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.permission-toast h4{color:var(--yellow);margin-bottom:6px;font-size:12px}
+.permission-toast p{font-size:11px;color:var(--text2);margin-bottom:8px}
+.permission-toast .buttons{display:flex;gap:6px}
+.permission-toast button{flex:1;padding:6px;border-radius:5px;border:1px solid var(--line);background:var(--bg3);color:var(--text);cursor:pointer;font-size:11px}
+.permission-toast button.approve{background:var(--green);border-color:var(--green);color:#000;font-weight:600}
+.permission-toast button.deny{background:var(--red);border-color:var(--red);color:#000;font-weight:600}
+
+/* Drop Zone */
+.drop-zone{position:absolute;inset:0;background:rgba(11,18,32,.92);display:none;align-items:center;justify-content:center;z-index:500;flex-direction:column;gap:10px;border:3px dashed var(--blue);pointer-events:none}
+.drop-zone.show{display:flex}
+.drop-zone .icon{font-size:40px}
+.drop-zone p{font-size:14px;color:var(--text2)}
+
+/* Templates */
+.template-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.template-card{padding:8px;border:1px solid var(--line);border-radius:6px;cursor:pointer;font-size:11px;text-align:center}
+.template-card:hover{border-color:var(--blue);background:var(--bg3)}
+.template-card .icon{font-size:20px;margin-bottom:3px}
+
+/* Process list */
+.process-item{padding:4px 6px;border-radius:3px;display:flex;align-items:center;gap:6px;font-size:11px;border-bottom:1px solid var(--line)}
+.process-item .pid{color:var(--text3);min-width:40px}
+.process-item .cmd{flex:1;overflow:hidden;text-overflow:ellipsis}
+.process-item .alive{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.process-item .dead{width:8px;height:8px;border-radius:50%;background:var(--text3)}
+
+/* Outline */
+.outline-item{padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:4px}
+.outline-item:hover{background:var(--bg3)}
+.outline-item .sym-type{font-size:9px;color:var(--text3);min-width:40px}
+.outline-item .sym-name{flex:1}
+.outline-item .sym-line{color:var(--text3);font-size:9px}
+
+/* Settings panel */
+.settings-group{margin-bottom:10px}
+.settings-group h4{font-size:11px;color:var(--cyan);margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:11px}
+.settings-row label{color:var(--text2)}
+
+/* Scrollbars */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--line2)}
+
+/* Animations */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.pulse{animation:pulse 2s infinite}
+
+/* Hidden */
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<!-- Command Palette -->
+<div class="cmd-palette" id="cmd-palette">
+  <input type="text" id="cmd-palette-input" placeholder="Type a command..." autocomplete="off">
+  <div class="results" id="cmd-palette-results"></div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <a href="/" style="color:var(--text2);text-decoration:none;font-size:12px;padding:4px 10px;border-radius:5px;border:1px solid var(--line);background:var(--bg3);display:flex;align-items:center">← Omni</a>
+  <button onclick="showNewProjectModal()">+ New</button>
+  <button onclick="showTemplatesModal()">📦 Templates</button>
+  <button onclick="showImportModal()">⬇ Import</button>
+  <select id="project-select" onchange="switchProject(this.value)" style="min-width:140px"><option value="">Select project...</option></select>
+  <div class="spacer"></div>
+  <label>Entry:</label>
+  <select id="entry-select" style="min-width:100px"><option>main.py</option></select>
+  <button class="primary" onclick="runProject()" title="Run (F5)">▶ Run</button>
+  <button onclick="runTests()" title="Run Tests">🧪 Tests</button>
+  <button onclick="formatCode()" title="Format">✨ Format</button>
+  <button onclick="showShellModal()" title="Shell">🐚 Shell</button>
+  <button onclick="toggleRightbar()" title="AI Assistant">🤖 AI</button>
+  <button onclick="showSettingsModal()" title="Settings">⚙</button>
+</div>
+
+<!-- Main Area -->
+<div class="main">
+
+  <!-- Activity Bar -->
+  <div class="activity-bar" id="activity-bar">
+    <button class="activity-btn active" onclick="setSidebar('files')" title="Files (Ctrl+Shift+E)">📁</button>
+    <button class="activity-btn" onclick="setSidebar('search')" title="Search (Ctrl+Shift+F)">🔍</button>
+    <button class="activity-btn" onclick="setSidebar('git')" title="Git (Ctrl+Shift+G)">🌿</button>
+    <button class="activity-btn" onclick="setSidebar('outline')" title="Outline (Ctrl+Shift+O)">📋</button>
+    <button class="activity-btn" onclick="setSidebar('processes')" title="Processes">⚙</button>
+    <button class="activity-btn" onclick="setSidebar('ports')" title="Ports">🔌</button>
+    <button class="activity-btn" onclick="setSidebar('snapshots')" title="Snapshots">📸</button>
+    <button class="activity-btn" onclick="setSidebar('audit')" title="Audit Log">📜</button>
+    <div style="flex:1"></div>
+    <button class="activity-btn" onclick="setSidebar('settings')" title="Settings">🔧</button>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+
+    <!-- Files Sidebar -->
+    <div class="sidebar-panel" id="sidebar-files">
+      <div class="sidebar-header">
+        <span>📁 Files</span>
+        <div style="display:flex;gap:3px">
+          <button onclick="newFile()" title="New file">+</button>
+          <button onclick="newFolder()" title="New folder">📁</button>
+          <button onclick="uploadFiles()" title="Upload">⬆</button>
+          <button onclick="showBulkActions()" title="Bulk actions">☰</button>
+        </div>
+      </div>
+      <div class="sidebar-content file-tree" id="file-tree"></div>
+      <div class="sidebar-footer" id="project-info">No project</div>
+    </div>
+
+    <!-- Search Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-search">
+      <div class="sidebar-header"><span>🔍 Search</span></div>
+      <div class="sidebar-content" style="padding:6px">
+        <div class="search-box">
+          <input id="search-input" placeholder="Search..." onkeydown="if(event.key==='Enter')doSearch()">
+          <button onclick="doSearch()">Find</button>
+        </div>
+        <div class="search-box">
+          <input id="replace-input" placeholder="Replace...">
+          <button onclick="doReplace()">Replace All</button>
+        </div>
+        <div class="search-options">
+          <label><input type="checkbox" id="search-regex"> Regex</label>
+          <label><input type="checkbox" id="search-case"> Case</label>
+          <label><input type="checkbox" id="search-files"> Files only</label>
+        </div>
+        <div id="search-results"></div>
+      </div>
+    </div>
+
+    <!-- Git Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-git">
+      <div class="sidebar-header"><span>🌿 Git</span></div>
+      <div class="sidebar-content" style="padding:6px">
+        <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+          <button onclick="gitInit()" style="font-size:10px;padding:3px 8px">init</button>
+          <button onclick="gitStatus()" style="font-size:10px;padding:3px 8px">status</button>
+          <button onclick="gitLog()" style="font-size:10px;padding:3px 8px">log</button>
+          <button onclick="gitDiff()" style="font-size:10px;padding:3px 8px">diff</button>
+          <button onclick="gitStashList()" style="font-size:10px;padding:3px 8px">stash</button>
+          <button onclick="gitRemoteList()" style="font-size:10px;padding:3px 8px">remote</button>
+          <button onclick="gitTagList()" style="font-size:10px;padding:3px 8px">tags</button>
+        </div>
+        <input id="git-commit-msg" placeholder="Commit message" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;color:var(--text);font-size:11px;margin-bottom:6px">
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          <button onclick="gitCommit()" style="font-size:10px;padding:3px 8px;flex:1" class="primary">Commit</button>
+          <button onclick="gitStash()" style="font-size:10px;padding:3px 8px;flex:1">Stash</button>
+        </div>
+        <div id="git-output" style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text2)"></div>
+      </div>
+    </div>
+
+    <!-- Outline Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-outline">
+      <div class="sidebar-header"><span>📋 Outline</span></div>
+      <div class="sidebar-content" id="outline-content" style="padding:4px">
+        <div style="padding:20px;color:var(--text3);text-align:center">Open a file to see outline</div>
+      </div>
+    </div>
+
+    <!-- Processes Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-processes">
+      <div class="sidebar-header"><span>⚙ Processes</span><button onclick="refreshProcesses()" style="font-size:12px">🔄</button></div>
+      <div class="sidebar-content" id="processes-content" style="padding:4px">
+        <div style="padding:20px;color:var(--text3);text-align:center">No active processes</div>
+      </div>
+    </div>
+
+    <!-- Ports Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-ports">
+      <div class="sidebar-header"><span>🔌 Ports</span><button onclick="allocatePort()" style="font-size:12px">+</button></div>
+      <div class="sidebar-content" id="ports-content" style="padding:4px">
+        <div style="padding:20px;color:var(--text3);text-align:center">No allocated ports</div>
+      </div>
+    </div>
+
+    <!-- Snapshots Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-snapshots">
+      <div class="sidebar-header"><span>📸 Snapshots</span><button onclick="createSnapshot()" style="font-size:12px">+</button></div>
+      <div class="sidebar-content" id="snapshots-content" style="padding:4px"></div>
+    </div>
+
+    <!-- Audit Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-audit">
+      <div class="sidebar-header"><span>📜 Audit Log</span></div>
+      <div class="sidebar-content" id="audit-content" style="padding:4px;font-size:10px"></div>
+    </div>
+
+    <!-- Settings Sidebar -->
+    <div class="sidebar-panel hidden" id="sidebar-settings">
+      <div class="sidebar-header"><span>🔧 Settings</span></div>
+      <div class="sidebar-content" style="padding:6px">
+        <div class="settings-group">
+          <h4>Editor</h4>
+          <div class="settings-row"><label>Font Size</label><input id="setting-font-size" type="number" value="13" style="width:50px" onchange="applySettings()"></div>
+          <div class="settings-row"><label>Tab Size</label><input id="setting-tab-size" type="number" value="4" style="width:50px" onchange="applySettings()"></div>
+          <div class="settings-row"><label>Word Wrap</label><select id="setting-word-wrap" onchange="applySettings()" style="width:80px"><option value="on">On</option><option value="off">Off</option></select></div>
+          <div class="settings-row"><label>Minimap</label><input id="setting-minimap" type="checkbox" checked onchange="applySettings()"></div>
+        </div>
+        <div class="settings-group">
+          <h4>Permissions</h4>
+          <div class="settings-row"><label>Auto-approve safe ops</label><input id="setting-auto-approve" type="checkbox" checked></div>
+          <div class="settings-row"><label>Dangerous commands</label><select style="width:100px"><option>Ask</option><option>Block</option><option>Allow</option></select></div>
+        </div>
+        <div class="settings-group">
+          <h4>Project</h4>
+          <button onclick="showEnvModal()" style="width:100%;margin-bottom:4px">Environment Variables</button>
+          <button onclick="runHealthCheck()" style="width:100%;margin-bottom:4px">Health Check</button>
+          <button onclick="analyzeDependencies()" style="width:100%">Dependencies</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Center -->
+  <div class="center">
+    <div class="breadcrumbs" id="breadcrumbs">
+      <span onclick="showCommandPalette()">SHIMS Coder v3</span>
+    </div>
+    <div class="editor-tabs" id="editor-tabs"></div>
+    <div id="monaco-container">
+      <div class="monaco-pane" id="monaco-pane-0"></div>
+    </div>
+
+    <!-- Panels -->
+    <div class="panels">
+      <div class="panel-tabs-row" id="panel-tabs-row">
+        <div class="panel-tab-btn active" onclick="switchPanel('console')" data-panel="console">Console</div>
+        <div class="panel-tab-btn" onclick="switchPanel('terminal')" data-panel="terminal">Terminal</div>
+        <div class="panel-tab-btn" onclick="switchPanel('search-results')" data-panel="search-results">Search Results</div>
+        <div class="panel-tab-btn" onclick="switchPanel('problems')" data-panel="problems">Problems</div>
+        <div class="panel-tab-btn" onclick="switchPanel('output')" data-panel="output">Output</div>
+      </div>
+      <div class="panel-body">
+        <div class="panel-content" id="panel-console">
+          <pre id="console-output" style="color:var(--text2)">Run output appears here...</pre>
+        </div>
+        <div class="panel-content hidden" id="panel-terminal">
+          <div id="terminal-container" style="height:100%"></div>
+        </div>
+        <div class="panel-content hidden" id="panel-search-results">
+          <div id="panel-search-results-content" style="color:var(--text2)">Search results appear here...</div>
+        </div>
+        <div class="panel-content hidden" id="panel-problems">
+          <div id="problems-content" style="color:var(--text2)">No problems detected</div>
+        </div>
+        <div class="panel-content hidden" id="panel-output">
+          <div id="output-content" style="color:var(--text2)">Background output appears here...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rightbar -->
+  <div class="rightbar" id="rightbar">
+    <div class="rightbar-header">
+      <span>🤖 AI Assistant</span>
+      <button onclick="toggleRightbar()" style="font-size:12px;background:none;border:none;color:var(--text2);cursor:pointer">✕</button>
+    </div>
+    <div class="rightbar-content">
+      <div style="margin-bottom:6px">
+        <label style="font-size:9px;color:var(--text2)">Context files:</label>
+        <div id="ai-context-files"></div>
+      </div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px">
+        <button onclick="aiAction('explain')" style="font-size:9px;padding:2px 6px">Explain</button>
+        <button onclick="aiAction('refactor')" style="font-size:9px;padding:2px 6px">Refactor</button>
+        <button onclick="aiAction('test')" style="font-size:9px;padding:2px 6px">Tests</button>
+        <button onclick="aiAction('fix')" style="font-size:9px;padding:2px 6px">Fix</button>
+        <button onclick="aiAction('optimize')" style="font-size:9px;padding:2px 6px">Optimize</button>
+        <button onclick="aiAction('doc')" style="font-size:9px;padding:2px 6px">Docs</button>
+      </div>
+      <div class="ai-chat" id="ai-chat"></div>
+    </div>
+    <div class="rightbar-footer">
+      <div class="ai-input">
+        <textarea id="ai-prompt" placeholder="Ask anything... Use @filename to include files"></textarea>
+        <button onclick="askAI()">Send</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Status Bar -->
+<div class="status-bar" id="status-bar">
+  <div class="item branch" id="status-branch" onclick="setSidebar('git')">🌿 —</div>
+  <div class="item" id="status-lang" onclick="showSettingsModal()">📝 —</div>
+  <div class="item" id="status-position">Ln 1, Col 1</div>
+  <div class="spacer"></div>
+  <div class="item" id="status-project" onclick="showNewProjectModal()">No project</div>
+  <div class="item" id="status-healthy" onclick="runHealthCheck()">✓ Healthy</div>
+  <div class="item" onclick="showCommandPalette()">⌘ Command Palette</div>
+</div>
+
+<!-- Drop Zone -->
+<div class="drop-zone" id="drop-zone">
+  <div class="icon">📁</div>
+  <p>Drop files or folders here</p>
+</div>
+
+<!-- New Project Modal -->
+<div class="modal" id="new-project-modal">
+  <div class="modal-box">
+    <h3>Create New Project</h3>
+    <input id="new-project-name" placeholder="Project name">
+    <div class="template-grid" id="template-grid"></div>
+    <div class="buttons">
+      <button onclick="closeModal('new-project-modal')">Cancel</button>
+      <button class="primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Templates Modal -->
+<div class="modal" id="templates-modal">
+  <div class="modal-box">
+    <h3>Project Templates</h3>
+    <div class="template-grid" id="templates-grid-all"></div>
+    <div class="buttons">
+      <button onclick="closeModal('templates-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal" id="import-modal">
+  <div class="modal-box">
+    <h3>Import Project</h3>
+    <div style="margin-bottom:8px">
+      <label style="font-size:10px;color:var(--text2)">From ZIP:</label>
+      <input type="file" id="import-zip-input" accept=".zip" style="margin-top:4px">
+    </div>
+    <div style="margin-bottom:8px">
+      <label style="font-size:10px;color:var(--text2)">From Git URL:</label>
+      <input id="import-git-url" placeholder="https://github.com/..." style="margin-top:4px">
+      <input id="import-git-branch" placeholder="main" style="margin-top:4px">
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('import-modal')">Cancel</button>
+      <button class="primary" onclick="doImport()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shell Modal -->
+<div class="modal" id="shell-modal">
+  <div class="modal-box" style="min-width:500px">
+    <h3>🐚 Shell Command</h3>
+    <input id="shell-command" placeholder="e.g., pip install requests" style="font-family:monospace">
+    <div class="search-options">
+      <label><input type="checkbox" id="shell-bg"> Background</label>
+      <label><input type="checkbox" id="shell-install"> Package install mode</label>
+    </div>
+    <textarea id="shell-output" readonly style="min-height:120px;font-family:monospace;background:var(--bg2)"></textarea>
+    <div class="buttons">
+      <button onclick="closeModal('shell-modal')">Close</button>
+      <button class="primary" onclick="runShellCommand()">Run</button>
+      <button onclick="runPackageInstall()" style="background:var(--green);border-color:var(--green);color:#000">Install</button>
+    </div>
+  </div>
+</div>
+
+<!-- Environment Modal -->
+<div class="modal" id="env-modal">
+  <div class="modal-box">
+    <h3>Environment Variables</h3>
+    <textarea id="env-vars-text" placeholder="KEY=value\nOTHER=123" style="min-height:120px;font-family:monospace"></textarea>
+    <div class="buttons">
+      <button onclick="closeModal('env-modal')">Cancel</button>
+      <button class="primary" onclick="saveEnvVars()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal" id="settings-modal">
+  <div class="modal-box" style="min-width:400px">
+    <h3>⚙ Settings</h3>
+    <div class="settings-group">
+      <h4>Editor</h4>
+      <div class="settings-row"><label>Theme</label><select id="setting-theme" onchange="applySettings()"><option value="vs-dark">Dark</option><option value="vs">Light</option><option value="hc-black">High Contrast</option></select></div>
+      <div class="settings-row"><label>Font Size</label><input id="setting-font-size" type="number" value="13" style="width:60px" onchange="applySettings()"></div>
+      <div class="settings-row"><label>Tab Size</label><input id="setting-tab-size" type="number" value="4" style="width:60px" onchange="applySettings()"></div>
+      <div class="settings-row"><label>Word Wrap</label><select id="setting-word-wrap" onchange="applySettings()"><option value="on">On</option><option value="off">Off</option></select></div>
+      <div class="settings-row"><label>Minimap</label><input id="setting-minimap" type="checkbox" checked onchange="applySettings()"></div>
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('settings-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Diff Modal -->
+<div class="modal" id="diff-modal">
+  <div class="modal-box" style="min-width:600px;max-width:95vw">
+    <h3>Diff</h3>
+    <pre id="diff-content" style="background:var(--bg);padding:8px;border-radius:4px;max-height:60vh;overflow:auto;font-size:11px"></pre>
+    <div class="buttons">
+      <button onclick="closeModal('diff-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Permission Toast Container -->
+<div id="permission-container" style="position:fixed;bottom:0;right:0;z-index:999"></div>
+
+<script>
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Coder v3 Frontend — Full Power IDE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentProject = null;
+let openTabs = [];
+let activeTab = null;
+let editors = {};
+let monacoEditor = null;
+let splitEditor = null;
+let terminal = null;
+let terminalId = null;
+let aiContextFiles = [];
+let selectedFiles = new Set();
+let currentSidebar = 'files';
+let commandPaletteIndex = -1;
+let lastSearchResults = [];
+let panelActive = 'console';
+let fileTreeData = [];
+let editorSettings = { fontSize: 13, tabSize: 4, wordWrap: 'on', minimap: true, theme: 'vs-dark' };
+
+// ── Monaco Setup ──────────────────────────────────────────────────────────────
+require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs' }});
+require(['vs/editor/editor.main'], () => {
+  monacoEditor = monaco.editor.create(document.getElementById('monaco-pane-0'), {
+    value: '// Welcome to SHIMS Coder v3\n// Select a project and file to start coding\n// Press Ctrl+Shift+P for Command Palette',
+    language: 'python',
+    theme: 'vs-dark',
+    fontSize: 13,
+    fontFamily: "'Cascadia Mono', 'Fira Code', monospace",
+    minimap: { enabled: true },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    tabSize: 4,
+    insertSpaces: true,
+    wordWrap: 'on',
+    lineNumbers: 'on',
+    glyphMargin: true,
+    folding: true,
+    renderWhitespace: 'selection',
+    bracketPairColorization: { enabled: true },
+    quickSuggestions: true,
+    suggestOnTriggerCharacters: true,
+    wordBasedSuggestions: true,
+  });
+
+  monacoEditor.onDidChangeCursorPosition(e => {
+    document.getElementById('status-position').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+  });
+
+  monacoEditor.onDidChangeModelContent(() => {
+    if (activeTab) {
+      const tab = document.querySelector(`.editor-tab[data-path="${activeTab}"]`);
+      if (tab && !tab.querySelector('.dirty')) {
+        tab.querySelector('span').insertAdjacentHTML('afterbegin', '<span class="dirty">● </span>');
+      }
+    }
+    updateOutline();
+  });
+
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveCurrentFile());
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP, () => showCommandPalette());
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => showGoToFile());
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, () => { setSidebar('search'); document.getElementById('search-input').focus(); });
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE, () => setSidebar('files'));
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyG, () => setSidebar('git'));
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyO, () => setSidebar('outline'));
+  monacoEditor.addCommand(monaco.KeyCode.F5, () => runProject());
+  monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Backslash, () => toggleSplitEditor());
+});
+
+function getLangFromPath(path) {
+  const ext = path.split('.').pop().toLowerCase();
+  const map = {
+    py:'python', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
+    html:'html', css:'css', json:'json', md:'markdown', yaml:'yaml', yml:'yaml',
+    sh:'shell', bash:'shell', go:'go', rs:'rust', java:'java', c:'c', cpp:'cpp',
+    h:'cpp', cs:'csharp', php:'php', rb:'ruby', sql:'sql', xml:'xml', toml:'ini',
+    ini:'ini', dockerfile:'dockerfile', ps1:'powershell', bat:'batch',
+  };
+  return map[ext] || 'plaintext';
+}
+
+function getFileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = {py:'🐍',js:'📜',ts:'📘',jsx:'⚛',tsx:'⚛',html:'🌐',css:'🎨',json:'📋',md:'📝',sh:'🐚',go:'🔵',rs:'🦀',java:'☕',c:'🔧',cpp:'🔧',php:'🐘',rb:'💎',sql:'🗄',yml:'⚙',yaml:'⚙',toml:'⚙',dockerfile:'🐳',ps1:'💻',bat:'💻'};
+  return map[ext] || '📄';
+}
+
+// ── Sidebar Management ────────────────────────────────────────────────────────
+function setSidebar(name) {
+  currentSidebar = name;
+  document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById('sidebar-' + name)?.classList.remove('hidden');
+  document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+  const icons = {files:0, search:1, git:2, outline:3, processes:4, ports:5, snapshots:6, audit:7, settings:8};
+  const idx = icons[name];
+  if (idx !== undefined) document.querySelectorAll('.activity-btn')[idx]?.classList.add('active');
+
+  if (name === 'processes') refreshProcesses();
+  if (name === 'ports') refreshPorts();
+  if (name === 'snapshots') refreshSnapshots();
+  if (name === 'audit') refreshAudit();
+  if (name === 'outline') updateOutline();
+}
+
+// ── Project Management ────────────────────────────────────────────────────────
+async function loadProjects() {
+  const r = await fetch('/coder/v2/projects');
+  const d = await r.json();
+  const sel = document.getElementById('project-select');
+  sel.innerHTML = '<option value="">Select project...</option>';
+  for (const p of d.projects) {
+    sel.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+  }
+}
+
+async function switchProject(id) {
+  if (!id) return;
+  const r = await fetch('/coder/v2/project/' + id);
+  const d = await r.json();
+  if (!d.ok) return;
+  currentProject = d.project;
+  openTabs = [];
+  activeTab = null;
+  editors = {};
+  selectedFiles.clear();
+  document.getElementById('editor-tabs').innerHTML = '';
+  if (monacoEditor) monacoEditor.setValue('// Select a file to edit');
+  if (splitEditor) { splitEditor.dispose(); splitEditor = null; document.getElementById('monaco-pane-1')?.remove(); }
+  renderFileTree();
+  document.getElementById('project-info').textContent = `${d.project.name} · ${d.project.language} · ${d.project.id}`;
+  document.getElementById('status-project').textContent = d.project.name;
+  document.getElementById('status-lang').textContent = '📝 ' + d.project.language;
+  document.getElementById('status-branch').textContent = '🌿 —';
+
+  const entrySel = document.getElementById('entry-select');
+  entrySel.innerHTML = '';
+  const files = d.project.files || [];
+  for (const f of files.filter(x => !x.is_dir)) {
+    entrySel.innerHTML += `<option value="${f.path}">${f.path}</option>`;
+  }
+  updateBreadcrumbs();
+  runHealthCheck();
+  refreshGitStatus();
+}
+
+async function showNewProjectModal() {
+  const r = await fetch('/coder/v2/templates');
+  const d = await r.json();
+  const grid = document.getElementById('template-grid');
+  grid.innerHTML = '<div class="template-card" onclick="selectTemplate(null)"><div class="icon">🐍</div><div>Blank Python</div></div>';
+  for (const t of d.templates) {
+    grid.innerHTML += `<div class="template-card" onclick="selectTemplate('${t.id}')"><div class="icon">📦</div><div>${escapeHtml(t.name)}</div></div>`;
+  }
+  document.getElementById('new-project-modal').classList.add('show');
+}
+
+function showTemplatesModal() { showNewProjectModal(); document.getElementById('templates-modal').classList.add('show'); }
+function showImportModal() { document.getElementById('import-modal').classList.add('show'); }
+function showShellModal() { document.getElementById('shell-modal').classList.add('show'); document.getElementById('shell-command').focus(); }
+function showEnvModal() { document.getElementById('env-modal').classList.add('show'); }
+function showSettingsModal() { document.getElementById('settings-modal').classList.add('show'); }
+
+let selectedTemplate = null;
+function selectTemplate(id) { selectedTemplate = id; }
+
+async function createProject() {
+  const name = document.getElementById('new-project-name').value.trim();
+  if (!name) return;
+  const r = await fetch('/coder/v2/project', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, template: selectedTemplate})
+  });
+  const d = await r.json();
+  closeModal('new-project-modal');
+  closeModal('templates-modal');
+  await loadProjects();
+  document.getElementById('project-select').value = d.project_id;
+  await switchProject(d.project_id);
+}
+
+async function doImport() {
+  const zipInput = document.getElementById('import-zip-input');
+  const gitUrl = document.getElementById('import-git-url').value.trim();
+
+  if (zipInput.files && zipInput.files[0]) {
+    const file = zipInput.files[0];
+    const buf = await file.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const name = file.name.replace('.zip', '');
+    const r = await fetch('/coder/v2/import', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({zip_b64: b64, name})
+    });
+    const d = await r.json();
+    if (d.ok) { closeModal('import-modal'); await loadProjects(); await switchProject(d.project_id); }
+  } else if (gitUrl) {
+    const branch = document.getElementById('import-git-branch').value.trim() || 'main';
+    const r = await fetch('/coder/v3/import-git', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url: gitUrl, branch})
+    });
+    const d = await r.json();
+    if (d.ok) { closeModal('import-modal'); await loadProjects(); await switchProject(d.project_id); }
+  }
+}
+
+function loadProject() {
+  const id = prompt('Enter project ID:');
+  if (id) { loadProjects().then(() => { document.getElementById('project-select').value = id; switchProject(id); }); }
+}
+
+// ── File Tree ─────────────────────────────────────────────────────────────────
+function renderFileTree() {
+  const tree = document.getElementById('file-tree');
+  if (!currentProject) { tree.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No project loaded</div>'; return; }
+  fileTreeData = currentProject.files || [];
+  tree.innerHTML = buildTreeHTML(fileTreeData);
+}
+
+function buildTreeHTML(files, prefix='') {
+  const dirs = files.filter(f => f.is_dir);
+  const items = files.filter(f => !f.is_dir);
+  let html = '';
+  for (const d of dirs) {
+    const checked = selectedFiles.has(prefix + d.name) ? 'checked' : '';
+    html += `<div class="item folder">
+      <input type="checkbox" class="checkbox" ${checked} onchange="toggleSelect('${prefix + d.name}', true)" onclick="event.stopPropagation()">
+      <span class="folder-toggle" onclick="toggleFolder(this);event.stopPropagation()">▶</span>
+      <span class="icon">📁</span>
+      <span class="name" onclick="event.stopPropagation()">${escapeHtml(d.name)}</span>
+    </div>`;
+    html += `<div class="children" style="display:none">${buildTreeHTML(d.children || [], prefix + d.name + '/')}</div>`;
+  }
+  for (const f of items) {
+    const isActive = activeTab === f.path ? 'active' : '';
+    const isSelected = selectedFiles.has(f.path) ? 'selected' : '';
+    const checked = selectedFiles.has(f.path) ? 'checked' : '';
+    html += `<div class="item ${isActive} ${isSelected}" onclick="openFile('${f.path}')" oncontextmenu="fileContextMenu(event,'${f.path}')">
+      <input type="checkbox" class="checkbox" ${checked} onchange="toggleSelect('${f.path}', false)" onclick="event.stopPropagation()">
+      <span class="icon">${getFileIcon(f.name)}</span>
+      <span class="name">${escapeHtml(f.name)}</span>
+      <span class="actions">
+        <button onclick="event.stopPropagation();addToAIContext('${f.path}')" title="Add to AI context">🤖</button>
+        <button onclick="event.stopPropagation();deleteFile('${f.path}')" title="Delete">🗑</button>
+      </span>
+    </div>`;
+  }
+  return html;
+}
+
+function toggleFolder(el) {
+  const children = el.parentElement.nextElementSibling;
+  if (children) {
+    const showing = children.style.display !== 'none';
+    children.style.display = showing ? 'none' : 'block';
+    el.textContent = showing ? '▶' : '▼';
+  }
+}
+
+function toggleSelect(path, isDir) {
+  if (selectedFiles.has(path)) selectedFiles.delete(path);
+  else selectedFiles.add(path);
+  renderFileTree();
+}
+
+function showBulkActions() {
+  if (selectedFiles.size === 0) { alert('Select files first using checkboxes'); return; }
+  const action = prompt(`Selected: ${selectedFiles.size} items\nActions: delete, move, copy, add-to-ai`);
+  if (action === 'delete') bulkDelete();
+  if (action === 'add-to-ai') { selectedFiles.forEach(f => addToAIContext(f)); alert('Added to AI context'); }
+}
+
+async function bulkDelete() {
+  if (!currentProject || selectedFiles.size === 0) return;
+  if (!confirm(`Delete ${selectedFiles.size} items?`)) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/bulk-delete', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({paths: Array.from(selectedFiles)})
+  });
+  selectedFiles.clear();
+  await switchProject(currentProject.id);
+}
+
+async function openFile(path) {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/file?path=' + encodeURIComponent(path));
+  const d = await r.json();
+  if (!d.ok) return;
+
+  if (!openTabs.includes(path)) {
+    openTabs.push(path);
+    addTab(path);
+  }
+  setActiveTab(path);
+  if (monacoEditor) {
+    monacoEditor.setValue(d.content);
+    monaco.editor.setModelLanguage(monacoEditor.getModel(), getLangFromPath(path));
+  }
+  updateBreadcrumbs(path);
+  updateOutline();
+}
+
+function addTab(path) {
+  const tabs = document.getElementById('editor-tabs');
+  const tab = document.createElement('div');
+  tab.className = 'editor-tab';
+  tab.dataset.path = path;
+  tab.innerHTML = `<span>${escapeHtml(path.split('/').pop())}</span>
+    <span class="split-btn" onclick="event.stopPropagation();splitToSide('${path}')" title="Split">⧉</span>
+    <span class="close" onclick="event.stopPropagation();closeTab('${path}')">×</span>`;
+  tab.onclick = () => openFile(path);
+  tabs.appendChild(tab);
+}
+
+function setActiveTab(path) {
+  activeTab = path;
+  document.querySelectorAll('.editor-tab').forEach(t => t.classList.toggle('active', t.dataset.path === path));
+  document.querySelectorAll('.file-tree .item').forEach(t => {
+    const nameEl = t.querySelector('.name');
+    if (nameEl) t.classList.toggle('active', activeTab && nameEl.textContent === path.split('/').pop());
+  });
+}
+
+function closeTab(path) {
+  openTabs = openTabs.filter(p => p !== path);
+  const tab = document.querySelector(`.editor-tab[data-path="${path}"]`);
+  if (tab) tab.remove();
+  if (activeTab === path) {
+    activeTab = openTabs[openTabs.length - 1] || null;
+    if (activeTab) openFile(activeTab);
+    else if (monacoEditor) monacoEditor.setValue('// Select a file');
+  }
+}
+
+function toggleSplitEditor() {
+  if (splitEditor) {
+    splitEditor.dispose();
+    splitEditor = null;
+    document.getElementById('monaco-pane-1')?.remove();
+    document.getElementById('monaco-pane-0').style.width = '100%';
+    return;
+  }
+  const container = document.getElementById('monaco-container');
+  const pane0 = document.getElementById('monaco-pane-0');
+  pane0.style.width = '50%';
+  const pane1 = document.createElement('div');
+  pane1.id = 'monaco-pane-1';
+  pane1.className = 'monaco-pane';
+  container.appendChild(pane1);
+  splitEditor = monaco.editor.create(pane1, {
+    value: '// Split view',
+    language: 'python',
+    theme: editorSettings.theme,
+    fontSize: editorSettings.fontSize,
+    minimap: { enabled: editorSettings.minimap },
+    automaticLayout: true,
+  });
+}
+
+function splitToSide(path) {
+  if (!splitEditor) toggleSplitEditor();
+  fetch('/coder/v2/project/' + currentProject.id + '/file?path=' + encodeURIComponent(path))
+    .then(r => r.json()).then(d => {
+      if (d.ok && splitEditor) {
+        splitEditor.setValue(d.content);
+        monaco.editor.setModelLanguage(splitEditor.getModel(), getLangFromPath(path));
+      }
+    });
+}
+
+function updateBreadcrumbs(path) {
+  const bc = document.getElementById('breadcrumbs');
+  if (!currentProject) { bc.innerHTML = '<span>SHIMS Coder v3</span>'; return; }
+  let html = `<span onclick="showCommandPalette()">${escapeHtml(currentProject.name)}</span>`;
+  if (path) {
+    const parts = path.split('/');
+    let acc = '';
+    for (const part of parts) {
+      acc += (acc ? '/' : '') + part;
+      html += `<span class="sep">/</span><span onclick="openFile('${acc}')">${escapeHtml(part)}</span>`;
+    }
+  }
+  bc.innerHTML = html;
+}
+
+async function saveCurrentFile() {
+  if (!currentProject || !activeTab || !monacoEditor) return;
+  const content = monacoEditor.getValue();
+  await fetch('/coder/v2/project/' + currentProject.id + '/file', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path: activeTab, content})
+  });
+  const tab = document.querySelector(`.editor-tab[data-path="${activeTab}"]`);
+  if (tab) {
+    const dirty = tab.querySelector('.dirty');
+    if (dirty) dirty.remove();
+  }
+}
+
+// ── File Operations ───────────────────────────────────────────────────────────
+async function newFile() {
+  if (!currentProject) return;
+  const path = prompt('File path (e.g., src/utils.py):');
+  if (!path) return;
+  await fetch('/coder/v2/project/' + currentProject.id + '/file', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path, content: ''})
+  });
+  await switchProject(currentProject.id);
+  openFile(path);
+}
+
+async function newFolder() {
+  if (!currentProject) return;
+  const path = prompt('Folder path:');
+  if (!path) return;
+  await fetch('/coder/v2/project/' + currentProject.id + '/mkdir', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path})
+  });
+  await switchProject(currentProject.id);
+}
+
+async function deleteFile(path) {
+  if (!currentProject) return;
+  if (!confirm(`Delete ${path}?`)) return;
+  await fetch('/coder/v2/project/' + currentProject.id + '/file?path=' + encodeURIComponent(path), {method:'DELETE'});
+  await switchProject(currentProject.id);
+}
+
+function fileContextMenu(e, path) {
+  e.preventDefault();
+  const actions = ['open', 'rename', 'delete', 'copy-path', 'git-blame', 'git-history', 'diff-versions', 'add-to-ai-context'];
+  const action = prompt(`File: ${path}\nActions: ${actions.join(', ')}`);
+  if (action === 'delete') deleteFile(path);
+  if (action === 'add-to-ai-context') addToAIContext(path);
+  if (action === 'git-blame') showGitBlame(path);
+  if (action === 'git-history') showGitHistory(path);
+  if (action === 'diff-versions') showDiffVersions(path);
+  if (action === 'copy-path') navigator.clipboard?.writeText(path);
+}
+
+function uploadFiles() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.webkitdirectory = true;
+  input.onchange = async e => {
+    if (!currentProject) return;
+    const files = {};
+    for (const file of e.target.files) {
+      const buf = await file.arrayBuffer();
+      files[file.webkitRelativePath || file.name] = Array.from(new Uint8Array(buf));
+    }
+    await fetch('/coder/v2/project/' + currentProject.id + '/upload-folder', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({files})
+    });
+    await switchProject(currentProject.id);
+  };
+  input.click();
+}
+
+// Drag & drop
+const dropZone = document.getElementById('drop-zone');
+window.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('show'); });
+dropZone.addEventListener('dragleave', e => { dropZone.classList.remove('show'); });
+dropZone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropZone.classList.remove('show');
+  if (!currentProject) return;
+  const files = {};
+  for (const item of e.dataTransfer.items) {
+    const entry = item.webkitGetAsEntry();
+    if (entry) await traverseEntry(entry, '', files);
+  }
+  await fetch('/coder/v2/project/' + currentProject.id + '/upload-folder', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({files})
+  });
+  await switchProject(currentProject.id);
+});
+
+async function traverseEntry(entry, path, files) {
+  if (entry.isFile) {
+    const file = await new Promise(resolve => entry.file(resolve));
+    const buf = await file.arrayBuffer();
+    files[path + file.name] = Array.from(new Uint8Array(buf));
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const entries = await new Promise(resolve => reader.readEntries(resolve));
+    for (const e of entries) await traverseEntry(e, path + entry.name + '/', files);
+  }
+}
+
+// ── Run & Build ───────────────────────────────────────────────────────────────
+async function runProject() {
+  if (!currentProject) return;
+  await saveCurrentFile();
+  const entry = document.getElementById('entry-select').value;
+  switchPanel('console');
+  const out = document.getElementById('console-output');
+  out.textContent = 'Running...';
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/run', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({entry_file: entry})
+  });
+  const d = await r.json();
+  let text = `Command: ${d.command || 'N/A'}\nReturn code: ${d.returncode}\n`;
+  if (d.stdout) text += `\n--- STDOUT ---\n${d.stdout}`;
+  if (d.stderr) text += `\n--- STDERR ---\n${d.stderr}`;
+  if (d.error) text += `\n--- ERROR ---\n${d.error}`;
+  out.textContent = text;
+  out.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+}
+
+async function runTests() {
+  if (!currentProject) return;
+  switchPanel('console');
+  document.getElementById('console-output').textContent = 'Running tests...';
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/test', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({})
+  });
+  const d = await r.json();
+  const out = document.getElementById('console-output');
+  out.textContent = (d.stdout || '') + (d.stderr || '') + (d.error || '');
+  out.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+}
+
+async function formatCode() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/format', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({file_path: activeTab})
+  });
+  const d = await r.json();
+  if (d.ok && activeTab) openFile(activeTab);
+  switchPanel('console');
+  document.getElementById('console-output').textContent = d.ok ? 'Formatted successfully' : (d.stderr || d.error || 'Format failed');
+}
+
+// ── Shell & Process Management ────────────────────────────────────────────────
+async function runShellCommand() {
+  if (!currentProject) return;
+  const cmd = document.getElementById('shell-command').value;
+  const bg = document.getElementById('shell-bg').checked;
+  const out = document.getElementById('shell-output');
+  out.value = 'Running...\n';
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/shell', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({command: cmd, background: bg})
+  });
+  const d = await r.json();
+  if (bg) {
+    out.value = `Background process started: ${d.process_id}\nPID: ${d.pid}`;
+    refreshProcesses();
+  } else {
+    out.value = `Exit: ${d.returncode}\n${d.stdout || ''}\n${d.stderr || ''}\n${d.error || ''}`;
+  }
+}
+
+async function runPackageInstall() {
+  if (!currentProject) return;
+  const cmd = document.getElementById('shell-command').value.trim();
+  const packages = cmd.split(/\s+/).filter(Boolean);
+  if (packages.length === 0) return;
+  const out = document.getElementById('shell-output');
+  out.value = 'Installing packages...\n';
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/install', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({packages})
+  });
+  const d = await r.json();
+  out.value = `Manager: ${d.manager}\nExit: ${d.returncode}\n${d.stdout || ''}\n${d.stderr || ''}`;
+}
+
+async function refreshProcesses() {
+  const r = await fetch('/coder/v3/processes' + (currentProject ? '?project_id=' + currentProject.id : ''));
+  const d = await r.json();
+  const el = document.getElementById('processes-content');
+  if (!d.processes || d.processes.length === 0) {
+    el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No active processes</div>';
+    return;
+  }
+  el.innerHTML = d.processes.map(p => `
+    <div class="process-item">
+      <span class="${p.alive ? 'alive' : 'dead'}"></span>
+      <span class="pid">${p.pid}</span>
+      <span class="cmd" title="${escapeHtml(p.command)}">${escapeHtml(p.command.substring(0, 40))}</span>
+      <button onclick="killProcess('${p.process_id}')" style="font-size:10px;padding:2px 6px" class="danger">Kill</button>
+      <button onclick="readProcess('${p.process_id}')" style="font-size:10px;padding:2px 6px">Read</button>
+    </div>
+  `).join('');
+}
+
+async function killProcess(pid) {
+  await fetch('/coder/v3/process/' + pid + '/kill', {method:'POST'});
+  refreshProcesses();
+}
+
+async function readProcess(pid) {
+  const r = await fetch('/coder/v3/process/' + pid + '/output');
+  const d = await r.json();
+  switchPanel('output');
+  document.getElementById('output-content').textContent = d.output || '(no output)';
+}
+
+async function allocatePort() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/port/allocate', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({purpose: 'app'})
+  });
+  const d = await r.json();
+  if (d.ok) refreshPorts();
+}
+
+async function refreshPorts() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/ports');
+  const d = await r.json();
+  const el = document.getElementById('ports-content');
+  if (!d.ports || d.ports.length === 0) {
+    el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No allocated ports</div>';
+    return;
+  }
+  el.innerHTML = d.ports.map(p => `
+    <div class="process-item">
+      <span style="color:var(--cyan);font-weight:600">:${p.port}</span>
+      <span style="font-size:10px;color:var(--text3)">${escapeHtml(p.owner)}</span>
+      <button onclick="releasePort(${p.port})" style="font-size:10px;padding:2px 6px" class="danger">Release</button>
+    </div>
+  `).join('');
+}
+
+async function releasePort(port) {
+  await fetch('/coder/v3/port/' + port + '/release', {method:'POST'});
+  refreshPorts();
+}
+
+// ── Port Management ───────────────────────────────────────────────────────────
+async function allocatePort() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/port/allocate', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({purpose: 'app'})
+  });
+  const d = await r.json();
+  if (d.ok) refreshPorts();
+}
+
+async function refreshPorts() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/ports');
+  const d = await r.json();
+  const el = document.getElementById('ports-content');
+  if (!d.ports || d.ports.length === 0) {
+    el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No allocated ports</div>';
+    return;
+  }
+  el.innerHTML = d.ports.map(p => `
+    <div class="process-item">
+      <span style="color:var(--cyan);font-weight:600">:${p.port}</span>
+      <span style="font-size:10px;color:var(--text3)">${escapeHtml(p.owner)}</span>
+      <button onclick="releasePort(${p.port})" style="font-size:10px;padding:2px 6px" class="danger">Release</button>
+    </div>
+  `).join('');
+}
+
+async function releasePort(port) {
+  await fetch('/coder/v3/port/' + port + '/release', {method:'POST'});
+  refreshPorts();
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+async function doSearch() {
+  if (!currentProject) return;
+  const query = document.getElementById('search-input').value;
+  if (!query) return;
+  const regex = document.getElementById('search-regex').checked;
+  const caseSensitive = document.getElementById('search-case').checked;
+  const r = await fetch(`/coder/v3/project/${currentProject.id}/search?query=${encodeURIComponent(query)}&regex=${regex}&case_sensitive=${caseSensitive}`);
+  const d = await r.json();
+  lastSearchResults = d.results || [];
+  const el = document.getElementById('search-results');
+  if (!d.results || d.results.length === 0) {
+    el.innerHTML = '<div style="padding:10px;color:var(--text3)">No results</div>';
+    return;
+  }
+  el.innerHTML = d.results.map(res => `
+    <div class="search-result" onclick="openFile('${res.file}');goToLine(${res.line})">
+      <div class="file">${escapeHtml(res.file)}</div>
+      <div><span class="line-num">${res.line}:</span>${escapeHtml(res.text)}</div>
+    </div>
+  `).join('');
+  switchPanel('search-results');
+}
+
+async function doReplace() {
+  if (!currentProject) return;
+  const find = document.getElementById('search-input').value;
+  const replace = document.getElementById('replace-input').value;
+  if (!find) return;
+  if (!confirm(`Replace all occurrences of "${find}" with "${replace}"?`)) return;
+  const regex = document.getElementById('search-regex').checked;
+  const caseSensitive = document.getElementById('search-case').checked;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/find-replace', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({find, replace, regex, case_sensitive: caseSensitive})
+  });
+  const d = await r.json();
+  alert(`Replaced ${d.total_replacements} occurrences in ${d.changes?.length || 0} files`);
+  await switchProject(currentProject.id);
+}
+
+function goToLine(line) {
+  if (monacoEditor) {
+    monacoEditor.revealLineInCenter(line);
+    monacoEditor.setPosition({lineNumber: line, column: 1});
+    monacoEditor.focus();
+  }
+}
+
+// ── Panels ────────────────────────────────────────────────────────────────────
+function switchPanel(name) {
+  panelActive = name;
+  document.querySelectorAll('.panel-tab-btn').forEach(t => t.classList.toggle('active', t.dataset.panel === name));
+  document.getElementById('panel-console').classList.toggle('hidden', name !== 'console');
+  document.getElementById('panel-terminal').classList.toggle('hidden', name !== 'terminal');
+  document.getElementById('panel-search-results').classList.toggle('hidden', name !== 'search-results');
+  document.getElementById('panel-problems').classList.toggle('hidden', name !== 'problems');
+  document.getElementById('panel-output').classList.toggle('hidden', name !== 'output');
+  if (name === 'terminal' && !terminal) initTerminal();
+}
+
+function initTerminal() {
+  terminal = new Terminal({
+    theme: { background: '#0f172a', foreground: '#e2e8f0', cursor: '#22d3ee' },
+    fontSize: 12,
+    fontFamily: "'Cascadia Mono', monospace",
+    cursorBlink: true,
+  });
+  terminal.open(document.getElementById('terminal-container'));
+  terminal.write('Terminal ready. Starting session...\r\n');
+  startTerminalSession();
+}
+
+async function startTerminalSession() {
+  if (!currentProject) { terminal.write('No project loaded.\r\n'); return; }
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/terminal/start', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    terminalId = d.terminal_id;
+    terminal.write(`Session started: ${d.shell}\r\n$ `);
+    terminal.onData(data => {
+      fetch('/coder/v2/terminal/' + terminalId + '/write', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({data})
+      });
+    });
+    pollTerminal();
+  }
+}
+
+async function pollTerminal() {
+  if (!terminalId) return;
+  const r = await fetch('/coder/v2/terminal/' + terminalId + '/read', {method:'POST'});
+  const d = await r.json();
+  if (d.ok && d.output) terminal.write(d.output);
+  if (d.done) { terminal.write('\r\n[Session ended]\r\n'); terminalId = null; return; }
+  setTimeout(pollTerminal, 200);
+}
+
+// ── Git ───────────────────────────────────────────────────────────────────────
+async function refreshGitStatus() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/status');
+  const d = await r.json();
+  const branch = d.stdout?.match(/On branch (\S+)/)?.[1] || '—';
+  document.getElementById('status-branch').textContent = '🌿 ' + branch;
+}
+
+async function gitInit() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/init', {method:'POST'});
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+  refreshGitStatus();
+}
+
+async function gitStatus() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/status');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+
+async function gitLog() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/log?n=20');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+
+async function gitDiff() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/diff');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+
+async function gitCommit() {
+  if (!currentProject) return;
+  const msg = document.getElementById('git-commit-msg').value;
+  if (!msg) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/commit', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: msg})
+  });
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'Committed';
+  document.getElementById('git-commit-msg').value = '';
+  refreshGitStatus();
+}
+
+async function gitStash() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/git/stash', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})
+  });
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'Stashed';
+}
+
+async function gitStashList() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/git/stash');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+
+async function gitRemoteList() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/git/remote');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+
+async function gitTagList() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/git/tag');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+
+async function showGitBlame(filePath) {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/git/blame/' + encodeURIComponent(filePath));
+  const d = await r.json();
+  document.getElementById('diff-content').textContent = d.stdout || d.stderr || d.error || 'OK';
+  document.getElementById('diff-modal').classList.add('show');
+}
+
+async function showGitHistory(filePath) {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/git/history/' + encodeURIComponent(filePath) + '?n=20');
+  const d = await r.json();
+  document.getElementById('diff-content').textContent = d.stdout || d.stderr || d.error || 'OK';
+  document.getElementById('diff-modal').classList.add('show');
+}
+
+async function showDiffVersions(filePath) {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/diff-versions?file_path=' + encodeURIComponent(filePath));
+  const d = await r.json();
+  document.getElementById('diff-content').textContent = d.stdout || d.stderr || d.error || 'OK';
+  document.getElementById('diff-modal').classList.add('show');
+}
+
+// ── Outline ───────────────────────────────────────────────────────────────────
+async function updateOutline() {
+  if (!currentProject || !activeTab) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/symbols/' + encodeURIComponent(activeTab));
+  const d = await r.json();
+  const el = document.getElementById('outline-content');
+  if (!d.ok || !d.symbols || d.symbols.length === 0) {
+    el.innerHTML = '<div style="padding:10px;color:var(--text3);text-align:center">No symbols found</div>';
+    return;
+  }
+  el.innerHTML = d.symbols.map(s => `
+    <div class="outline-item" onclick="goToLine(${s.line})">
+      <span class="sym-type">${s.type}</span>
+      <span class="sym-name">${escapeHtml(s.name)}</span>
+      <span class="sym-line">:${s.line}</span>
+    </div>
+  `).join('');
+}
+
+// ── Snapshots ─────────────────────────────────────────────────────────────────
+async function createSnapshot() {
+  if (!currentProject) return;
+  const name = prompt('Snapshot name:');
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/snapshot', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  if (d.ok) refreshSnapshots();
+}
+
+async function refreshSnapshots() {
+  const r = await fetch('/coder/v3/snapshots' + (currentProject ? '?project_id=' + currentProject.id : ''));
+  const d = await r.json();
+  const el = document.getElementById('snapshots-content');
+  if (!d.snapshots || d.snapshots.length === 0) {
+    el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No snapshots</div>';
+    return;
+  }
+  el.innerHTML = d.snapshots.map(s => `
+    <div class="process-item">
+      <span style="font-size:10px;color:var(--text3)">${new Date(s.created_at).toLocaleString()}</span>
+      <span style="flex:1;font-size:10px">${escapeHtml(s.name || s.id)}</span>
+      <button onclick="restoreSnapshot('${s.id}')" style="font-size:9px;padding:2px 6px">Restore</button>
+    </div>
+  `).join('');
+}
+
+async function restoreSnapshot(snapId) {
+  if (!confirm('Restore this snapshot? Current changes will be backed up.')) return;
+  const r = await fetch('/coder/v3/snapshot/' + snapId + '/restore', {method:'POST'});
+  const d = await r.json();
+  if (d.ok) { alert('Restored!'); await switchProject(d.project_id); }
+}
+
+// ── Audit ─────────────────────────────────────────────────────────────────────
+async function refreshAudit() {
+  const r = await fetch('/coder/v3/audit-log' + (currentProject ? '?project_id=' + currentProject.id : ''));
+  const d = await r.json();
+  const el = document.getElementById('audit-content');
+  if (!d.entries || d.entries.length === 0) {
+    el.innerHTML = '<div style="padding:10px;color:var(--text3);text-align:center">No entries</div>';
+    return;
+  }
+  el.innerHTML = d.entries.slice(-50).map(e => `
+    <div style="padding:2px 0;border-bottom:1px solid var(--line)">
+      <span style="color:var(--text3)">${new Date(e.timestamp).toLocaleTimeString()}</span>
+      <span style="color:var(--cyan)">${e.action}</span>
+      <span style="color:var(--text2)">${JSON.stringify(e.details).substring(0, 60)}</span>
+    </div>
+  `).join('');
+}
+
+// ── Health & Dependencies ─────────────────────────────────────────────────────
+async function runHealthCheck() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/health');
+  const d = await r.json();
+  const healthy = d.healthy;
+  document.getElementById('status-healthy').textContent = healthy ? '✓ Healthy' : `✗ ${d.issues?.filter(i=>i.level==='error').length || 0} errors`;
+  document.getElementById('status-healthy').style.color = healthy ? 'var(--green)' : 'var(--red)';
+  const el = document.getElementById('problems-content');
+  if (!d.issues || d.issues.length === 0) {
+    el.innerHTML = '<div style="color:var(--green)">✓ No issues found</div>';
+  } else {
+    el.innerHTML = d.issues.map(i => `<div style="color:${i.level==='error'?'var(--red)':i.level==='warning'?'var(--yellow)':'var(--text3)'}">${i.level.toUpperCase()}: ${escapeHtml(i.message)}</div>`).join('');
+  }
+  switchPanel('problems');
+}
+
+async function analyzeDependencies() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/dependencies');
+  const d = await r.json();
+  switchPanel('console');
+  document.getElementById('console-output').textContent = JSON.stringify(d.dependencies, null, 2);
+}
+
+// ── Environment Variables ─────────────────────────────────────────────────────
+async function saveEnvVars() {
+  if (!currentProject) return;
+  const text = document.getElementById('env-vars-text').value;
+  const env = {};
+  for (const line of text.split('\n')) {
+    const [k, ...v] = line.split('=');
+    if (k && v.length) env[k.trim()] = v.join('=').trim();
+  }
+  await fetch('/coder/v3/project/' + currentProject.id + '/env', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({env, merge: true})
+  });
+  closeModal('env-modal');
+}
+
+// ── AI Assistant ──────────────────────────────────────────────────────────────
+function toggleRightbar() {
+  const bar = document.getElementById('rightbar');
+  bar.style.display = bar.style.display === 'none' ? 'flex' : 'none';
+}
+
+function addToAIContext(path) {
+  if (!aiContextFiles.includes(path)) {
+    aiContextFiles.push(path);
+    renderAIContext();
+  }
+}
+
+function removeFromAIContext(path) {
+  aiContextFiles = aiContextFiles.filter(p => p !== path);
+  renderAIContext();
+}
+
+function renderAIContext() {
+  const el = document.getElementById('ai-context-files');
+  el.innerHTML = aiContextFiles.map(p => `<span class="context-tag">${escapeHtml(p)}<span class="remove" onclick="removeFromAIContext('${p}')">×</span></span>`).join('');
+}
+
+async function askAI() {
+  const prompt = document.getElementById('ai-prompt').value.trim();
+  if (!prompt || !currentProject) return;
+
+  const mentions = [];
+  const cleanPrompt = prompt.replace(/@([a-zA-Z0-9_./-]+)/g, (m, name) => {
+    mentions.push(name);
+    return `[file: ${name}]`;
+  });
+
+  const chat = document.getElementById('ai-chat');
+  chat.innerHTML += `<div class="ai-message user">${escapeHtml(prompt)}</div>`;
+  chat.innerHTML += `<div class="ai-message assistant" id="ai-thinking"><span class="pulse">Thinking...</span></div>`;
+  chat.scrollTop = chat.scrollHeight;
+
+  const ctxR = await fetch('/coder/v2/project/' + currentProject.id + '/ai-context', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mention_files: [...aiContextFiles, ...mentions]})
+  });
+  const ctxD = await ctxR.json();
+
+  let enriched = cleanPrompt;
+  if (ctxD.ok && ctxD.files.length > 0) {
+    enriched += '\n\n--- Project Context ---\n';
+    for (const f of ctxD.files) {
+      enriched += `\n### ${f.path}\n${f.content}\n`;
+    }
+  }
+
+  const r = await fetch('/api/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({message: enriched, session_id: 'coder_v3_' + currentProject.id, conversation_mode: true})
+  });
+  const d = await r.json();
+
+  document.getElementById('ai-thinking').remove();
+  const answer = d.answer || d.output || 'No response';
+  chat.innerHTML += `<div class="ai-message assistant">${formatMarkdown(escapeHtml(answer))}</div>`;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function aiAction(action) {
+  if (!currentProject || !activeTab) { alert('Open a file first'); return; }
+  const chat = document.getElementById('ai-chat');
+  chat.innerHTML += `<div class="ai-message user">AI ${action} for ${activeTab}</div>`;
+  chat.innerHTML += `<div class="ai-message assistant" id="ai-thinking"><span class="pulse">Thinking...</span></div>`;
+  chat.scrollTop = chat.scrollHeight;
+
+  const selection = monacoEditor ? monacoEditor.getModel().getValueInRange(monacoEditor.getSelection()) : '';
+
+  const r = await fetch('/coder/v3/project/' + currentProject.id + '/ai/assist', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({action, file_path: activeTab, selection, context: 'coder v3 inline assist'})
+  });
+  const d = await r.json();
+
+  document.getElementById('ai-thinking').remove();
+  const answer = d.response || d.error || 'No response';
+  chat.innerHTML += `<div class="ai-message assistant">${formatMarkdown(escapeHtml(answer))}</div>`;
+  if (d.ok) {
+    chat.innerHTML += `<div style="margin-top:4px"><button onclick="applyAIChanges()" style="font-size:10px;padding:3px 8px;background:var(--green);border:none;border-radius:4px;cursor:pointer">Apply Changes</button></div>`;
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function applyAIChanges() {
+  alert('Review the AI response and copy-paste changes manually for safety.');
+}
+
+function formatMarkdown(text) {
+  // Simple formatting: code blocks
+  return text
+    .replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg);padding:6px;border-radius:4px;overflow:auto;font-size:10px;margin:4px 0">$1</pre>')
+    .replace(/`([^`]+)`/g, '<code style="background:var(--bg);padding:1px 3px;border-radius:3px;font-size:10px">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+// ── Command Palette ───────────────────────────────────────────────────────────
+let paletteCommands = [];
+
+async function showCommandPalette() {
+  const r = await fetch('/coder/v3/command-palette');
+  const d = await r.json();
+  paletteCommands = d.commands || [];
+  renderCommandPalette('');
+  const el = document.getElementById('cmd-palette');
+  el.classList.add('show');
+  document.getElementById('cmd-palette-input').value = '';
+  document.getElementById('cmd-palette-input').focus();
+  commandPaletteIndex = -1;
+}
+
+function showGoToFile() {
+  showCommandPalette();
+  document.getElementById('cmd-palette-input').value = '> ';
+  document.getElementById('cmd-palette-input').focus();
+}
+
+function renderCommandPalette(query) {
+  const el = document.getElementById('cmd-palette-results');
+  const q = query.toLowerCase().replace(/^>\s*/, '');
+  const isFileQuery = query.startsWith('>');
+
+  if (isFileQuery && currentProject) {
+    const files = (currentProject.files || []).flatMap(f => f.is_dir ? [] : [f.path]);
+    const matched = files.filter(f => f.toLowerCase().includes(q));
+    el.innerHTML = matched.slice(0, 20).map(f => `
+      <div class="result-item" onclick="openFile('${f}');hideCommandPalette()">
+        <span>📄</span>
+        <span>${escapeHtml(f)}</span>
+      </div>
+    `).join('');
+    return;
+  }
+
+  const filtered = paletteCommands.filter(c =>
+    c.label.toLowerCase().includes(q) || c.category.toLowerCase().includes(q)
+  );
+  el.innerHTML = filtered.map((c, i) => `
+    <div class="result-item ${i === commandPaletteIndex ? 'selected' : ''}" data-index="${i}" onclick="executeCommand('${c.id}');hideCommandPalette()">
+      <span class="category">${escapeHtml(c.category)}</span>
+      <span>${escapeHtml(c.label)}</span>
+      <span class="shortcut">${escapeHtml(c.shortcut || '')}</span>
+    </div>
+  `).join('');
+}
+
+function hideCommandPalette() {
+  document.getElementById('cmd-palette').classList.remove('show');
+}
+
+function executeCommand(id) {
+  const map = {
+    'new_file': newFile, 'new_folder': newFolder, 'save': saveCurrentFile,
+    'run': runProject, 'run_tests': runTests, 'format': formatCode,
+    'find': () => { setSidebar('search'); document.getElementById('search-input').focus(); },
+    'replace': () => { setSidebar('search'); document.getElementById('replace-input').focus(); },
+    'go_to_file': showGoToFile, 'command_palette': showCommandPalette,
+    'toggle_terminal': () => switchPanel('terminal'), 'git_status': () => { setSidebar('git'); gitStatus(); },
+    'git_commit': () => { setSidebar('git'); document.getElementById('git-commit-msg').focus(); },
+    'snapshot': createSnapshot, 'health_check': runHealthCheck,
+    'ai_explain': () => aiAction('explain'), 'ai_generate': () => aiAction('generate'),
+    'ai_refactor': () => aiAction('refactor'), 'ai_test': () => aiAction('test'),
+    'install_packages': showShellModal, 'shell_command': showShellModal,
+    'export_project': exportProject, 'import_project': showImportModal,
+    'split_editor': toggleSplitEditor, 'outline': () => setSidebar('outline'),
+    'settings': showSettingsModal,
+  };
+  if (map[id]) map[id]();
+}
+
+document.getElementById('cmd-palette-input').addEventListener('input', e => {
+  renderCommandPalette(e.target.value);
+  commandPaletteIndex = -1;
+});
+
+document.getElementById('cmd-palette-input').addEventListener('keydown', e => {
+  const items = document.querySelectorAll('.cmd-palette .result-item');
+  if (e.key === 'Escape') { hideCommandPalette(); }
+  else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    commandPaletteIndex = Math.min(commandPaletteIndex + 1, items.length - 1);
+    items.forEach((item, i) => item.classList.toggle('selected', i === commandPaletteIndex));
+    items[commandPaletteIndex]?.scrollIntoView({block:'nearest'});
+  }
+  else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    commandPaletteIndex = Math.max(commandPaletteIndex - 1, 0);
+    items.forEach((item, i) => item.classList.toggle('selected', i === commandPaletteIndex));
+    items[commandPaletteIndex]?.scrollIntoView({block:'nearest'});
+  }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (items[commandPaletteIndex]) items[commandPaletteIndex].click();
+    else if (items.length === 1) items[0].click();
+    else if (document.getElementById('cmd-palette-input').value.startsWith('>')) {
+      const file = document.querySelector('.cmd-palette .result-item span:nth-child(2)')?.textContent;
+      if (file) { openFile(file); hideCommandPalette(); }
+    }
+  }
+});
+
+// ── Export / Import ───────────────────────────────────────────────────────────
+async function exportProject() {
+  if (!currentProject) return;
+  const a = document.createElement('a');
+  a.href = '/coder/v2/project/' + currentProject.id + '/export';
+  a.download = currentProject.name + '.zip';
+  a.click();
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function applySettings() {
+  editorSettings.fontSize = parseInt(document.getElementById('setting-font-size').value) || 13;
+  editorSettings.tabSize = parseInt(document.getElementById('setting-tab-size').value) || 4;
+  editorSettings.wordWrap = document.getElementById('setting-word-wrap').value;
+  editorSettings.minimap = document.getElementById('setting-minimap').checked;
+  editorSettings.theme = document.getElementById('setting-theme')?.value || 'vs-dark';
+
+  if (monacoEditor) {
+    monacoEditor.updateOptions({
+      fontSize: editorSettings.fontSize,
+      tabSize: editorSettings.tabSize,
+      wordWrap: editorSettings.wordWrap,
+      minimap: { enabled: editorSettings.minimap },
+      theme: editorSettings.theme,
+    });
+  }
+  if (splitEditor) {
+    splitEditor.updateOptions({
+      fontSize: editorSettings.fontSize,
+      tabSize: editorSettings.tabSize,
+      wordWrap: editorSettings.wordWrap,
+      minimap: { enabled: editorSettings.minimap },
+      theme: editorSettings.theme,
+    });
+  }
+}
+
+// ── Modal Helpers ─────────────────────────────────────────────────────────────
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ── Keyboard Shortcuts Global ─────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCurrentFile(); }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') { e.preventDefault(); showCommandPalette(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); showGoToFile(); }
+  if (e.key === 'F5') { e.preventDefault(); runProject(); }
+  if (e.key === 'Escape') { hideCommandPalette(); }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadProjects();
+</script>
+</body>
+</html>

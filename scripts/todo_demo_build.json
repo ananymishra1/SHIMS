@@ -1,0 +1,101 @@
+{
+  "ok": true,
+  "app_name": "todo_demo",
+  "title": "Todo Demo",
+  "prefix": "/todo",
+  "scaffold": {
+    "ok": true,
+    "app_name": "todo_demo",
+    "prefix": "/todo",
+    "paths": {
+      "app_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo",
+      "services_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo\\services",
+      "templates_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo\\templates",
+      "static_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo\\static",
+      "css_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo\\static\\css",
+      "js_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo\\static\\js",
+      "routers_dir": "E:\\shims_final_omni_enterprise_2026\\apps\\todo_demo\\routers",
+      "tests_dir": "E:\\shims_final_omni_enterprise_2026\\tests",
+      "db_path": "E:\\shims_final_omni_enterprise_2026\\storage\\todo_demo.sqlite3"
+    },
+    "files_created": [
+      "config.py",
+      "database.py",
+      "app.py",
+      "base.html",
+      "index.html",
+      "todo_demo.css",
+      "todo_demo.js",
+      "test_todo_demo.py"
+    ]
+  },
+  "files_written": [
+    "database.py",
+    "services/auth.py",
+    "services/tasks.py",
+    "routers/tasks.py",
+    "templates/index.html",
+    "static/css/todo_demo.css",
+    "static/js/todo_demo.js",
+    "tests/test_todo_demo.py"
+  ],
+  "files_failed": [],
+  "mount_note": {
+    "ok": true,
+    "changes": []
+  },
+  "tile_note": {
+    "ok": true,
+    "changes": []
+  },
+  "test_result": {
+    "ok": true,
+    "returncode": 0,
+    "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.14.5, pytest-9.1.0, pluggy-1.6.0 -- E:\\shims_final_omni_enterprise_2026\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: E:\\shims_final_omni_enterprise_2026\nconfigfile: pytest.ini\nplugins: anyio-4.13.0\ncollecting ... collected 10 items\n\ntests/test_todo_demo.py::test_status PASSED                              [ 10%]\ntests/test_todo_demo.py::test_create_task PASSED                         [ 20%]\ntests/test_todo_demo.py::test_create_task_required_field PASSED          [ 30%]\ntests/test_todo_demo.py::test_create_task_missing_title PASSED           [ 40%]\ntests/test_todo_demo.py::test_list_tasks PASSED                          [ 50%]\ntests/test_todo_demo.py::test_list_tasks_contains_created PASSED         [ 60%]\ntests/test_todo_demo.py::test_create_multiple_tasks PASSED               [ 70%]\ntests/test_todo_demo.py::test_create_task_done_true PASSED               [ 80%]\ntests/test_todo_demo.py::test_list_tasks_returns_list_structure PASSED   [ 90%]\ntests/test_todo_demo.py::test_full_flow_create_and_read PASSED           [100%]\n\n============================== warnings summary ===============================\n.venv\\Lib\\site-packages\\fastapi\\testclient.py:1\n  E:\\shims_final_omni_enterprise_2026\\.venv\\Lib\\site-packages\\fastapi\\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n======================== 10 passed, 1 warning in 2.04s ========================\n",
+    "stderr": ""
+  },
+  "gen_metadata": [
+    {
+      "file": "database.py",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "services/auth.py",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "services/tasks.py",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "routers/tasks.py",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "templates/index.html",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "static/css/todo_demo.css",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "static/js/todo_demo.js",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "file": "tests/test_todo_demo.py",
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    }
+  ],
+  "model": "claude-sonnet-4-6",
+  "provider": "anthropic"
+}

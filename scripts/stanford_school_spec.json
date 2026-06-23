@@ -1,0 +1,1211 @@
+{
+  "app_name": "stanford_school",
+  "title": "Stanford International School",
+  "prefix": "/school",
+  "roles": [
+    {
+      "username": "admin",
+      "role": "admin",
+      "password": "admin123"
+    },
+    {
+      "username": "principal",
+      "role": "principal",
+      "password": "principal123"
+    },
+    {
+      "username": "teacher",
+      "role": "teacher",
+      "password": "teacher123"
+    },
+    {
+      "username": "parent",
+      "role": "parent",
+      "password": "parent123"
+    },
+    {
+      "username": "librarian",
+      "role": "librarian",
+      "password": "librarian123"
+    },
+    {
+      "username": "accountant",
+      "role": "accountant",
+      "password": "accountant123"
+    }
+  ],
+  "entities": [
+    {
+      "name": "student",
+      "fields": [
+        {
+          "name": "full_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "date_of_birth",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "gender",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "grade_class",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "section",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "roll_number",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "admission_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "parent_id",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "address",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "phone",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "blood_group",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "photo_url",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "admission",
+      "fields": [
+        {
+          "name": "applicant_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "date_of_birth",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "gender",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "applied_grade",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "parent_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "parent_phone",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "parent_email",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "previous_school",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "interview_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "name": "remarks",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "attendance",
+      "fields": [
+        {
+          "name": "student_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "grade_class",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "section",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "marked_by",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "remarks",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "exam",
+      "fields": [
+        {
+          "name": "exam_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "exam_type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "grade_class",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "subject",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "exam_date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "start_time",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "duration_minutes",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "total_marks",
+          "type": "real",
+          "required": true
+        },
+        {
+          "name": "passing_marks",
+          "type": "real",
+          "required": false
+        },
+        {
+          "name": "venue",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "grade",
+      "fields": [
+        {
+          "name": "student_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "exam_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "subject",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "marks_obtained",
+          "type": "real",
+          "required": true
+        },
+        {
+          "name": "total_marks",
+          "type": "real",
+          "required": true
+        },
+        {
+          "name": "grade_letter",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "remarks",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "fee",
+      "fields": [
+        {
+          "name": "student_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "fee_type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "amount",
+          "type": "real",
+          "required": true
+        },
+        {
+          "name": "due_date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "paid_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "name": "paid_amount",
+          "type": "real",
+          "required": false
+        },
+        {
+          "name": "payment_mode",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "transaction_id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "academic_year",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "remarks",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "transport",
+      "fields": [
+        {
+          "name": "route_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "vehicle_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "driver_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "driver_phone",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "capacity",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "stops",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "morning_time",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "afternoon_time",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "transport_assignment",
+      "fields": [
+        {
+          "name": "student_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "transport_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "pickup_stop",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "drop_stop",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "start_date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "end_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "library_book",
+      "fields": [
+        {
+          "name": "title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "author",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "isbn",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "category",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "publisher",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "edition",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "total_copies",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "available_copies",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "location",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "library_issue",
+      "fields": [
+        {
+          "name": "book_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "student_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "issue_date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "due_date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "return_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "name": "fine_amount",
+          "type": "real",
+          "required": false
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "issued_by",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "parent",
+      "fields": [
+        {
+          "name": "full_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "relationship",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "phone",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "occupation",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "address",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "username",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "password_hash",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "ai_insight",
+      "fields": [
+        {
+          "name": "student_id",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "insight_type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "model_used",
+          "type": "text",
+          "required": false
+        },
+        {
+          "name": "created_at",
+          "type": "real",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/api/students",
+      "method": "POST",
+      "purpose": "Create a new student record",
+      "required_fields": [
+        "full_name",
+        "date_of_birth",
+        "gender",
+        "grade_class",
+        "admission_number"
+      ]
+    },
+    {
+      "path": "/api/students",
+      "method": "GET",
+      "purpose": "List all students with optional filters (grade, section, status)",
+      "required_fields": []
+    },
+    {
+      "path": "/api/students/{student_id}",
+      "method": "GET",
+      "purpose": "Get student detail by ID",
+      "required_fields": []
+    },
+    {
+      "path": "/api/students/{student_id}",
+      "method": "PUT",
+      "purpose": "Update student record",
+      "required_fields": [
+        "full_name"
+      ]
+    },
+    {
+      "path": "/api/students/{student_id}",
+      "method": "DELETE",
+      "purpose": "Soft-delete or deactivate student",
+      "required_fields": []
+    },
+    {
+      "path": "/api/students/search",
+      "method": "GET",
+      "purpose": "Search students by name, admission number, grade",
+      "required_fields": []
+    },
+    {
+      "path": "/api/admissions",
+      "method": "POST",
+      "purpose": "Submit a new admission application",
+      "required_fields": [
+        "applicant_name",
+        "date_of_birth",
+        "gender",
+        "applied_grade",
+        "parent_name",
+        "parent_phone"
+      ]
+    },
+    {
+      "path": "/api/admissions",
+      "method": "GET",
+      "purpose": "List all admission applications with status filter",
+      "required_fields": []
+    },
+    {
+      "path": "/api/admissions/{admission_id}",
+      "method": "GET",
+      "purpose": "Get admission application detail",
+      "required_fields": []
+    },
+    {
+      "path": "/api/admissions/{admission_id}/status",
+      "method": "PUT",
+      "purpose": "Update admission status (pending/approved/rejected/enrolled)",
+      "required_fields": [
+        "status"
+      ]
+    },
+    {
+      "path": "/api/admissions/{admission_id}/enroll",
+      "method": "POST",
+      "purpose": "Convert approved admission to student record",
+      "required_fields": []
+    },
+    {
+      "path": "/api/attendance",
+      "method": "POST",
+      "purpose": "Mark attendance for a student on a date",
+      "required_fields": [
+        "student_id",
+        "date",
+        "status",
+        "grade_class"
+      ]
+    },
+    {
+      "path": "/api/attendance/bulk",
+      "method": "POST",
+      "purpose": "Bulk mark attendance for a class/section on a date",
+      "required_fields": [
+        "records",
+        "grade_class",
+        "date"
+      ]
+    },
+    {
+      "path": "/api/attendance",
+      "method": "GET",
+      "purpose": "Get attendance records filtered by date, class, student",
+      "required_fields": []
+    },
+    {
+      "path": "/api/attendance/summary/{student_id}",
+      "method": "GET",
+      "purpose": "Get attendance summary (present/absent/percentage) for a student",
+      "required_fields": []
+    },
+    {
+      "path": "/api/attendance/report",
+      "method": "GET",
+      "purpose": "Class-wise attendance report for a date range",
+      "required_fields": []
+    },
+    {
+      "path": "/api/exams",
+      "method": "POST",
+      "purpose": "Create a new exam schedule entry",
+      "required_fields": [
+        "exam_name",
+        "exam_type",
+        "grade_class",
+        "subject",
+        "exam_date",
+        "total_marks"
+      ]
+    },
+    {
+      "path": "/api/exams",
+      "method": "GET",
+      "purpose": "List exams filtered by grade, subject, type",
+      "required_fields": []
+    },
+    {
+      "path": "/api/exams/{exam_id}",
+      "method": "GET",
+      "purpose": "Get exam details",
+      "required_fields": []
+    },
+    {
+      "path": "/api/exams/{exam_id}",
+      "method": "PUT",
+      "purpose": "Update exam schedule",
+      "required_fields": []
+    },
+    {
+      "path": "/api/grades",
+      "method": "POST",
+      "purpose": "Enter grade/marks for a student in an exam",
+      "required_fields": [
+        "student_id",
+        "exam_id",
+        "subject",
+        "marks_obtained",
+        "total_marks"
+      ]
+    },
+    {
+      "path": "/api/grades/bulk",
+      "method": "POST",
+      "purpose": "Bulk enter grades for entire class in an exam",
+      "required_fields": [
+        "exam_id",
+        "grades"
+      ]
+    },
+    {
+      "path": "/api/grades",
+      "method": "GET",
+      "purpose": "List grades filtered by student, exam, subject",
+      "required_fields": []
+    },
+    {
+      "path": "/api/grades/report/{student_id}",
+      "method": "GET",
+      "purpose": "Full academic report card for a student",
+      "required_fields": []
+    },
+    {
+      "path": "/api/grades/class-report",
+      "method": "GET",
+      "purpose": "Class-wise grade report for an exam",
+      "required_fields": []
+    },
+    {
+      "path": "/api/fees",
+      "method": "POST",
+      "purpose": "Create fee record for a student",
+      "required_fields": [
+        "student_id",
+        "fee_type",
+        "amount",
+        "due_date",
+        "academic_year"
+      ]
+    },
+    {
+      "path": "/api/fees/bulk",
+      "method": "POST",
+      "purpose": "Generate fees for all students of a class/year",
+      "required_fields": [
+        "grade_class",
+        "fee_type",
+        "amount",
+        "due_date",
+        "academic_year"
+      ]
+    },
+    {
+      "path": "/api/fees",
+      "method": "GET",
+      "purpose": "List fees filtered by student, status, academic year",
+      "required_fields": []
+    },
+    {
+      "path": "/api/fees/{fee_id}/pay",
+      "method": "POST",
+      "purpose": "Record fee payment",
+      "required_fields": [
+        "paid_amount",
+        "payment_mode"
+      ]
+    },
+    {
+      "path": "/api/fees/defaulters",
+      "method": "GET",
+      "purpose": "List students with overdue/unpaid fees",
+      "required_fields": []
+    },
+    {
+      "path": "/api/fees/summary",
+      "method": "GET",
+      "purpose": "Fee collection summary by type and period",
+      "required_fields": []
+    },
+    {
+      "path": "/api/transport",
+      "method": "POST",
+      "purpose": "Create a transport route/vehicle",
+      "required_fields": [
+        "route_name",
+        "vehicle_number",
+        "driver_name",
+        "driver_phone"
+      ]
+    },
+    {
+      "path": "/api/transport",
+      "method": "GET",
+      "purpose": "List all transport routes",
+      "required_fields": []
+    },
+    {
+      "path": "/api/transport/{transport_id}",
+      "method": "GET",
+      "purpose": "Get transport route details with assigned students",
+      "required_fields": []
+    },
+    {
+      "path": "/api/transport/{transport_id}",
+      "method": "PUT",
+      "purpose": "Update transport route details",
+      "required_fields": []
+    },
+    {
+      "path": "/api/transport/assign",
+      "method": "POST",
+      "purpose": "Assign a student to a transport route",
+      "required_fields": [
+        "student_id",
+        "transport_id",
+        "start_date"
+      ]
+    },
+    {
+      "path": "/api/transport/assign/{assignment_id}",
+      "method": "DELETE",
+      "purpose": "Remove student transport assignment",
+      "required_fields": []
+    },
+    {
+      "path": "/api/library/books",
+      "method": "POST",
+      "purpose": "Add a new book to library catalog",
+      "required_fields": [
+        "title",
+        "author",
+        "total_copies"
+      ]
+    },
+    {
+      "path": "/api/library/books",
+      "method": "GET",
+      "purpose": "Search/list library books by title, author, category",
+      "required_fields": []
+    },
+    {
+      "path": "/api/library/books/{book_id}",
+      "method": "GET",
+      "purpose": "Get book details and availability",
+      "required_fields": []
+    },
+    {
+      "path": "/api/library/books/{book_id}",
+      "method": "PUT",
+      "purpose": "Update book catalog entry",
+      "required_fields": []
+    },
+    {
+      "path": "/api/library/issue",
+      "method": "POST",
+      "purpose": "Issue a book to a student",
+      "required_fields": [
+        "book_id",
+        "student_id",
+        "issue_date",
+        "due_date"
+      ]
+    },
+    {
+      "path": "/api/library/return/{issue_id}",
+      "method": "POST",
+      "purpose": "Record book return and calculate fine if any",
+      "required_fields": [
+        "return_date"
+      ]
+    },
+    {
+      "path": "/api/library/issues",
+      "method": "GET",
+      "purpose": "List all issued books with status (active/returned/overdue)",
+      "required_fields": []
+    },
+    {
+      "path": "/api/library/overdue",
+      "method": "GET",
+      "purpose": "List overdue book returns",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents",
+      "method": "POST",
+      "purpose": "Register a parent account",
+      "required_fields": [
+        "full_name",
+        "relationship",
+        "phone"
+      ]
+    },
+    {
+      "path": "/api/parents",
+      "method": "GET",
+      "purpose": "List all parents",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents/{parent_id}",
+      "method": "GET",
+      "purpose": "Get parent details with linked students",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents/{parent_id}/students",
+      "method": "GET",
+      "purpose": "Get all students linked to a parent",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents/portal/attendance/{student_id}",
+      "method": "GET",
+      "purpose": "Parent portal: view child attendance",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents/portal/grades/{student_id}",
+      "method": "GET",
+      "purpose": "Parent portal: view child grades and report card",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents/portal/fees/{student_id}",
+      "method": "GET",
+      "purpose": "Parent portal: view child fee status",
+      "required_fields": []
+    },
+    {
+      "path": "/api/parents/portal/notices",
+      "method": "GET",
+      "purpose": "Parent portal: view school notices and announcements",
+      "required_fields": []
+    },
+    {
+      "path": "/api/ai/insights/{student_id}",
+      "method": "GET",
+      "purpose": "AI-generated performance insights for a student covering attendance, grades, and behavior trends",
+      "required_fields": []
+    },
+    {
+      "path": "/api/ai/summarize/{student_id}",
+      "method": "POST",
+      "purpose": "AI summary of a student's academic profile for parent/teacher meetings",
+      "required_fields": []
+    },
+    {
+      "path": "/api/ai/class-report",
+      "method": "POST",
+      "purpose": "AI analysis of class-level performance trends and recommendations for teacher",
+      "required_fields": [
+        "grade_class",
+        "subject"
+      ]
+    },
+    {
+      "path": "/api/ai/admission-screening",
+      "method": "POST",
+      "purpose": "AI-assisted screening recommendation for an admission application",
+      "required_fields": [
+        "admission_id"
+      ]
+    },
+    {
+      "path": "/api/ai/fee-risk",
+      "method": "POST",
+      "purpose": "AI prediction of students at risk of fee default based on payment history",
+      "required_fields": []
+    },
+    {
+      "path": "/api/ai/attendance-alert",
+      "method": "POST",
+      "purpose": "AI-generated attendance concern alerts for students below threshold",
+      "required_fields": [
+        "threshold_percent"
+      ]
+    },
+    {
+      "path": "/api/voice/transcribe",
+      "method": "POST",
+      "purpose": "Transcribe voice input (en) for hands-free data entry using faster-whisper",
+      "required_fields": [
+        "file"
+      ]
+    },
+    {
+      "path": "/api/dashboard/stats",
+      "method": "GET",
+      "purpose": "Dashboard summary: total students, attendance today, pending fees, overdue books, pending admissions",
+      "required_fields": []
+    },
+    {
+      "path": "/api/notices",
+      "method": "POST",
+      "purpose": "Post a school notice/announcement",
+      "required_fields": [
+        "title",
+        "content"
+      ]
+    },
+    {
+      "path": "/api/notices",
+      "method": "GET",
+      "purpose": "List all school notices",
+      "required_fields": []
+    }
+  ],
+  "ui_tabs": [
+    "Dashboard",
+    "Admissions",
+    "Students",
+    "Attendance",
+    "Exams & Grades",
+    "Fees",
+    "Transport",
+    "Library",
+    "Parent Portal",
+    "AI Insights"
+  ],
+  "ai_endpoints": [
+    "/api/ai/insights/{student_id}",
+    "/api/ai/summarize/{student_id}",
+    "/api/ai/class-report",
+    "/api/ai/admission-screening",
+    "/api/ai/fee-risk",
+    "/api/ai/attendance-alert"
+  ],
+  "tests": [
+    "test_status_200_school_index",
+    "test_create_student",
+    "test_list_students",
+    "test_search_students",
+    "test_create_admission",
+    "test_update_admission_status",
+    "test_enroll_admission_to_student",
+    "test_mark_attendance",
+    "test_bulk_mark_attendance",
+    "test_attendance_summary",
+    "test_create_exam",
+    "test_enter_grade",
+    "test_bulk_enter_grades",
+    "test_student_report_card",
+    "test_create_fee",
+    "test_bulk_generate_fees",
+    "test_fee_payment",
+    "test_fee_defaulters",
+    "test_create_transport_route",
+    "test_assign_student_transport",
+    "test_add_library_book",
+    "test_issue_library_book",
+    "test_return_library_book",
+    "test_overdue_books",
+    "test_create_parent",
+    "test_parent_portal_attendance",
+    "test_parent_portal_grades",
+    "test_parent_portal_fees",
+    "test_ai_student_insights",
+    "test_ai_student_summarize",
+    "test_ai_class_report",
+    "test_ai_fee_risk",
+    "test_ai_attendance_alert",
+    "test_voice_transcribe_endpoint",
+    "test_dashboard_stats",
+    "test_create_notice"
+  ],
+  "notes": "App lives at apps/stanford_school/ with prefix /school and storage at storage/stanford_school.sqlite3 (WAL + foreign keys). Static files mount at /stanford_school-static. Routers split by domain: routers/admissions.py, routers/students.py, routers/attendance.py, routers/exams.py, routers/grades.py, routers/fees.py, routers/transport.py, routers/library.py, routers/parents.py, routers/ai.py, routers/voice.py. Services mirror routers: services/admissions.py, services/students.py, services/attendance.py, services/exams.py, services/grades.py, services/fees.py, services/transport.py, services/library.py, services/parents.py, services/ai.py, services/voice.py, services/demo.py. AI service uses shared.ai.ask_ai with school-specific system prompts requesting JSON output; _extract_json() parses robustly. AI insights are persisted to ai_insight table and saved to omni-brain under namespace=stanford_school. Voice transcription uses faster-whisper via services/voice.py with stt_corrector for school terminology (subject names, grade labels). Parent portal tabs are read-only views secured by parent_id linkage. Fee bulk generation creates one record per student in a grade for a given fee_type and academic_year. Library fine calculation: 1 unit per day overdue, configurable in config.py. Admission-to-enrollment flow: POST /api/admissions/{id}/enroll creates student record from approved admission data and marks admission status as 'enrolled'. Dashboard stats endpoint aggregates across all tables for admin/principal summary view. Omni launcher tile: <div class='nav-row' onclick=\"window.open('/school','_blank')\" style='cursor:pointer'><span>🏫</span>Stanford International School</div>. All routes return {ok: true, ...} on success or raise HTTPException. Pydantic request models defined per router. Demo seed data in services/demo.py creates 5 students, 2 parents, 1 transport route, 5 library books for testing."
+}

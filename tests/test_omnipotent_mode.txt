@@ -1,0 +1,2 @@
+# This file tests omnipotent mode auto-apply
+# Created at: 2026-06-09T11:07:50Z

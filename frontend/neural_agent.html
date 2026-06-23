@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHIMS Neural Agent — Self-Evolution Control</title>
+<style>
+:root{--bg:#0b1220;--bg2:#0f172a;--bg3:#1e293b;--bg4:#1a2234;--line:#334155;--line2:#475569;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--cyan:#22d3ee;--green:#4ade80;--yellow:#facc15;--red:#f87171;--blue:#60a5fa;--purple:#a78bfa;--orange:#fb923c}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+/* Header */
+.header{height:52px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:12px;position:sticky;top:0;z-index:100}
+.header h1{font-size:15px;font-weight:600;color:var(--cyan);display:flex;align-items:center;gap:8px}
+.header .badge{font-size:10px;padding:2px 8px;border-radius:10px;background:var(--bg3);border:1px solid var(--line);color:var(--text2)}
+.header .badge.online{background:rgba(74,222,128,.15);border-color:var(--green);color:var(--green)}
+.header .badge.offline{background:rgba(248,113,113,.15);border-color:var(--red);color:var(--red)}
+.header .spacer{flex:1}
+.header nav{display:flex;gap:8px}
+.header nav a{color:var(--text2);text-decoration:none;font-size:12px;padding:4px 10px;border-radius:5px}
+.header nav a:hover{background:var(--bg3);color:var(--text)}
+.header nav a.active{background:var(--bg3);color:var(--cyan)}
+
+/* Layout */
+.container{max-width:1400px;margin:0 auto;padding:16px;display:grid;grid-template-columns:280px 1fr;gap:16px}
+@media(max-width:900px){.container{grid-template-columns:1fr}}
+
+/* Sidebar */
+.sidebar{display:flex;flex-direction:column;gap:12px}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px}
+.panel h3{font-size:12px;font-weight:600;color:var(--cyan);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
+.panel h3 .icon{font-size:14px;margin-right:4px}
+
+.model-status .model-name{font-size:14px;font-weight:600;margin-bottom:4px}
+.model-status .model-provider{font-size:11px;color:var(--text3);margin-bottom:8px}
+.model-status .hw-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;color:var(--text2)}
+.model-status .hw-row .val{color:var(--text)}
+
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-box{text-align:center;padding:8px;background:var(--bg3);border-radius:6px}
+.stat-box .num{font-size:18px;font-weight:700;color:var(--cyan)}
+.stat-box .label{font-size:10px;color:var(--text3);margin-top:2px}
+
+.action-btn{width:100%;padding:8px;border-radius:6px;border:1px solid var(--line);background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:6px}
+.action-btn:hover{background:var(--line)}
+.action-btn.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+.action-btn.primary:hover{background:#3b82f6}
+.action-btn.danger{background:var(--red);border-color:var(--red);color:#000;font-weight:600}
+.action-btn.danger:hover{background:#ef4444}
+.action-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* Main */
+.main{display:flex;flex-direction:column;gap:12px}
+
+/* Filter bar */
+.filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.filter-bar button{padding:5px 12px;border-radius:5px;border:1px solid var(--line);background:var(--bg2);color:var(--text2);font-size:11px;cursor:pointer}
+.filter-bar button:hover{background:var(--bg3);color:var(--text)}
+.filter-bar button.active{background:var(--bg3);color:var(--cyan);border-color:var(--cyan)}
+.filter-bar .spacer{flex:1}
+.filter-bar input{background:var(--bg2);border:1px solid var(--line);border-radius:5px;padding:5px 10px;color:var(--text);font-size:11px;min-width:180px}
+
+/* Proposal cards */
+.proposal-card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.proposal-card:hover{border-color:var(--line2)}
+.proposal-header{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+.proposal-header .status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.proposal-header .status-dot.pending{background:var(--yellow)}
+.proposal-header .status-dot.validated{background:var(--blue)}
+.proposal-header .status-dot.approved{background:var(--green)}
+.proposal-header .status-dot.applied{background:var(--cyan)}
+.proposal-header .status-dot.rejected{background:var(--red)}
+.proposal-header .status-dot.failed{background:var(--red)}
+.proposal-header .title{flex:1;font-size:13px;font-weight:600}
+.proposal-header .meta{font-size:10px;color:var(--text3);white-space:nowrap}
+.proposal-header .source-badge{font-size:9px;padding:1px 6px;border-radius:8px;background:var(--bg3);color:var(--text3);border:1px solid var(--line)}
+
+.proposal-body{padding:12px 14px}
+.proposal-body .section{margin-bottom:10px}
+.proposal-body .section-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+.proposal-body .section-text{font-size:12px;color:var(--text2);line-height:1.5}
+.proposal-body .files{display:flex;gap:6px;flex-wrap:wrap}
+.proposal-body .file-tag{font-size:10px;padding:2px 8px;border-radius:4px;background:var(--bg3);border:1px solid var(--line);color:var(--cyan)}
+
+.proposal-diff{background:var(--bg);border-top:1px solid var(--line);padding:10px 14px;overflow:auto;max-height:300px}
+.proposal-diff pre{margin:0;font-family:'Cascadia Mono','Fira Code',monospace;font-size:11px;line-height:1.4;color:var(--text2);white-space:pre-wrap;word-break:break-all}
+.proposal-diff .diff-add{color:var(--green)}
+.proposal-diff .diff-rem{color:var(--red)}
+.proposal-diff .diff-hdr{color:var(--text3)}
+
+.proposal-actions{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap}
+.proposal-actions button{padding:5px 14px;border-radius:5px;border:1px solid var(--line);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer}
+.proposal-actions button:hover{background:var(--line)}
+.proposal-actions button.test{border-color:var(--blue);color:var(--blue)}
+.proposal-actions button.test:hover{background:rgba(96,165,250,.15)}
+.proposal-actions button.accept{border-color:var(--green);color:var(--green)}
+.proposal-actions button.accept:hover{background:rgba(74,222,128,.15)}
+.proposal-actions button.reject{border-color:var(--red);color:var(--red)}
+.proposal-actions button.reject:hover{background:rgba(248,113,113,.15)}
+.proposal-actions button.apply{border-color:var(--cyan);color:var(--cyan);font-weight:600}
+.proposal-actions button.apply:hover{background:rgba(34,211,238,.15)}
+
+/* Generate panel */
+.generate-panel{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.generate-panel h3{font-size:12px;font-weight:600;color:var(--cyan);margin-bottom:10px}
+.generate-row{display:flex;gap:8px;margin-bottom:8px;align-items:flex-start}
+.generate-row input,.generate-row textarea{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;color:var(--text);font-size:12px;font-family:inherit}
+.generate-row textarea{min-height:60px;resize:vertical}
+.generate-row button{align-self:flex-end;padding:8px 16px;border-radius:6px;border:1px solid var(--line);background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap}
+.generate-row button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+.generate-row button.primary:hover{background:#3b82f6}
+
+/* Toast */
+.toast{position:fixed;bottom:16px;right:16px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:12px;max-width:360px;z-index:999;box-shadow:0 10px 40px rgba(0,0,0,.5);font-size:12px;animation:slideIn .3s ease}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast.success{border-color:var(--green)}
+.toast.error{border-color:var(--red)}
+.toast.info{border-color:var(--blue)}
+
+/* Modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000}
+.modal.show{display:flex}
+.modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:400px;max-width:90vw;max-height:90vh;overflow:auto}
+.modal-box h3{margin-bottom:10px;font-size:13px;color:var(--cyan)}
+.modal-box pre{background:var(--bg);padding:8px;border-radius:6px;font-size:11px;overflow:auto;max-height:400px}
+.modal-box .buttons{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+.modal-box button{padding:5px 12px;border-radius:5px;border:1px solid var(--line);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer}
+.modal-box button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+
+/* Empty state */
+.empty-state{text-align:center;padding:40px;color:var(--text3);font-size:13px}
+.empty-state .icon{font-size:32px;margin-bottom:8px}
+
+/* Scrollbars */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--line2)}
+
+/* Loading */
+.pulse{animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🧠 Neural Agent <span style="color:var(--text3);font-weight:400;font-size:12px">Self-Evolution Control</span></h1>
+  <div class="spacer"></div>
+  <span id="model-badge" class="badge offline">Checking model...</span>
+  <nav>
+    <a href="/">← Omni</a>
+    <a href="/coder-v3">Coder v3</a>
+    <a href="/neural-governor">Governor</a>
+  </nav>
+</div>
+
+<div class="container">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Model Status -->
+    <div class="panel model-status">
+      <h3><span class="icon">🤖</span>Evolution Model</h3>
+      <div class="model-name" id="model-name">—</div>
+      <div class="model-provider" id="model-provider">—</div>
+      <div class="hw-row"><span>VRAM</span><span class="val" id="hw-vram">—</span></div>
+      <div class="hw-row"><span>RAM</span><span class="val" id="hw-ram">—</span></div>
+      <div class="hw-row"><span>GPU</span><span class="val" id="hw-gpu">—</span></div>
+      <div class="hw-row"><span>CUDA</span><span class="val" id="hw-cuda">—</span></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="panel">
+      <h3><span class="icon">📊</span>Proposals</h3>
+      <div class="stats-grid">
+        <div class="stat-box"><div class="num" id="stat-total">—</div><div class="label">Total</div></div>
+        <div class="stat-box"><div class="num" id="stat-pending">—</div><div class="label">Pending</div></div>
+        <div class="stat-box"><div class="num" id="stat-approved">—</div><div class="label">Approved</div></div>
+        <div class="stat-box"><div class="num" id="stat-applied">—</div><div class="label">Applied</div></div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="panel">
+      <h3><span class="icon">⚡</span>Actions</h3>
+      <button class="action-btn primary" onclick="runReflection()">🔍 Run Reflection</button>
+      <button class="action-btn" onclick="document.getElementById('generate-intent').focus()">✨ New Proposal</button>
+      <button class="action-btn" onclick="refreshAll()">🔄 Refresh</button>
+    </div>
+
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Generate Panel -->
+    <div class="generate-panel">
+      <h3>✨ Generate New Proposal</h3>
+      <div class="generate-row">
+        <input id="generate-intent" placeholder="Intent: e.g., 'Add health check endpoint to API'">
+      </div>
+      <div class="generate-row">
+        <input id="generate-file" placeholder="File path (optional, e.g., backend/app/main.py)">
+      </div>
+      <div class="generate-row">
+        <textarea id="generate-instructions" placeholder="Detailed instructions (optional)"></textarea>
+        <button class="primary" onclick="generateProposal()">Generate</button>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <button class="active" onclick="filterProposals('all')" data-filter="all">All</button>
+      <button onclick="filterProposals('pending')" data-filter="pending">Pending</button>
+      <button onclick="filterProposals('validated')" data-filter="validated">Validated</button>
+      <button onclick="filterProposals('approved')" data-filter="approved">Approved</button>
+      <button onclick="filterProposals('applied')" data-filter="applied">Applied</button>
+      <button onclick="filterProposals('rejected')" data-filter="rejected">Rejected</button>
+      <div class="spacer"></div>
+      <input id="search-proposals" placeholder="Search proposals..." oninput="searchProposals(this.value)">
+    </div>
+
+    <!-- Proposals List -->
+    <div id="proposals-list">
+      <div class="empty-state">
+        <div class="icon">🧬</div>
+        <div>Loading proposals...</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Result Modal -->
+<div class="modal" id="result-modal">
+  <div class="modal-box">
+    <h3 id="result-title">Result</h3>
+    <pre id="result-content"></pre>
+    <div class="buttons">
+      <button onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let proposals = [];
+let currentFilter = 'all';
+let currentSearch = '';
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  refreshAll();
+});
+
+async function refreshAll() {
+  await loadModelStatus();
+  await loadProposals();
+}
+
+// ── Model Status ──────────────────────────────────────────────────────────────
+async function loadModelStatus() {
+  try {
+    const r = await fetch('/api/neural-agent/model-status');
+    const d = await r.json();
+    if (!d.ok) return;
+    document.getElementById('model-name').textContent = d.model;
+    document.getElementById('model-provider').textContent = d.provider + (d.available ? ' ● Online' : ' ○ Not pulled');
+    document.getElementById('hw-vram').textContent = d.hardware.vram_gb + ' GB';
+    document.getElementById('hw-ram').textContent = d.hardware.ram_gb + ' GB';
+    document.getElementById('hw-gpu').textContent = d.hardware.gpu_name;
+    document.getElementById('hw-cuda').textContent = d.hardware.cuda ? 'Yes' : 'No';
+    const badge = document.getElementById('model-badge');
+    badge.className = 'badge ' + (d.available ? 'online' : 'offline');
+    badge.textContent = d.available ? d.model + ' Online' : d.model + ' Not Available';
+  } catch (e) {
+    console.error('Model status error:', e);
+  }
+}
+
+// ── Proposals ─────────────────────────────────────────────────────────────────
+async function loadProposals() {
+  try {
+    const r = await fetch('/api/neural-agent/proposals?limit=50');
+    const d = await r.json();
+    proposals = d.proposals || [];
+    updateStats();
+    renderProposals();
+  } catch (e) {
+    console.error('Load proposals error:', e);
+    document.getElementById('proposals-list').innerHTML = '<div class="empty-state"><div class="icon">⚠</div><div>Failed to load proposals</div></div>';
+  }
+}
+
+function updateStats() {
+  document.getElementById('stat-total').textContent = proposals.length;
+  document.getElementById('stat-pending').textContent = proposals.filter(p => p.status === 'pending' || p.status === 'proposed').length;
+  document.getElementById('stat-approved').textContent = proposals.filter(p => p.status === 'approved').length;
+  document.getElementById('stat-applied').textContent = proposals.filter(p => p.status === 'applied' || p.status === 'deployed').length;
+}
+
+function filterProposals(status) {
+  currentFilter = status;
+  document.querySelectorAll('.filter-bar button[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === status));
+  renderProposals();
+}
+
+function searchProposals(query) {
+  currentSearch = query.toLowerCase();
+  renderProposals();
+}
+
+function getFilteredProposals() {
+  let list = proposals;
+  if (currentFilter !== 'all') {
+    list = list.filter(p => p.status === currentFilter || (currentFilter === 'pending' && (p.status === 'pending' || p.status === 'proposed')));
+  }
+  if (currentSearch) {
+    list = list.filter(p =>
+      (p.title || '').toLowerCase().includes(currentSearch) ||
+      (p.intent || '').toLowerCase().includes(currentSearch) ||
+      (p.description || '').toLowerCase().includes(currentSearch) ||
+      (p.affected_files || []).some(f => f.toLowerCase().includes(currentSearch))
+    );
+  }
+  return list;
+}
+
+function renderProposals() {
+  const list = getFilteredProposals();
+  const el = document.getElementById('proposals-list');
+  if (list.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">🧬</div><div>No proposals match your filter</div></div>';
+    return;
+  }
+  el.innerHTML = list.map(p => renderProposalCard(p)).join('');
+}
+
+function renderProposalCard(p) {
+  const statusClass = p.status === 'proposed' ? 'pending' : p.status;
+  const statusLabel = p.status.charAt(0).toUpperCase() + p.status.slice(1);
+  const diffHtml = formatDiff(p.diff || p.patch_content || '');
+  const canTest = ['pending', 'proposed', 'validation_failed'].includes(p.status);
+  const canAccept = ['pending', 'proposed', 'validated', 'validation_failed'].includes(p.status);
+  const canApply = ['approved', 'validated'].includes(p.status);
+  const canReject = !['applied', 'deployed', 'rejected'].includes(p.status);
+
+  return `
+    <div class="proposal-card" data-id="${escapeHtml(p.id)}">
+      <div class="proposal-header">
+        <div class="status-dot ${statusClass}"></div>
+        <div class="title">${escapeHtml(p.title || 'Untitled')}</div>
+        <span class="source-badge">${p.source || 'unknown'}</span>
+        <div class="meta">${statusLabel} · ${escapeHtml(p.proposed_by || 'system')} · ${formatDate(p.created_at)}</div>
+      </div>
+      <div class="proposal-body">
+        <div class="section">
+          <div class="section-label">Intent</div>
+          <div class="section-text">${escapeHtml(p.intent || p.title || '—')}</div>
+        </div>
+        <div class="section">
+          <div class="section-label">Thought</div>
+          <div class="section-text">${escapeHtml(p.thought || p.description || '—')}</div>
+        </div>
+        <div class="section">
+          <div class="section-label">Affected Files</div>
+          <div class="files">${(p.affected_files || []).map(f => `<span class="file-tag">${escapeHtml(f)}</span>`).join('')}</div>
+        </div>
+      </div>
+      ${diffHtml ? `<div class="proposal-diff"><pre>${diffHtml}</pre></div>` : ''}
+      <div class="proposal-actions">
+        ${canTest ? `<button class="test" onclick="testProposal('${p.id}')">🧪 Test</button>` : ''}
+        ${canAccept ? `<button class="accept" onclick="acceptProposal('${p.id}')">✓ Accept</button>` : ''}
+        ${canReject ? `<button class="reject" onclick="rejectProposal('${p.id}')">✕ Reject</button>` : ''}
+        ${canApply ? `<button class="apply" onclick="applyProposal('${p.id}')">▶ Apply</button>` : ''}
+        <button onclick="viewFull('${p.id}')">📄 Full</button>
+      </div>
+    </div>
+  `;
+}
+
+function formatDiff(diffText) {
+  if (!diffText) return '';
+  return escapeHtml(diffText).split('\n').map(line => {
+    if (line.startsWith('+')) return `<span class="diff-add">${line}</span>`;
+    if (line.startsWith('-')) return `<span class="diff-rem">${line}</span>`;
+    if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) return `<span class="diff-hdr">${line}</span>`;
+    return line;
+  }).join('\n');
+}
+
+function formatDate(dt) {
+  if (!dt) return '—';
+  try { return new Date(dt).toLocaleString(); } catch (e) { return String(dt); }
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+async function testProposal(id) {
+  showToast('Running sandbox test...', 'info');
+  try {
+    const r = await fetch('/api/neural-agent/proposals/' + encodeURIComponent(id) + '/test', {method: 'POST'});
+    const d = await r.json();
+    showResult('Test Result: ' + (d.ok ? 'Passed' : 'Failed'), JSON.stringify(d, null, 2));
+    if (d.ok) await loadProposals();
+  } catch (e) {
+    showToast('Test failed: ' + e.message, 'error');
+  }
+}
+
+async function acceptProposal(id) {
+  const notes = prompt('Approval notes (optional):') || '';
+  try {
+    const r = await fetch('/api/neural-agent/proposals/' + encodeURIComponent(id) + '/accept', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({notes})
+    });
+    const d = await r.json();
+    showToast(d.ok ? 'Proposal accepted' : 'Failed: ' + d.message, d.ok ? 'success' : 'error');
+    await loadProposals();
+  } catch (e) {
+    showToast('Accept failed: ' + e.message, 'error');
+  }
+}
+
+async function rejectProposal(id) {
+  const notes = prompt('Rejection reason (optional):') || '';
+  try {
+    const r = await fetch('/api/neural-agent/proposals/' + encodeURIComponent(id) + '/reject', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({notes})
+    });
+    const d = await r.json();
+    showToast(d.ok ? 'Proposal rejected' : 'Failed: ' + d.message, d.ok ? 'success' : 'error');
+    await loadProposals();
+  } catch (e) {
+    showToast('Reject failed: ' + e.message, 'error');
+  }
+}
+
+async function applyProposal(id) {
+  if (!confirm('Apply this proposal to live code? A backup will be created automatically.')) return;
+  try {
+    const r = await fetch('/api/neural-agent/proposals/' + encodeURIComponent(id) + '/apply', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({approval_phrase: 'I_APPROVE_SHIMS_PATCH'})
+    });
+    const d = await r.json();
+    showResult('Apply Result: ' + (d.ok ? 'Success' : 'Failed'), JSON.stringify(d, null, 2));
+    await loadProposals();
+  } catch (e) {
+    showToast('Apply failed: ' + e.message, 'error');
+  }
+}
+
+async function viewFull(id) {
+  try {
+    const r = await fetch('/api/neural-agent/proposals/' + encodeURIComponent(id));
+    const d = await r.json();
+    if (d.ok && d.proposal) {
+      showResult('Proposal: ' + (d.proposal.title || 'Untitled'), JSON.stringify(d.proposal, null, 2));
+    }
+  } catch (e) {
+    showToast('View failed: ' + e.message, 'error');
+  }
+}
+
+async function generateProposal() {
+  const intent = document.getElementById('generate-intent').value.trim();
+  if (!intent) { showToast('Enter an intent first', 'error'); return; }
+  const filePath = document.getElementById('generate-file').value.trim();
+  const instructions = document.getElementById('generate-instructions').value.trim();
+
+  showToast('Generating proposal with local model...', 'info');
+  try {
+    const r = await fetch('/api/neural-agent/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({intent, file_path: filePath, instructions})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showToast('Proposal generated: ' + d.proposal_id, 'success');
+      document.getElementById('generate-intent').value = '';
+      document.getElementById('generate-file').value = '';
+      document.getElementById('generate-instructions').value = '';
+      await loadProposals();
+    } else {
+      showToast('Generate failed: ' + (d.error || 'Unknown'), 'error');
+    }
+  } catch (e) {
+    showToast('Generate failed: ' + e.message, 'error');
+  }
+}
+
+async function runReflection() {
+  showToast('Running reflection cycle...', 'info');
+  try {
+    const r = await fetch('/api/neural-agent/reflect', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      showResult('Reflection Complete', `Gaps found: ${d.gaps_found}\nProposals generated: ${d.proposals_generated}\n\n` + JSON.stringify(d.gaps, null, 2));
+      await loadProposals();
+    } else {
+      showToast('Reflection failed: ' + (d.error || 'Unknown'), 'error');
+    }
+  } catch (e) {
+    showToast('Reflection failed: ' + e.message, 'error');
+  }
+}
+
+// ── UI Helpers ────────────────────────────────────────────────────────────────
+function showToast(message, type) {
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+function showResult(title, content) {
+  document.getElementById('result-title').textContent = title;
+  document.getElementById('result-content').textContent = content;
+  document.getElementById('result-modal').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('result-modal').classList.remove('show');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

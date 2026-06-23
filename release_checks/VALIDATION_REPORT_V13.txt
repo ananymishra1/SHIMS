@@ -1,0 +1,11 @@
+SHIMS v13 Platform Foundation validation
+
+Executed before final packaging:
+- Python compile: backend/app/main.py, apps/shims_omni/main.py, apps/shims_enterprise/main.py, shims_enterprise/app.py, shared/*.py: PASSED
+- Desktop regression tests: 25 passed
+- Android XML parse: PASSED
+- Frontend inline JavaScript syntax extraction + node --check: PASSED
+- Safety cleanup: no .env secrets and no __pycache__ directories included
+
+Key v13 regression added:
+- test_self_evolution_real_propose_validate_apply_pipeline verifies a generated patch proposal is durable, sandbox validated, blocked without approval, then applied to the live project after approval phrase.

@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}J K Hospital — SHIMS{% endblock %}
+{% block content %}
+<header class="app-header">
+    <div class="brand">
+        <span class="logo">🏥</span>
+        <div>
+            <h1>J K Hospital</h1>
+            <small>Powered by SHIMS Omni</small>
+        </div>
+    </div>
+    <nav class="main-nav">
+        <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="patients">Patients</button>
+        <button data-tab="opd">OPD Queue</button>
+        <button data-tab="visit">Encounter</button>
+        <button data-tab="lab">Lab</button>
+        <button data-tab="ipd">IPD/Beds</button>
+        <button data-tab="ot">OT</button>
+        <button data-tab="ivf">IVF</button>
+        <button data-tab="admin">Admin</button>
+        <button data-tab="ai">AI Assistant</button>
+    </nav>
+    <div class="user-pill">
+        <span id="user-name">Guest</span>
+        <span id="role-badge">Reception</span>
+        <span id="clock">--:--</span>
+        <button class="btn" id="logout-btn" onclick="logout()" style="display:none;padding:0.35rem 0.7rem;font-size:0.8rem">Logout</button>
+    </div>
+</header>
+
+<main class="app-body">
+    <section id="tab-dashboard" class="tab active">
+        <div class="kpi-grid">
+            <div class="kpi"><label>Total Patients</label><b id="stat-patients">0</b></div>
+            <div class="kpi"><label>Active Visits</label><b id="stat-active">0</b></div>
+            <div class="kpi"><label>OPD Today</label><b id="stat-opd">0</b></div>
+            <div class="kpi"><label>IPD Admitted</label><b id="stat-ipd">0</b></div>
+            <div class="kpi"><label>IVF Cycles</label><b id="stat-ivf">0</b></div>
+            <div class="kpi"><label>OT Pending</label><b id="stat-ot">0</b></div>
+        </div>
+        <div class="panel" style="margin-top:1rem">
+            <h2>Quick Actions</h2>
+            <div class="actions">
+                <button class="btn primary" onclick="openRegister()">+ Register New Patient</button>
+                <button class="btn" onclick="startOPD()">Start OPD Visit</button>
+                <button class="btn" onclick="loadDemo()">Load Demo Data</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="tab-patients" class="tab">
+        <div class="toolbar">
+            <input type="text" id="patient-search" placeholder="Search name, phone, UHID..." onkeyup="searchPatients()">
+            <button class="btn primary" onclick="openRegister()">+ New Patient</button>
+        </div>
+        <div class="panel">
+            <table class="data-table">
+                <thead><tr><th>UHID</th><th>Name</th><th>Phone</th><th>Age/Gender</th><th>City</th><th>Action</th></tr></thead>
+                <tbody id="patient-list"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="tab-opd" class="tab">
+        <div class="toolbar">
+            <h2>OPD Queue</h2>
+            <button class="btn" onclick="refreshOPD()">Refresh</button>
+        </div>
+        <div class="panel" id="opd-queue"></div>
+    </section>
+
+    <section id="tab-visit" class="tab">
+        <div id="visit-empty" class="empty-state">Select a patient / visit to open the encounter.</div>
+        <div id="visit-workspace" class="hidden">
+            <div class="visit-header">
+                <div>
+                    <h2 id="enc-patient-name"></h2>
+                    <span id="enc-uhid" class="badge"></span>
+                    <span id="enc-visit-type" class="badge"></span>
+                </div>
+                <div class="visit-actions">
+                    <button class="btn" onclick="startVoice('complaint')">🎤 Complaint</button>
+                    <button class="btn" onclick="startVoice('diagnosis')">🎤 Diagnosis</button>
+                    <button class="btn" onclick="startVoice('notes')">🎤 Notes</button>
+                    <button class="btn" onclick="printPrescription()">🖨 Prescription</button>
+                    <button class="btn" onclick="printVisitSummary()">🖨 Summary</button>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <h3>Vitals</h3>
+                    <form id="vitals-form" class="form compact">
+                        <div class="row">
+                            <input name="temperature" placeholder="Temp °F">
+                            <input name="pulse" placeholder="Pulse">
+                            <input name="bp_systolic" placeholder="BP Sys">
+                            <input name="bp_diastolic" placeholder="BP Dia">
+                        </div>
+                        <div class="row">
+                            <input name="respiratory_rate" placeholder="RR">
+                            <input name="spo2" placeholder="SpO2">
+                            <input name="weight_kg" placeholder="Weight kg">
+                            <input name="height_cm" placeholder="Height cm">
+                        </div>
+                        <button type="button" class="btn primary" onclick="saveVitals()">Save Vitals</button>
+                    </form>
+                    <div id="vitals-history" class="history"></div>
+                </div>
+                <div class="panel">
+                    <h3>Complaints</h3>
+                    <form id="complaint-form" class="form">
+                        <input name="complaint" placeholder="Chief complaint" id="input-complaint">
+                        <input name="duration" placeholder="Duration">
+                        <textarea name="notes" placeholder="Notes"></textarea>
+                        <button type="button" class="btn primary" onclick="saveComplaint()">Add Complaint</button>
+                    </form>
+                    <div id="complaints-history" class="history"></div>
+                </div>
+                <div class="panel">
+                    <h3>Diagnosis</h3>
+                    <form id="diagnosis-form" class="form">
+                        <input name="diagnosis" placeholder="Diagnosis" id="input-diagnosis">
+                        <input name="icd_code" placeholder="ICD code">
+                        <select name="type"><option value="provisional">Provisional</option><option value="confirmed">Confirmed</option><option value="differential">Differential</option></select>
+                        <textarea name="notes" placeholder="Notes"></textarea>
+                        <button type="button" class="btn primary" onclick="saveDiagnosis()">Add Diagnosis</button>
+                    </form>
+                    <div id="diagnoses-history" class="history"></div>
+                </div>
+                <div class="panel">
+                    <h3>Prescription</h3>
+                    <form id="prescription-form" class="form">
+                        <input name="medication" placeholder="Medication">
+                        <input name="dosage" placeholder="Dose">
+                        <input name="frequency" placeholder="Frequency">
+                        <input name="duration" placeholder="Duration">
+                        <input name="route" placeholder="Route">
+                        <textarea name="instructions" placeholder="Instructions"></textarea>
+                        <button type="button" class="btn primary" onclick="savePrescription()">Add Rx</button>
+                    </form>
+                    <div id="prescriptions-history" class="history"></div>
+                </div>
+            </div>
+            <div class="panel ai-panel">
+                <h3>AI Clinical Support</h3>
+                <div class="ai-actions">
+                    <button class="btn" onclick="aiDifferential()">Differential Diagnosis</button>
+                    <button class="btn" onclick="aiTreatment()">Treatment Suggestions</button>
+                    <button class="btn" onclick="aiMentor()">Ask Mentor</button>
+                </div>
+                <div id="ai-output" class="ai-output"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="tab-lab" class="tab">
+        <div class="toolbar"><h2>Lab Orders</h2><button class="btn" onclick="refreshLab()">Refresh</button></div>
+        <div class="panel">
+            <table class="data-table">
+                <thead><tr><th>Visit</th><th>Test</th><th>Category</th><th>Status</th><th>Ordered</th><th>Action</th></tr></thead>
+                <tbody id="lab-list"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="tab-ipd" class="tab">
+        <div class="toolbar"><h2>Bed Board</h2><button class="btn" onclick="refreshBeds()">Refresh</button></div>
+        <div class="panel">
+            <div id="bed-board" class="kpi-grid"></div>
+        </div>
+    </section>
+
+    <section id="tab-ot" class="tab">
+        <div class="toolbar"><h2>OT Schedule</h2><button class="btn" onclick="refreshOT()">Refresh</button></div>
+        <div class="panel" id="ot-list"></div>
+    </section>
+
+    <section id="tab-ivf" class="tab">
+        <div class="toolbar">
+            <h2>IVF Center</h2>
+            <button class="btn primary" onclick="openIVFCouple()">+ New Couple</button>
+        </div>
+        <div class="panel" id="ivf-couples"></div>
+    </section>
+
+    <section id="tab-admin" class="tab">
+        <div class="grid-2">
+            <div class="panel">
+                <h2>Demo Data</h2>
+                <p>Generate simulated patients and cycles for training/demos.</p>
+                <input id="demo-count" type="number" value="30" min="1" max="200" style="width:80px">
+                <button class="btn primary" onclick="generateDemo()">Generate</button>
+                <div id="demo-result"></div>
+            </div>
+            <div class="panel">
+                <h2>Staff Estimator</h2>
+                <div class="form compact">
+                    <input id="est-patients" placeholder="Total patients">
+                    <input id="est-opd" placeholder="OPD/day">
+                    <input id="est-beds" placeholder="IPD beds">
+                    <input id="est-ivf" placeholder="IVF cycles/month">
+                </div>
+                <button class="btn primary" onclick="estimateStaff()">Estimate</button>
+                <pre id="est-result" class="ai-output"></pre>
+            </div>
+        </div>
+    </section>
+
+    <section id="tab-ai" class="tab">
+        <div class="panel">
+            <h2>Junior Doctor Mentor</h2>
+            <textarea id="mentor-question" rows="3" placeholder="Ask anything: Why does this patient have raised TLC? What are red flags in ectopic pregnancy?"></textarea>
+            <button class="btn primary" onclick="askMentor()">Ask</button>
+            <div id="mentor-answer" class="ai-output"></div>
+        </div>
+    </section>
+</main>
+
+<!-- Modals -->
+<div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-title">Register Patient</h3>
+            <button class="close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal()">Cancel</button>
+            <button class="btn primary" id="modal-save" onclick="submitModal()">Save</button>
+        </div>
+    </div>
+</div>
+
+<div id="voice-overlay" class="voice-overlay hidden">
+    <div class="voice-card">
+        <div class="pulse"></div>
+        <p id="voice-status">Listening... speak in Hindi or English</p>
+        <button class="btn" onclick="stopVoice()">Stop</button>
+    </div>
+</div>
+
+<div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+        <h2>🏥 J K Hospital</h2>
+        <p>Sign in with your SHIMS hospital account</p>
+        <div class="form">
+            <input id="login-username" placeholder="Username (e.g. doctor)" value="reception">
+            <input id="login-password" type="password" placeholder="Password" value="JKH2025!">
+            <button class="btn primary" onclick="doLogin()">Sign In</button>
+        </div>
+        <div id="login-error" class="login-error"></div>
+        <div class="login-hint">
+            Demo accounts: reception / doctor / nurse / lab / ot / ivf / admin<br>
+            Password: JKH2025!
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/hospital-static/js/hospital.js"></script>
+{% endblock %}

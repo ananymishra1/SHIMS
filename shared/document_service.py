@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from .config import GENERATED_DIR
+from .security import new_id
+
+
+def _safe_name(title: str, suffix: str) -> Path:
+    slug = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in title.strip())[:50] or 'document'
+    return GENERATED_DIR / f'{slug}_{new_id("doc")}.{suffix}'
+
+
+def create_markdown(title: str, body: str) -> Path:
+    path = _safe_name(title, 'md')
+    path.write_text(f'# {title}\n\nGenerated: {datetime.now().isoformat(timespec="seconds")}\n\n{body}\n', encoding='utf-8')
+    return path
+
+
+def create_docx(title: str, sections: dict[str, str]) -> Path:
+    try:
+        from docx import Document
+    except Exception:
+        body = '\n\n'.join(f'## {k}\n{v}' for k, v in sections.items())
+        return create_markdown(title, body)
+    path = _safe_name(title, 'docx')
+    doc = Document()
+    doc.add_heading(title, level=1)
+    doc.add_paragraph(f'Generated: {datetime.now().isoformat(timespec="seconds")}')
+    for heading, text in sections.items():
+        doc.add_heading(heading, level=2)
+        doc.add_paragraph(text)
+    doc.save(path)
+    return path
+
+
+def create_rich_docx(
+    title: str,
+    blocks: list[dict[str, Any]],
+    profile: str = 'corporate',
+    letterhead: bool = True,
+    subtitle: str = '',
+) -> Path:
+    """Create a richly-formatted .docx from structured content blocks.
+
+    Supports headings/sub-headings, bullet & numbered lists, indenting,
+    per-run bold/italic/underline/size/color, callout notes, quotes and tables,
+    via named style profiles (corporate / regulatory / modern / minimal).
+    Falls back to Markdown if python-docx is unavailable.
+    """
+    try:
+        from .document_engine.rich_docx import build_docx
+    except Exception:
+        md = []
+        for b in blocks:
+            t = (b.get('type') or 'paragraph').lower()
+            txt = b.get('text', '')
+            if t == 'heading':
+                md.append(f"{'#' * int(b.get('level', 1))} {txt}")
+            elif t in ('bullets', 'numbered'):
+                bullet = '-' if t == 'bullets' else '1.'
+                md += [f"{bullet} {i if isinstance(i, str) else i.get('text', '')}" for i in b.get('items', [])]
+            else:
+                md.append(str(txt))
+        return create_markdown(title, '\n\n'.join(md))
+    path = _safe_name(title, 'docx')
+    return build_docx(title, blocks, profile=profile, output_path=path,
+                      letterhead=letterhead, subtitle=subtitle)
+
+
+def create_pdf(title: str, sections: dict[str, str]) -> Path:
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import cm
+    except Exception:
+        return create_docx(title, sections)
+    path = _safe_name(title, 'pdf')
+    c = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+    y = height - 2 * cm
+    c.setFont('Helvetica-Bold', 16)
+    c.drawString(2 * cm, y, title[:90])
+    y -= 0.8 * cm
+    c.setFont('Helvetica', 9)
+    c.drawString(2 * cm, y, f'Generated: {datetime.now().isoformat(timespec="seconds")}')
+    y -= 0.8 * cm
+    for heading, text in sections.items():
+        if y < 3 * cm:
+            c.showPage(); y = height - 2 * cm
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(2 * cm, y, heading[:80])
+        y -= 0.55 * cm
+        c.setFont('Helvetica', 10)
+        words = str(text).split()
+        line = ''
+        for word in words:
+            candidate = (line + ' ' + word).strip()
+            if len(candidate) > 95:
+                c.drawString(2 * cm, y, line)
+                y -= 0.45 * cm
+                line = word
+                if y < 2 * cm:
+                    c.showPage(); y = height - 2 * cm; c.setFont('Helvetica', 10)
+            else:
+                line = candidate
+        if line:
+            c.drawString(2 * cm, y, line)
+            y -= 0.65 * cm
+    c.save()
+    return path
+
+
+def create_xlsx(title: str, rows: list[dict[str, Any]]) -> Path:
+    try:
+        from openpyxl import Workbook
+    except Exception:
+        path = _safe_name(title, 'json')
+        path.write_text(json.dumps(rows, indent=2), encoding='utf-8')
+        return path
+    path = _safe_name(title, 'xlsx')
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'SHIMS Export'
+    if rows:
+        headers = list(rows[0].keys())
+        ws.append(headers)
+        for row in rows:
+            ws.append([row.get(h, '') for h in headers])
+    else:
+        ws.append(['No data'])
+    wb.save(path)
+    return path
+
+
+def create_pptx(title: str, slides: dict[str, str]) -> Path:
+    try:
+        from pptx import Presentation
+    except Exception:
+        return create_docx(title, slides)
+    path = _safe_name(title, 'pptx')
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[0])
+    slide.shapes.title.text = title
+    slide.placeholders[1].text = 'Generated by SHIMS'
+    for heading, body in slides.items():
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = heading
+        slide.placeholders[1].text = body
+    prs.save(path)
+    return path
+
+
+def create_document(kind: str, title: str, content: Any) -> Path:
+    kind = kind.lower()
+    # Rich, block-structured docx: content is a list of blocks, or a dict
+    # carrying {'blocks': [...], 'profile': ..., 'subtitle': ...}.
+    if kind == 'docx' and isinstance(content, list):
+        return create_rich_docx(title, content)
+    if kind == 'docx' and isinstance(content, dict) and isinstance(content.get('blocks'), list):
+        return create_rich_docx(
+            title, content['blocks'],
+            profile=content.get('profile', 'corporate'),
+            letterhead=content.get('letterhead', True),
+            subtitle=content.get('subtitle', ''),
+        )
+    sections = content if isinstance(content, dict) else {'Content': str(content)}
+    if kind == 'pdf':
+        return create_pdf(title, sections)
+    if kind == 'docx':
+        return create_docx(title, sections)
+    if kind == 'pptx':
+        return create_pptx(title, sections)
+    if kind == 'xlsx':
+        rows = content if isinstance(content, list) else [{'content': json.dumps(content)}]
+        return create_xlsx(title, rows)
+    return create_markdown(title, '\n\n'.join(f'## {k}\n{v}' for k, v in sections.items()))

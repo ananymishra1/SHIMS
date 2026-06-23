@@ -1,0 +1,15 @@
+{
+  "token": "local-factory-shared-token-2026",
+  "instances": [
+    {
+      "id": "primary",
+      "url": "http://127.0.0.1:8010",
+      "description": "Main SHIMS Omni + Enterprise instance (Kimi K2.6 cloud default)"
+    },
+    {
+      "id": "local",
+      "url": "http://127.0.0.1:8030",
+      "description": "Isolated Local Factory instance (Ollama Qwen 3B/7B + ChemDFM)"
+    }
+  ]
+}

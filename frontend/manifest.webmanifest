@@ -1,0 +1,47 @@
+{
+  "id": "/",
+  "name": "Shims",
+  "short_name": "Shims",
+  "description": "A local-first autonomous AI coworker for Dr. Anany Mishra.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay", "browser"],
+  "background_color": "#0c1216",
+  "theme_color": "#0c1216",
+  "orientation": "any",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/maskable-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Chat",
+      "short_name": "Chat",
+      "url": "/",
+      "description": "Open Shims chat"
+    },
+    {
+      "name": "System",
+      "short_name": "System",
+      "url": "/#system",
+      "description": "Open Shims diagnostics"
+    }
+  ]
+}

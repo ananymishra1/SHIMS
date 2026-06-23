@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SHIMS Omni</title>
+  <link rel="stylesheet" href="/static/omni.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="orb">S</div><div><h1>SHIMS Omni</h1><p>Independent AI entity</p></div></div>
+      <div class="status"><span id="routeBadge">Local-first</span><span id="voiceBadge">Voice idle</span></div>
+
+      <section class="panel">
+        <h2>Model Control</h2>
+        <label>Provider</label>
+        <select id="provider"><option value="ollama">Ollama local</option><option value="openai">OpenAI cloud</option><option value="gemini">Gemini cloud</option></select>
+        <label>Model</label>
+        <select id="modelSelect"><option value="llama3.2:latest">llama3.2:latest</option></select>
+        <div class="row"><button id="refreshModels">Refresh Models</button><button id="warmModel">Warm</button></div>
+        <small id="modelHint">Use Refresh after running ollama pull llama3.2:latest</small>
+      </section>
+
+      <section class="panel">
+        <h2>Human Voice</h2>
+        <div class="row"><button id="voiceToggle">Voice On</button><button id="micToggle">Mic</button></div>
+        <label>Voice</label><select id="voiceSelect"></select>
+        <label>Rate <span id="rateVal">1.02</span></label><input id="rate" type="range" min="0.75" max="1.35" step="0.01" value="1.02">
+        <label>Pitch <span id="pitchVal">1.00</span></label><input id="pitch" type="range" min="0.75" max="1.25" step="0.01" value="1.00">
+        <label>Volume <span id="volumeVal">1.00</span></label><input id="volume" type="range" min="0" max="1" step="0.01" value="1">
+        <small>Browser speech is live now. Cloud neural TTS can be added later without changing chat.</small>
+      </section>
+
+      <details class="panel"><summary>Enterprise Pairing</summary>
+        <input id="enterpriseUrl" value="http://127.0.0.1:8020">
+        <input id="bridgeToken" placeholder="bridge token">
+        <div class="row"><button id="pair">Pair</button><button id="unpair">Unpair</button></div>
+        <button id="overview">Enterprise Overview</button>
+        <pre id="pairOut">{{ pairing }}</pre>
+      </details>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><h2>Conversation</h2><p>Typed chat, voice chat, model routing, tools, and safe evolution.</p></div>
+        <div class="row"><button id="stopSpeak">Stop Voice</button><button id="speakLast">Speak Last</button></div>
+      </header>
+      <section id="chat" class="chat"></section>
+      <form id="chatForm" class="composer">
+        <textarea id="message" placeholder="Talk to SHIMS Omni... press Enter to send, Shift+Enter for new line"></textarea>
+        <button id="sendBtn">Send</button>
+      </form>
+      <section class="tools">
+        <button data-tool="doc">Document</button><button data-tool="image">Image</button><button data-tool="video">Video</button><button data-tool="code">Code + Test</button><button data-tool="evolve">Self-Evolution Draft</button>
+      </section>
+      <pre id="toolOut" class="toolout"></pre>
+    </main>
+  </div>
+  <script src="/static/omni.js"></script>
+</body>
+</html>

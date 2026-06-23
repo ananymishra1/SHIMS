@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.SheenaWellness" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/sheena_primary</item>
+        <item name="colorPrimaryVariant">@color/sheena_accent</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/sheena_accent</item>
+        <item name="android:statusBarColor">@color/sheena_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/sheena_bg</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

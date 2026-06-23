@@ -1,0 +1,610 @@
+{% extends "base.html" %}
+
+{% block title %}Stanford International School{% endblock %}
+
+{% block content %}
+<!-- Login Page -->
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-circle">🎓</div>
+      <h1>Stanford International School</h1>
+      <p>Excellence in Education</p>
+    </div>
+    <div id="loginError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group">
+      <label class="form-label">Username</label>
+      <input type="text" id="loginUsername" class="form-control" placeholder="Enter username" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input type="password" id="loginPassword" class="form-control" placeholder="Enter password" />
+    </div>
+    <button class="btn btn-primary btn-lg btn-block" onclick="doLogin()">Sign In</button>
+    <div class="login-divider"></div>
+    <div class="login-hints">
+      <small>admin/admin123 · principal/principal123 · teacher/teacher123 · student/student123</small>
+    </div>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div id="appShell" class="app-shell hidden">
+  <header class="app-header">
+    <div class="logo">
+      <div class="logo-icon">🎓</div>
+      <div>
+        <div>Stanford International School</div>
+        <div class="header-subtitle">Excellence in Education</div>
+      </div>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="header-user">
+      <div class="user-avatar" id="userAvatar">U</div>
+      <div class="user-info">
+        <div class="user-name" id="userName">User</div>
+        <div class="user-role" id="userRole">role</div>
+      </div>
+      <button class="btn-logout" id="logoutBtn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <aside class="app-sidebar">
+    <nav class="sidebar-nav" id="sidebarNav">
+      <button class="nav-item active" data-tab="dashboard">
+        <span class="nav-icon">📊</span> Dashboard
+      </button>
+      <button class="nav-item" data-tab="students">
+        <span class="nav-icon">👨‍🎓</span> Students
+      </button>
+      <button class="nav-item" data-tab="staff">
+        <span class="nav-icon">👩‍🏫</span> Staff
+      </button>
+      <button class="nav-item" data-tab="classes">
+        <span class="nav-icon">🏫</span> Classes
+      </button>
+      <button class="nav-item" data-tab="attendance">
+        <span class="nav-icon">📋</span> Attendance
+      </button>
+      <button class="nav-item" data-tab="exams">
+        <span class="nav-icon">📝</span> Exams
+      </button>
+      <button class="nav-item" data-tab="results">
+        <span class="nav-icon">📈</span> Results
+      </button>
+      <button class="nav-item" data-tab="fees">
+        <span class="nav-icon">💰</span> Fees
+      </button>
+      <button class="nav-item" data-tab="reports">
+        <span class="nav-icon">📄</span> Reports
+      </button>
+    </nav>
+  </aside>
+
+  <main class="app-main">
+    <!-- Dashboard -->
+    <div id="tab-dashboard" class="tab-content active">
+      <div class="welcome-banner">
+        <h2 id="welcomeText">Welcome to Stanford International School</h2>
+        <div class="accent-stripe"></div>
+        <p>Manage students, staff, attendance, exams, results and fees in one place.</p>
+      </div>
+
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-tile">
+          <div class="stat-icon">👨‍🎓</div>
+          <div class="stat-value" id="statStudents">—</div>
+          <div class="stat-label">Students</div>
+        </div>
+        <div class="stat-tile accent">
+          <div class="stat-icon">👩‍🏫</div>
+          <div class="stat-value" id="statStaff">—</div>
+          <div class="stat-label">Staff Members</div>
+        </div>
+        <div class="stat-tile info">
+          <div class="stat-icon">🏫</div>
+          <div class="stat-value" id="statClasses">—</div>
+          <div class="stat-label">Classes</div>
+        </div>
+        <div class="stat-tile warning">
+          <div class="stat-icon">📝</div>
+          <div class="stat-value" id="statExams">—</div>
+          <div class="stat-label">Exams</div>
+        </div>
+        <div class="stat-tile success">
+          <div class="stat-icon">💰</div>
+          <div class="stat-value" id="statFees">—</div>
+          <div class="stat-label">Fee Records</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-icon">📋</div>
+          <div class="stat-value" id="statAttendance">—</div>
+          <div class="stat-label">Attendance Records</div>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <div>
+          <div class="card ai-panel">
+            <div class="card-header">
+              <div class="card-title ai-panel-title"><span>🤖</span> AI Intervention Suggestions</div>
+            </div>
+            <div class="card-body">
+              <p class="ai-panel-desc">Identify at-risk students using attendance, results and fee data.</p>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">Grade filter</label>
+                  <input type="text" id="aiContext" class="form-control" placeholder="e.g. 10" />
+                </div>
+                <div class="form-group align-end">
+                  <button class="btn btn-accent" onclick="getAiSuggestions()">Get Suggestions</button>
+                </div>
+              </div>
+              <div id="aiLoading" class="ai-loading"><div class="spinner"></div>Analyzing data…</div>
+              <div id="aiResult" class="ai-result"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><div class="card-title">Recent Students</div></div>
+            <div class="card-body" id="recentStudents"><p class="table-empty">Loading…</p></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Quick Actions</div></div>
+            <div class="card-body">
+              <button class="btn btn-primary btn-block" onclick="switchTab('students')">Admit Student</button>
+              <button class="btn btn-secondary btn-block" style="margin-top:0.5rem" onclick="switchTab('attendance')">Mark Attendance</button>
+              <button class="btn btn-secondary btn-block" style="margin-top:0.5rem" onclick="switchTab('reports')">Generate Report Card</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Students -->
+    <div id="tab-students" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Students</h2>
+          <p class="page-subtitle">Admit and manage student records.</p>
+        </div>
+        <button class="btn btn-primary" id="addStudentBtn" onclick="openModal('studentModal')">+ Admit Student</button>
+      </div>
+      <div class="toolbar">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="studentSearch" class="search-input" placeholder="Search students…" oninput="filterTable('studentsTable', this.value)" />
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="studentsTable">
+            <thead>
+              <tr><th>ID</th><th>Admission No.</th><th>Full Name</th><th>Grade</th><th>Section</th><th>Parent Phone</th></tr>
+            </thead>
+            <tbody id="studentsBody"><tr><td colspan="6" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Staff -->
+    <div id="tab-staff" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Staff</h2>
+          <p class="page-subtitle">Teachers and administrative staff.</p>
+        </div>
+        <button class="btn btn-primary" id="addStaffBtn" onclick="openModal('staffModal')">+ Add Staff</button>
+      </div>
+      <div class="toolbar">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="staffSearch" class="search-input" placeholder="Search staff…" oninput="filterTable('staffTable', this.value)" />
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="staffTable">
+            <thead>
+              <tr><th>ID</th><th>Employee ID</th><th>Full Name</th><th>Role</th><th>Subject</th></tr>
+            </thead>
+            <tbody id="staffBody"><tr><td colspan="5" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Classes -->
+    <div id="tab-classes" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Classes</h2>
+          <p class="page-subtitle">Grades, sections and class teachers.</p>
+        </div>
+        <button class="btn btn-primary" id="addClassBtn" onclick="openModal('classModal')">+ Create Class</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="classesTable">
+            <thead>
+              <tr><th>ID</th><th>Grade</th><th>Section</th><th>Class Teacher ID</th></tr>
+            </thead>
+            <tbody id="classesBody"><tr><td colspan="4" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance -->
+    <div id="tab-attendance" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Attendance</h2>
+          <p class="page-subtitle">Daily attendance records.</p>
+        </div>
+        <button class="btn btn-primary" id="addAttendanceBtn" onclick="openModal('attendanceModal')">+ Mark Attendance</button>
+      </div>
+      <div class="toolbar">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="attendanceSearch" class="search-input" placeholder="Search attendance…" oninput="filterTable('attendanceTable', this.value)" />
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="attendanceTable">
+            <thead>
+              <tr><th>ID</th><th>Student ID</th><th>Date</th><th>Status</th></tr>
+            </thead>
+            <tbody id="attendanceBody"><tr><td colspan="4" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Exams -->
+    <div id="tab-exams" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Exams</h2>
+          <p class="page-subtitle">Exam schedule and settings.</p>
+        </div>
+        <button class="btn btn-primary" id="addExamBtn" onclick="openModal('examModal')">+ Create Exam</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="examsTable">
+            <thead>
+              <tr><th>ID</th><th>Name</th><th>Subject</th><th>Grade</th><th>Max Marks</th></tr>
+            </thead>
+            <tbody id="examsBody"><tr><td colspan="5" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="tab-results" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Results</h2>
+          <p class="page-subtitle">Exam marks and performance.</p>
+        </div>
+        <button class="btn btn-primary" id="addResultBtn" onclick="openModal('resultModal')">+ Record Result</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="resultsTable">
+            <thead>
+              <tr><th>ID</th><th>Student ID</th><th>Exam ID</th><th>Marks</th></tr>
+            </thead>
+            <tbody id="resultsBody"><tr><td colspan="4" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fees -->
+    <div id="tab-fees" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Fees</h2>
+          <p class="page-subtitle">Fee records and outstanding balances.</p>
+        </div>
+        <button class="btn btn-primary" id="addFeeBtn" onclick="openModal('feeModal')">+ Add Fee Record</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table id="feesTable">
+            <thead>
+              <tr><th>ID</th><th>Student ID</th><th>Amount</th><th>Term</th><th>Paid</th><th>Balance</th></tr>
+            </thead>
+            <tbody id="feesBody"><tr><td colspan="6" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reports -->
+    <div id="tab-reports" class="tab-content">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Student Report Card</h2>
+          <p class="page-subtitle">Generate and print a consolidated student report.</p>
+        </div>
+      </div>
+      <div class="card no-print">
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Select Student</label>
+            <select id="reportStudentSelect" class="form-control"><option value="">-- choose student --</option></select>
+          </div>
+          <div class="form-group align-end">
+            <button class="btn btn-primary" onclick="generateReportCard()">Generate Report</button>
+          </div>
+        </div>
+      </div>
+      <div id="reportCardContainer" style="display:none">
+        <div class="card report-card" id="reportCard">
+          <div class="report-header">
+            <h2>🎓 Stanford International School</h2>
+            <p>Student Report Card</p>
+          </div>
+          <div id="reportStudentInfo"></div>
+          <h3>Exam Results</h3>
+          <div id="reportResults"></div>
+          <h3>Attendance Summary</h3>
+          <div id="reportAttendance"></div>
+          <h3>Fee Summary</h3>
+          <div id="reportFees"></div>
+          <div class="report-footer">
+            <p>Generated on <span id="reportDate"></span></p>
+          </div>
+        </div>
+        <div class="form-actions no-print">
+          <button class="btn btn-primary" onclick="printReportCard()">🖨️ Print Report Card</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast" style="display:none"></div>
+
+<!-- Modals -->
+<div id="studentModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Admit Student</h3>
+      <button class="modal-close" onclick="closeModal('studentModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="studentModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Admission Number <span class="required">*</span></label>
+        <input type="text" id="s_admission_number" class="form-control" placeholder="e.g. ADM2024001" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Full Name <span class="required">*</span></label>
+        <input type="text" id="s_full_name" class="form-control" placeholder="Student full name" />
+      </div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label class="form-label">Grade <span class="required">*</span></label>
+          <input type="text" id="s_grade" class="form-control" placeholder="e.g. 10" />
+        </div>
+        <div class="form-group flex-1">
+          <label class="form-label">Section <span class="required">*</span></label>
+          <input type="text" id="s_section" class="form-control" placeholder="e.g. A" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Parent Phone</label>
+        <input type="text" id="s_parent_phone" class="form-control" placeholder="e.g. +1-555-0100" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('studentModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="admitStudent()">Admit Student</button>
+    </div>
+  </div>
+</div>
+
+<div id="staffModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Add Staff Member</h3>
+      <button class="modal-close" onclick="closeModal('staffModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="staffModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Employee ID <span class="required">*</span></label>
+        <input type="text" id="st_employee_id" class="form-control" placeholder="e.g. EMP001" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Full Name <span class="required">*</span></label>
+        <input type="text" id="st_full_name" class="form-control" placeholder="Staff full name" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role <span class="required">*</span></label>
+        <input type="text" id="st_role" class="form-control" placeholder="e.g. Teacher, Principal" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Subject</label>
+        <input type="text" id="st_subject" class="form-control" placeholder="e.g. Mathematics" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('staffModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addStaff()">Add Staff</button>
+    </div>
+  </div>
+</div>
+
+<div id="classModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Create Class</h3>
+      <button class="modal-close" onclick="closeModal('classModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="classModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label class="form-label">Grade <span class="required">*</span></label>
+          <input type="text" id="c_grade" class="form-control" placeholder="e.g. 10" />
+        </div>
+        <div class="form-group flex-1">
+          <label class="form-label">Section <span class="required">*</span></label>
+          <input type="text" id="c_section" class="form-control" placeholder="e.g. A" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Class Teacher ID</label>
+        <input type="number" id="c_class_teacher_id" class="form-control" placeholder="Staff ID (optional)" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('classModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createClass()">Create Class</button>
+    </div>
+  </div>
+</div>
+
+<div id="attendanceModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Mark Attendance</h3>
+      <button class="modal-close" onclick="closeModal('attendanceModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="attendanceModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Student ID <span class="required">*</span></label>
+        <input type="number" id="a_student_id" class="form-control" placeholder="Student ID" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date <span class="required">*</span></label>
+        <input type="date" id="a_date" class="form-control" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status <span class="required">*</span></label>
+        <select id="a_status" class="form-control">
+          <option value="Present">Present</option>
+          <option value="Absent">Absent</option>
+          <option value="Late">Late</option>
+          <option value="Excused">Excused</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('attendanceModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="markAttendance()">Mark Attendance</button>
+    </div>
+  </div>
+</div>
+
+<div id="examModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Create Exam</h3>
+      <button class="modal-close" onclick="closeModal('examModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="examModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Exam Name <span class="required">*</span></label>
+        <input type="text" id="e_name" class="form-control" placeholder="e.g. Midterm 2024" />
+      </div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label class="form-label">Subject <span class="required">*</span></label>
+          <input type="text" id="e_subject" class="form-control" placeholder="e.g. Mathematics" />
+        </div>
+        <div class="form-group flex-1">
+          <label class="form-label">Grade <span class="required">*</span></label>
+          <input type="text" id="e_grade" class="form-control" placeholder="e.g. 10" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Max Marks <span class="required">*</span></label>
+        <input type="number" id="e_max_marks" class="form-control" placeholder="e.g. 100" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('examModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createExam()">Create Exam</button>
+    </div>
+  </div>
+</div>
+
+<div id="resultModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Record Result</h3>
+      <button class="modal-close" onclick="closeModal('resultModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="resultModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Student ID <span class="required">*</span></label>
+        <input type="number" id="r_student_id" class="form-control" placeholder="Student ID" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Exam ID <span class="required">*</span></label>
+        <input type="number" id="r_exam_id" class="form-control" placeholder="Exam ID" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Marks <span class="required">*</span></label>
+        <input type="number" id="r_marks" class="form-control" placeholder="Marks obtained" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('resultModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="recordResult()">Record Result</button>
+    </div>
+  </div>
+</div>
+
+<div id="feeModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Add Fee Record</h3>
+      <button class="modal-close" onclick="closeModal('feeModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="feeModalError" class="alert alert-danger" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Student ID <span class="required">*</span></label>
+        <input type="number" id="f_student_id" class="form-control" placeholder="Student ID" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount <span class="required">*</span></label>
+        <input type="number" id="f_amount" class="form-control" placeholder="Total fee amount" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Term <span class="required">*</span></label>
+        <input type="text" id="f_term" class="form-control" placeholder="e.g. Term 1 2024" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Paid</label>
+        <input type="number" id="f_paid" class="form-control" placeholder="Amount paid so far" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('feeModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addFee()">Add Fee Record</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/stanford_school-static/js/stanford_school.js"></script>
+{% endblock %}

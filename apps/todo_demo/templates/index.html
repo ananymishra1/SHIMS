@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Todo Demo{% endblock %}
+
+{% block content %}
+<div class="todo-container">
+  <header class="todo-header">
+    <h1>📝 Todo Demo</h1>
+    <p class="subtitle">Manage your tasks efficiently</p>
+  </header>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="tasks">Tasks</button>
+  </div>
+
+  <div id="tab-tasks" class="tab-content active">
+    <div class="card add-task-card">
+      <h2>Add New Task</h2>
+      <form id="add-task-form" class="task-form">
+        <div class="form-group">
+          <label for="task-title">Title <span class="required">*</span></label>
+          <input
+            type="text"
+            id="task-title"
+            name="title"
+            placeholder="Enter task title..."
+            required
+          />
+        </div>
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="task-done" name="done" />
+            <span>Mark as done</span>
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary">
+          <span class="btn-icon">+</span> Add Task
+        </button>
+      </form>
+      <div id="form-message" class="form-message hidden"></div>
+    </div>
+
+    <div class="card tasks-list-card">
+      <div class="tasks-header">
+        <h2>All Tasks</h2>
+        <button id="refresh-btn" class="btn btn-secondary btn-sm" title="Refresh">
+          ↻ Refresh
+        </button>
+      </div>
+      <div id="tasks-loading" class="loading-indicator hidden">
+        <span class="spinner"></span> Loading tasks...
+      </div>
+      <div id="tasks-error" class="error-banner hidden"></div>
+      <div id="tasks-empty" class="empty-state hidden">
+        <span class="empty-icon">📋</span>
+        <p>No tasks yet. Add your first task above!</p>
+      </div>
+      <ul id="tasks-list" class="tasks-list"></ul>
+      <div id="tasks-summary" class="tasks-summary hidden"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/todo-static/js/todo_demo.js"></script>
+{% endblock %}
