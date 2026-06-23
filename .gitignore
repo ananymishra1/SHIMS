@@ -39,6 +39,8 @@ apps/shims_enterprise/
 shared/enterprise_*.py
 scripts/start_enterprise.ps1
 docs/enterprise_reference_outputs/
+docs/ENTERPRISE_*.md
+release_checks/VALIDATION_REPORT_V*_ENTERPRISE*.txt
 tests/test_enterprise*.py
 tests/reset_enterprise_passwords.py
 tests/test_v13_enterprise_complete.py
