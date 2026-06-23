@@ -475,6 +475,17 @@ class SHIMSTrayApp:
         def open_browser(_icon, _item):
             import webbrowser; webbrowser.open(self.omni_url)
 
+        def on_restart(_icon, _item):
+            """Re-exec from source — picks up any self.patch changes to tray_app.py."""
+            import os
+            self.clip_mon.stop()
+            self.approvals.stop()
+            _icon.stop()
+            if self.chat.root:
+                self.chat.root.after(0, self.chat.root.quit)
+            # Replace this process with a fresh one running the same script
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
         def on_quit(_icon, _item):
             self.clip_mon.stop()
             self.approvals.stop()
@@ -486,6 +497,7 @@ class SHIMSTrayApp:
             pystray.MenuItem(f"Open Chat  ({self.hotkey})", open_chat, default=True),
             pystray.MenuItem("Open in Browser", open_browser),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Restart (reload source)", on_restart),
             pystray.MenuItem("Quit SHIMS", on_quit),
         )
         return pystray.Icon("SHIMS", img, "SHIMS", menu)
