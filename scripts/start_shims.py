@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """
-SHIMS clean starter — Enterprise + Omni + Desktop Bridge.
+SHIMS clean starter — Desktop Bridge + Omni.
 
 Usage:
-    scripts/start_shims.py                  # start everything
-    scripts/start_shims.py --no-bridge      # start omni + enterprise only
+    scripts/start_shims.py                  # start bridge + omni
+    scripts/start_shims.py --tray           # also launch desktop tray app
+    scripts/start_shims.py --no-bridge      # start omni only
     scripts/start_shims.py --dry-run        # print what would run
     scripts/start_shims.py --no-verify      # skip port health checks
 
 Configuration is read from the project .env file:
     SHIMS_OMNI_PORT              default 8010
-    SHIMS_ENTERPRISE_PORT        default 8020
     SHIMS_BRIDGE_PORT            default 9876
     SHIMS_BRIDGE_TOKEN           required for the desktop bridge
     SHIMS_DESKTOP_BRIDGE_URI     default ws://localhost:<bridge_port>/bridge
-    SHIMS_DESKTOP_BRIDGE_TOKEN   default <SHIMS_BRIDGE_TOKEN>
-    SHIMS_ENTERPRISE_URL         default http://127.0.0.1:<enterprise_port>
 
 Each service opens in its own terminal window on Windows; on Unix it runs
 under nohup and writes to logs/start_shims_<service>.log.
@@ -48,8 +46,7 @@ except Exception:
     pass
 
 
-DEFAULT_OMNI_PORT = 8010
-DEFAULT_ENTERPRISE_PORT = 8020
+DEFAULT_OMNI_PORT   = 8010
 DEFAULT_BRIDGE_PORT = 9876
 
 
@@ -219,7 +216,6 @@ def _start_omni(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     env = {
         "SHIMS_DESKTOP_BRIDGE_URI": cfg["bridge_uri"],
         "SHIMS_DESKTOP_BRIDGE_TOKEN": cfg["bridge_token"],
-        "SHIMS_ENTERPRISE_URL": cfg["enterprise_url"],
         "HF_HUB_ENABLE_HF_TRANSFER": "",
         "HF_XET_HIGH_PERFORMANCE": "1",
     }
@@ -241,31 +237,19 @@ def _start_omni(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     _run_service("SHIMS Omni", ROOT_DIR, cmd, env=env)
 
 
-def _start_enterprise(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
-    port = cfg["enterprise_port"]
-    print(f"[starter] starting SHIMS Enterprise on port {port}")
-    env = {
-        "SHIMS_DESKTOP_BRIDGE_URI": cfg["bridge_uri"],
-        "SHIMS_DESKTOP_BRIDGE_TOKEN": cfg["bridge_token"],
-        "HF_HUB_ENABLE_HF_TRANSFER": "",
-        "HF_XET_HIGH_PERFORMANCE": "1",
-    }
+
+def _start_tray(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
+    omni_url = f"http://127.0.0.1:{cfg['omni_port']}"
+    print(f"[starter] starting SHIMS Desktop Tray at {omni_url}")
     cmd = [
         str(_python()),
-        "-m", "uvicorn",
-        "shims_enterprise.app:app",
-        "--host", "0.0.0.0",
-        "--port", str(port),
-        "--no-access-log",
+        str(ROOT_DIR / "desktop_bridge" / "tray_app.py"),
+        "--omni-url", omni_url,
     ]
-
     if args.dry_run:
-        print("  env:", env)
         print("  ", " ".join(cmd))
         return
-
-    _free_port(port)
-    _run_service("SHIMS Enterprise", ROOT_DIR, cmd, env=env)
+    _run_service("SHIMS Tray", ROOT_DIR, cmd)
 
 
 def _run_service(
@@ -303,25 +287,18 @@ def _run_service(
 
 
 def _build_config() -> dict[str, Any]:
-    omni_port = _env_int("SHIMS_OMNI_PORT", DEFAULT_OMNI_PORT)
-    enterprise_port = _env_int("SHIMS_ENTERPRISE_PORT", DEFAULT_ENTERPRISE_PORT)
+    omni_port   = _env_int("SHIMS_OMNI_PORT", DEFAULT_OMNI_PORT)
     bridge_port = _env_int("SHIMS_BRIDGE_PORT", DEFAULT_BRIDGE_PORT)
     bridge_token = _env_str("SHIMS_BRIDGE_TOKEN", "")
-    bridge_uri = _env_str(
+    bridge_uri  = _env_str(
         "SHIMS_DESKTOP_BRIDGE_URI",
         f"ws://localhost:{bridge_port}/bridge",
     )
-    enterprise_url = _env_str(
-        "SHIMS_ENTERPRISE_URL",
-        f"http://127.0.0.1:{enterprise_port}",
-    )
     return {
-        "omni_port": omni_port,
-        "enterprise_port": enterprise_port,
-        "bridge_port": bridge_port,
+        "omni_port":    omni_port,
+        "bridge_port":  bridge_port,
         "bridge_token": bridge_token,
-        "bridge_uri": bridge_uri,
-        "enterprise_url": enterprise_url,
+        "bridge_uri":   bridge_uri,
     }
 
 
@@ -330,41 +307,21 @@ def _print_summary(cfg: dict[str, Any]) -> None:
     print("=" * 50)
     print(" SHIMS is running")
     print("=" * 50)
-    print(f"  Omni:       http://localhost:{cfg['omni_port']}")
-    print(f"  Enterprise: http://localhost:{cfg['enterprise_port']}")
-    print(f"  Bridge:     {cfg['bridge_uri']}")
+    print(f"  Omni:    http://localhost:{cfg['omni_port']}")
+    print(f"  Council: http://localhost:{cfg['omni_port']}/omni-duobot")
+    print(f"  Bridge:  {cfg['bridge_uri']}")
     print("=" * 50)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Start the SHIMS stack: Desktop Bridge, Omni, and Enterprise.",
+        description="Start the SHIMS stack: Desktop Bridge + Omni.",
     )
-    parser.add_argument(
-        "--no-bridge",
-        action="store_true",
-        help="do not start the desktop bridge",
-    )
-    parser.add_argument(
-        "--no-omni",
-        action="store_true",
-        help="do not start SHIMS Omni",
-    )
-    parser.add_argument(
-        "--no-enterprise",
-        action="store_true",
-        help="do not start SHIMS Enterprise",
-    )
-    parser.add_argument(
-        "--no-verify",
-        action="store_true",
-        help="skip port health checks after starting",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="print commands instead of running them",
-    )
+    parser.add_argument("--no-bridge", action="store_true", help="skip desktop bridge")
+    parser.add_argument("--no-omni",   action="store_true", help="skip SHIMS Omni")
+    parser.add_argument("--tray",      action="store_true", help="also launch tray coworker app")
+    parser.add_argument("--no-verify", action="store_true", help="skip port health checks")
+    parser.add_argument("--dry-run",   action="store_true", help="print commands, do not run")
     args = parser.parse_args()
 
     if not ENV_PATH.exists():
@@ -373,7 +330,7 @@ def main() -> int:
     cfg = _build_config()
 
     print("[starter] SHIMS stack launcher")
-    print(f"  root: {ROOT_DIR}")
+    print(f"  root:   {ROOT_DIR}")
     print(f"  python: {_python()}")
 
     if not args.no_bridge:
@@ -386,10 +343,10 @@ def main() -> int:
         if not args.dry_run:
             time.sleep(1)
 
-    if not args.no_enterprise:
-        _start_enterprise(args, cfg)
+    if args.tray:
         if not args.dry_run:
-            time.sleep(1)
+            time.sleep(3)   # let Omni come up first
+        _start_tray(args, cfg)
 
     if args.dry_run:
         return 0
@@ -401,8 +358,6 @@ def main() -> int:
             ok &= _wait_for_port(cfg["bridge_port"], "bridge", timeout=20)
         if not args.no_omni:
             ok &= _wait_for_port(cfg["omni_port"], "omni", timeout=60)
-        if not args.no_enterprise:
-            ok &= _wait_for_port(cfg["enterprise_port"], "enterprise", timeout=60)
         if not ok:
             print("[starter] ERROR: one or more services failed to start in time.")
             return 1

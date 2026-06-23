@@ -35,3 +35,8 @@ webrtcvad>=2.0.10
 psutil>=5.9
 # Headless browser automation for web browsing tools.
 playwright>=1.60
+# Desktop coworker tray app
+pystray>=0.19
+keyboard>=0.13
+pyperclip>=1.8
+plyer>=2.1
