@@ -242,14 +242,14 @@
       <div class="v9-row" style="flex-wrap:wrap;gap:6px">
         <a class="v9-btn" style="font-size:10px;padding:4px 8px;text-decoration:none;display:inline-flex;align-items:center" href="/hospital" target="_self">🏥 J K Hospital</a>
         <a class="v9-btn" style="font-size:10px;padding:4px 8px;text-decoration:none;display:inline-flex;align-items:center" href="/school" target="_self">🏫 Stanford School</a>
-        <a class="v9-btn" style="font-size:10px;padding:4px 8px;text-decoration:none;display:inline-flex;align-items:center" href="http://127.0.0.1:8020" target="_blank" rel="noopener">🏭 Enterprise</a>
+        <a id="link-enterprise" class="v9-btn" style="font-size:10px;padding:4px 8px;text-decoration:none;display:inline-flex;align-items:center" href="http://127.0.0.1:8020" target="_blank" rel="noopener">🏭 Enterprise</a>
         <button id="build-school-btn" class="v9-btn" style="font-size:10px;padding:4px 8px" onclick="buildStanfordSchool()">🚀 Build School App</button>
       </div>
       <div id="build-school-status" style="font-size:10px;color:var(--text-dim);margin-top:4px"></div>
     </div>
 
     <!-- Enterprise Bridge -->
-    <div class="panel-header" onclick="togglePanelSection('enterprise')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line)">
+    <div id="header-enterprise" class="panel-header" onclick="togglePanelSection('enterprise')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line)">
       <span>🏭 Enterprise Bridge</span><span class="panel-chevron" id="chevron-enterprise">▸</span>
     </div>
     <div class="panel-body hidden" id="body-enterprise" style="padding-top:8px;flex:0 0 auto;max-height:200px;overflow:auto">

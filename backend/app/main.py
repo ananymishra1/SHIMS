@@ -222,7 +222,8 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", os.getenv("OLLAMA_BASE_URL", "http://127.
 DEFAULT_OLLAMA_MODEL = os.getenv("SHIMS_OLLAMA_MODEL", os.getenv("OLLAMA_MODEL", "llama3.2:latest"))
 HUGGINGFACE_HOST = os.getenv("HUGGINGFACE_BASE_URL", settings.huggingface_base_url).rstrip("/")
 DEFAULT_HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", settings.huggingface_model)
-ENTERPRISE_URL = os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8021").rstrip("/")
+ENTERPRISE_ENABLED = settings.enterprise_pairing_enabled
+ENTERPRISE_URL = os.getenv("SHIMS_ENTERPRISE_URL", settings.enterprise_url).rstrip("/")
 OLLAMA_MODEL_ALIASES = {
     "gemma": "gemma3:1b",
     "google gemma": "gemma3:1b",
@@ -5017,10 +5018,14 @@ async def converse_ws(ws: WebSocket) -> None:
 async def enterprise_events_ws(ws: WebSocket) -> None:
     """Proxy live Enterprise WebSocket events to Omni clients."""
     await ws.accept()
+    if not ENTERPRISE_ENABLED:
+        await ws.send_text(json.dumps({"type": "error", "message": "Enterprise integration is not configured"}))
+        await ws.close(code=1001, reason="Enterprise not configured")
+        return
     import websockets
     from shared.config import settings
     import os
-    enterprise_url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "ws://127.0.0.1:8021"))
+    enterprise_url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
     ws_url = enterprise_url.replace("http://", "ws://").replace("https://", "wss://").rstrip("/") + "/ws/events"
     try:
         async with websockets.connect(ws_url) as ent_ws:
@@ -7399,17 +7404,23 @@ async def reset_local() -> dict[str, Any]:
     PROVIDER_DEFAULTS["ollama"] = model
     return {"ok": True, "provider": "ollama", "model": model}
 
+ENTERPRISE_NOT_CONFIGURED = {"ok": False, "enabled": False, "message": "Enterprise integration is not configured. Set SHIMS_ENTERPRISE_URL and SHIMS_ENTERPRISE_PAIRING_ENABLED=true to enable."}
+
 @app.get("/enterprise/status")
 async def enterprise_status() -> dict[str, Any]:
+    if not ENTERPRISE_ENABLED:
+        return ENTERPRISE_NOT_CONFIGURED
     try:
         async with httpx.AsyncClient(timeout=2.5) as client:
             r = await client.get(f"{ENTERPRISE_URL}/health")
-            return {"ok": r.status_code < 400, "enterprise": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:200], "url": ENTERPRISE_URL}
+            return {"ok": r.status_code < 400, "enabled": True, "enterprise": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:200], "url": ENTERPRISE_URL}
     except Exception as exc:
-        return {"ok": False, "url": ENTERPRISE_URL, "detail": str(exc)[:220]}
+        return {"ok": False, "enabled": True, "url": ENTERPRISE_URL, "detail": str(exc)[:220]}
 
 @app.post("/enterprise/task")
 async def enterprise_task(request: Request) -> dict[str, Any]:
+    if not ENTERPRISE_ENABLED:
+        return ENTERPRISE_NOT_CONFIGURED
     payload = await request.json()
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -7422,6 +7433,8 @@ async def enterprise_task(request: Request) -> dict[str, Any]:
 @app.get("/enterprise/commands")
 async def enterprise_commands() -> dict[str, Any]:
     """List all bridge commands Enterprise supports."""
+    if not ENTERPRISE_ENABLED:
+        return ENTERPRISE_NOT_CONFIGURED
     return {
         "ok": True,
         "commands": [
@@ -7443,6 +7456,8 @@ async def enterprise_commands() -> dict[str, Any]:
 @app.post("/enterprise/command")
 async def enterprise_command_proxy(request: Request) -> dict[str, Any]:
     """Proxy any command to Enterprise /api/bridge/command."""
+    if not ENTERPRISE_ENABLED:
+        return ENTERPRISE_NOT_CONFIGURED
     payload = await request.json()
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -7456,6 +7471,8 @@ async def enterprise_command_proxy(request: Request) -> dict[str, Any]:
 @app.get("/enterprise/dashboard")
 async def enterprise_dashboard() -> dict[str, Any]:
     """Fetch Enterprise dashboard summary."""
+    if not ENTERPRISE_ENABLED:
+        return ENTERPRISE_NOT_CONFIGURED
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             headers = {"X-Bridge-Token": settings.bridge_token or ""}

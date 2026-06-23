@@ -13,8 +13,8 @@ try:
     env_file = Path(os.getenv('SHIMS_ENV_FILE', ROOT_DIR / '.env')).expanduser().resolve()
     if not env_file.exists():
         env_file = ROOT_DIR / '.env'
-    # Make the selected env file the source of truth even when the parent shell has stale env vars.
-    load_dotenv(env_file, override=True)
+    # Load defaults from the env file, but do NOT override env vars already set by a launcher.
+    load_dotenv(env_file, override=False)
 except Exception:
     pass
 

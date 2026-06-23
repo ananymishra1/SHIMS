@@ -689,10 +689,21 @@ def _run_mailbox_organize(args: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Enterprise bridge tools
 # --------------------------------------------------------------------------- #
+
+def _enterprise_disabled() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "enabled": False,
+        "error": "Enterprise integration is not configured. Set SHIMS_ENTERPRISE_URL and SHIMS_ENTERPRISE_PAIRING_ENABLED=true to enable.",
+    }
+
+
 def _run_enterprise_command(args: dict[str, Any]) -> dict[str, Any]:
     """Send a command to the paired SHIMS Enterprise instance."""
-    import httpx
     from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
+    import httpx
     cmd = str(args.get("command") or "").strip()
     payload = args.get("payload") or {}
     if not cmd:
@@ -2802,6 +2813,9 @@ def _run_mail_organize(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_status(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     import httpx, os
     from .config import settings
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -2814,6 +2828,9 @@ def _run_enterprise_status(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_command(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     import httpx, os
     from .config import settings
     cmd = str(args.get("command") or "").strip()
@@ -2835,10 +2852,16 @@ def _run_enterprise_command(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_dashboard(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     return _run_enterprise_command({"command": "summary", "payload": {}})
 
 
 def _run_enterprise_list_commands(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     return {"ok": True, "commands": [
         {"cmd": "summary", "desc": "Factory-wide harmonized summary"},
         {"cmd": "list_dashboard", "desc": "Department dashboard data"},
@@ -2856,6 +2879,9 @@ def _run_enterprise_list_commands(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_lims(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -2885,6 +2911,9 @@ def _run_enterprise_lims(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_equipment(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -2914,6 +2943,9 @@ def _run_enterprise_equipment(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_mes(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -2957,6 +2989,9 @@ def _run_enterprise_mes(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_training(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -2986,6 +3021,9 @@ def _run_enterprise_training(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_supplier(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -3019,6 +3057,9 @@ def _run_enterprise_supplier(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_analytics(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -3040,6 +3081,9 @@ def _run_enterprise_analytics(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_notifications(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -3065,6 +3109,9 @@ def _run_enterprise_notifications(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_dms(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -3092,6 +3139,9 @@ def _run_enterprise_dms(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_ehs(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -3117,6 +3167,9 @@ def _run_enterprise_ehs(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_enterprise_rim(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     payload = args.get("payload") or {}
     url = getattr(settings, "enterprise_url", os.getenv("SHIMS_ENTERPRISE_URL", "http://127.0.0.1:8020"))
@@ -3281,6 +3334,9 @@ def _gate_summary(name: str, args: dict[str, Any]) -> str:
 
 
 def _run_enterprise_export(args: dict[str, Any]) -> dict[str, Any]:
+    from .config import settings
+    if not getattr(settings, "enterprise_pairing_enabled", False):
+        return _enterprise_disabled()
     action = str(args.get("action") or "").strip()
     module = str(args.get("module") or "").strip()
     payload = args.get("payload") or {}

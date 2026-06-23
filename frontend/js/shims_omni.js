@@ -1246,6 +1246,7 @@ async function handleSlashCommand(text){
       return;
     }
     if(cmd==='/enterprise'){
+      if(state.enterpriseEnabled === false){ pushBubble('assistant','Enterprise integration is not configured.'); return; }
       if(!arg){ pushBubble('assistant','Usage: `/enterprise summary` or `/enterprise list_dashboard rd` or `/enterprise create_experiment {"title":"..."}`'); return; }
       const b=toolBubble('Enterprise Bridge');
       const {data}=await postJSON('/enterprise/command',{command:arg, payload:{}});
@@ -2315,6 +2316,15 @@ async function loadEnterpriseStatus(){
   const el=$('#enterprise-status'); if(!el) return;
   try{
     const d=await (await fetch('/enterprise/status')).json();
+    state.enterpriseEnabled = d.enabled !== false;
+    if(d.enabled===false){
+      // Enterprise integration is not configured; hide the bridge UI entirely.
+      const hdr=$('#header-enterprise'); if(hdr) hdr.style.display='none';
+      const body=$('#body-enterprise'); if(body) body.style.display='none';
+      const link=$('#link-enterprise'); if(link) link.style.display='none';
+      const strip=$('#enterprise-status'); if(strip) strip.style.display='none';
+      return;
+    }
     if(d.ok){
       el.innerHTML='<span style="color:#74ffb9">●</span> Enterprise connected · '+escapeHtml(d.url||'');
       connectEnterpriseEvents();
