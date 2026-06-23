@@ -920,7 +920,7 @@ async function handleSlashCommand(text){
     if(cmd==='/self-check'){
       const scope=(arg||'tests').split(' ')[0].toLowerCase();
       const b=toolBubble('Self-Check');
-      const body:any={scope};
+      const body={scope};
       if(scope==='file'){
         const parts=(arg||'').split(' ').slice(1);
         body.relative_path=parts[0]||'';
