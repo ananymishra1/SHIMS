@@ -2,7 +2,7 @@
 """
 SHIMS Desktop Tray App
 ======================
-Always-on desktop coworker: system tray icon, global hotkey (Ctrl+Space),
+Always-on desktop coworker: system tray icon, global hotkey (Ctrl+Shift+S),
 floating chat window, clipboard monitor, and OS toast notifications.
 
 Requirements (install once):
@@ -67,7 +67,7 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_OMNI_URL = "http://127.0.0.1:8010"
-DEFAULT_HOTKEY   = "ctrl+space"
+DEFAULT_HOTKEY   = "ctrl+shift+s"
 ICON_SIZE        = 64
 WINDOW_W, WINDOW_H = 440, 520
 CLIP_MIN_LEN     = 80    # chars before clipboard offer fires
