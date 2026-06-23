@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import httpx
+import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "storage" / "process_manager"
@@ -32,6 +33,24 @@ OLLAMA_EXE = Path(os.getenv("OLLAMA_EXE", "C:/Users/alapm/AppData/Local/Programs
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1:11435")
 OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "E:/ollama/models")
 PEER_TOKEN = os.getenv("INTER_INSTANCE_TOKEN", "local-factory-shared-token-2026")
+
+
+def _port_from_url(url: str) -> int | None:
+    try:
+        return int(url.split(":")[-1].split("/")[0])
+    except Exception:
+        return None
+
+
+def _find_listening_pid(port: int) -> int | None:
+    """Find the process currently listening on the given TCP port."""
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:
+                return conn.pid
+    except Exception:
+        pass
+    return None
 
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 
@@ -124,19 +143,36 @@ def _service_env(name: str) -> dict[str, str]:
     return env
 
 
+# Keep file handles and Popen objects alive so the child stdout/stderr pipes stay open.
+_proc_handles: dict[str, tuple[subprocess.Popen, object, object]] = {}
+
+
 def _start_service(name: str) -> int | None:
     cfg = SERVICES[name]
     log_out = ROOT / "logs" / f"pm_{name}.out.log"
     log_err = ROOT / "logs" / f"pm_{name}.err.log"
+    port = _port_from_url(cfg["health"])
     try:
+        out_fp = open(log_out, "a", encoding="utf-8")
+        err_fp = open(log_err, "a", encoding="utf-8")
         proc = subprocess.Popen(
             cfg["cmd"],
             cwd=str(ROOT),
             env=_service_env(name),
-            stdout=open(log_out, "a", encoding="utf-8"),
-            stderr=open(log_err, "a", encoding="utf-8"),
+            stdout=out_fp,
+            stderr=err_fp,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
+        # Wait up to 30s for the service to bind its port, then store the listening PID.
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            pid = _find_listening_pid(port) if port else None
+            if pid:
+                _proc_handles[name] = (proc, out_fp, err_fp)
+                return pid
+            time.sleep(0.5)
+        _proc_handles[name] = (proc, out_fp, err_fp)
+        print(f"{name}: did not bind port {port} in time", file=sys.stderr)
         return proc.pid
     except Exception as exc:
         print(f"Failed to start {name}: {exc}", file=sys.stderr)
@@ -147,7 +183,20 @@ def _stop_service(pid: int | None) -> bool:
     if pid is None or not _is_alive(pid):
         return True
     try:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], check=False, timeout=10)
+        proc = psutil.Process(pid)
+        children = proc.children(recursive=True)
+        for child in children:
+            try:
+                child.terminate()
+            except Exception:
+                pass
+        proc.terminate()
+        gone, alive = psutil.wait_procs(children + [proc], timeout=5)
+        for p in alive:
+            try:
+                p.kill()
+            except Exception:
+                pass
         return not _is_alive(pid)
     except Exception as exc:
         print(f"Failed to kill {pid}: {exc}", file=sys.stderr)
