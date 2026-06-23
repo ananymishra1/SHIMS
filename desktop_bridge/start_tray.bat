@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  SHIMS Desktop Tray — always-on coworker
-REM  Press Ctrl+Space anywhere to open the floating chat window.
+REM  Press Ctrl+Shift+S anywhere to open the floating chat window.
 REM  Right-click the system tray icon for options.
 REM ============================================================
 cd /d "%~dp0.."
@@ -13,7 +13,7 @@ if not exist .venv\Scripts\python.exe (
 )
 
 echo [SHIMS Tray] Starting desktop coworker...
-echo [SHIMS Tray] Press Ctrl+Space anywhere to open chat.
+echo [SHIMS Tray] Press Ctrl+Shift+S anywhere to open chat.
 echo [SHIMS Tray] Look for the SHIMS icon in your system tray.
 echo.
 
