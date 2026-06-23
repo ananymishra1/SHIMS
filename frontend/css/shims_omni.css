@@ -944,7 +944,7 @@ a.nav-row{text-decoration:none;color:inherit}
   cursor:pointer;background:rgba(124,240,255,.04);transition:all .25s;
   opacity:0;pointer-events:none;
 }
-#boot .boot-enter.ready{opacity:1;pointer-events:auto;animation:bootPulse 2s ease-in-out infinite}
+#boot.ready .boot-enter{opacity:1;pointer-events:auto;animation:bootPulse 2s ease-in-out infinite}
 #boot .boot-enter:hover{background:rgba(124,240,255,.15);box-shadow:0 0 22px rgba(124,240,255,.4)}
 @keyframes bootPulse{0%,100%{box-shadow:0 0 0 rgba(124,240,255,.4)}50%{box-shadow:0 0 26px rgba(124,240,255,.6)}}
 

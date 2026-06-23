@@ -12,6 +12,7 @@
   <script>(function(){try{var t=localStorage.getItem('shims_theme')||'aurora';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','aurora');}})();</script>
   <link rel="stylesheet" href="/static/css/shims_omni.css?v=20260613-aurora">
   <link rel="stylesheet" href="/static/css/shims_agent.css?v=20260613-aurora">
+  <noscript><style>#boot{display:none!important}</style></noscript>
 </head>
 <body>
 <!-- ═══════════════════════════════════════════════════════════════════════
@@ -727,8 +728,28 @@
   }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="/static/js/shims_omni.js?v=20260609p2" defer></script>
-  <script src="/static/js/shims_agent.js?v=20260609p2" defer></script>
+  <script>
+    (function(){
+      function showBootButton(){
+        var boot=document.getElementById('boot');
+        if(boot) boot.classList.add('ready');
+      }
+      function removeBoot(){
+        var boot=document.getElementById('boot');
+        if(boot && boot.parentNode) boot.parentNode.removeChild(boot);
+      }
+      document.addEventListener('DOMContentLoaded', function(){
+        setTimeout(showBootButton, 400);
+        setTimeout(removeBoot, 3500);
+      });
+      window.addEventListener('error', function(e){
+        var log=document.getElementById('boot-log');
+        if(log) log.textContent='JS error: '+(e.message||'unknown');
+      });
+    })();
+  </script>
+  <script src="/static/js/shims_omni.js?v=20260619-aurora" defer></script>
+  <script src="/static/js/shims_agent.js?v=20260619-aurora" defer></script>
 <div class="nav-row" onclick="window.open('/school','_blank')" style="cursor:pointer"><span>🏢</span>Stanford International School</div>
 </body>
 </html>
