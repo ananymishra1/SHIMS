@@ -4542,8 +4542,23 @@ async def coder_v2_page() -> HTMLResponse:
 
 @app.get("/", include_in_schema=False)
 async def index() -> HTMLResponse:
+    # Public, sellable front door. Falls back to the app if the landing page
+    # is ever missing so the product is never unreachable.
+    landing = FRONTEND_DIR / "landing.html"
+    if landing.is_file():
+        return HTMLResponse(landing.read_text(encoding="utf-8"), headers=_NO_CACHE)
     path = FRONTEND_DIR / "shims_omni.html"
     return HTMLResponse(path.read_text(encoding="utf-8"), headers=_NO_CACHE)
+
+
+@app.get("/welcome", include_in_schema=False)
+@app.get("/landing", include_in_schema=False)
+async def landing_page() -> HTMLResponse:
+    landing = FRONTEND_DIR / "landing.html"
+    if not landing.is_file():
+        path = FRONTEND_DIR / "shims_omni.html"
+        return HTMLResponse(path.read_text(encoding="utf-8"), headers=_NO_CACHE)
+    return HTMLResponse(landing.read_text(encoding="utf-8"), headers=_NO_CACHE)
 
 
 @app.get("/omni-duobot", include_in_schema=False)

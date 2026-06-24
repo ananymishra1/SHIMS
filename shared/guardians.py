@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import functools
 import hmac
+import logging
 import os
+import re
 import secrets
+import time
 import warnings
 from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger("shims.guardians")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
@@ -161,6 +166,98 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         return await self.app(scope, receive, wrapped_send)
+
+
+# --------------------------------------------------------------------------- #
+# Input sanitization
+# --------------------------------------------------------------------------- #
+
+def sanitize_filename(name: str, max_length: int = 200) -> str:
+    """Sanitize an arbitrary string for safe use as a filename.
+
+    Strips path separators, control characters and reserved symbols, trims
+    leading/trailing dots and spaces, and bounds the length. Never returns
+    an empty string.
+    """
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(name))
+    safe = safe.strip(". ")
+    if len(safe) > max_length:
+        safe = safe[:max_length]
+    return safe or "unnamed"
+
+
+def sanitize_shell_arg(arg: str) -> str:
+    """Strip null bytes and control characters from a shell argument.
+
+    Prefer ``shlex.quote`` for actual shell interpolation; this is a defensive
+    pre-filter for logging and display.
+    """
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(arg))
+
+
+# Backwards/forwards-compatible alias used by newer call sites.
+def validate_all_secrets() -> dict[str, str]:
+    """Alias of :func:`ensure_env_secrets_strong` for newer call sites."""
+    return ensure_env_secrets_strong()
+
+
+# --------------------------------------------------------------------------- #
+# Rate limiting
+# --------------------------------------------------------------------------- #
+
+class RateLimiter:
+    """Simple in-memory sliding-window rate limiter.
+
+    Suitable for single-process deployments; back with Redis for multi-worker
+    setups. Keyed by an arbitrary string (e.g. client IP or session id).
+    """
+
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._requests: dict[str, list[float]] = {}
+
+    def _prune(self, key: str, now: float) -> list[float]:
+        cutoff = now - self.window_seconds
+        kept = [t for t in self._requests.get(key, []) if t > cutoff]
+        self._requests[key] = kept
+        return kept
+
+    def is_allowed(self, key: str) -> bool:
+        """Record an attempt and return whether it is within the limit."""
+        now = time.time()
+        kept = self._prune(key, now)
+        if len(kept) >= self.max_requests:
+            return False
+        kept.append(now)
+        return True
+
+    def remaining(self, key: str) -> int:
+        """Requests still allowed in the current window for ``key``."""
+        now = time.time()
+        kept = self._prune(key, now)
+        return max(0, self.max_requests - len(kept))
+
+    def reset(self, key: str) -> None:
+        """Clear all recorded attempts for ``key``."""
+        self._requests.pop(key, None)
+
+
+# --------------------------------------------------------------------------- #
+# Audit logging
+# --------------------------------------------------------------------------- #
+
+def audit_log(event: str, details: dict[str, Any] | None = None, level: str = "info") -> None:
+    """Emit a structured, security-relevant audit event to the logger."""
+    msg = f"SECURITY_AUDIT: {event}"
+    if details:
+        msg += f" | {details}"
+    if level == "warning":
+        logger.warning(msg)
+    elif level == "error":
+        logger.error(msg)
+    else:
+        logger.info(msg)
 
 
 def require_strong_secrets(func: Callable[..., Any]) -> Callable[..., Any]:
