@@ -239,6 +239,15 @@ OLLAMA_MODEL_ALIASES = {
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
+# Growth & product API (behavior learning, licensing, skill marketplace, cortex).
+# Guarded so a problem here can never block app boot.
+try:
+    from backend.app.routes_growth import router as _growth_router
+    app.include_router(_growth_router)
+except Exception as _growth_exc:  # pragma: no cover - defensive
+    import logging as _logging
+    _logging.getLogger(__name__).warning("growth router not loaded: %s", _growth_exc)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=restricted_cors_origins(),

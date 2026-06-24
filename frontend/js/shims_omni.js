@@ -1959,9 +1959,40 @@ function openPane(name){
 function closePane(){ $$('.pane-overlay').forEach(p=>p.classList.remove('open')); }
 window.openPane=openPane; window.closePane=closePane;
 async function loadMemoryPane(){ const box=$('#memory-body'); if(!box)return; try{ const d=await (await fetch('/memory')).json(); box.innerHTML=(d.memories||[]).map(m=>`<div class="v9-chip"><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.content)}</small></div>`).join('')||'<div class="empty-pane">No memories.</div>'; }catch(e){box.textContent=e.message;} }
-async function loadSkillsPane(){ const box=$('#skills-body'); if(!box)return; try{ const d=await (await fetch('/skills')).json(); const learned=(d.learned||[]); const builtin=(d.builtin||d.skills||[]); box.innerHTML='<div class="v9-setting-card"><h3>Learned skills & preferences</h3>'+(learned.length?learned.map(s=>`<div class="v9-chip"><b>${s.pinned?'📌 ':''}${escapeHtml(s.name)}</b><small>${escapeHtml(s.description||'')}</small> <button class="secondary" style="font-size:11px" onclick="forgetSkill('${s.id}')">forget</button></div>`).join(''):'<small>None yet — SHIMS learns these from your chats. Try saying "I always want…".</small>')+'</div>'+'<div class="v9-setting-card"><h3>Built-in capabilities</h3>'+builtin.map(s=>`<div class="v9-chip"><b>${escapeHtml(s.name)}</b><small>${escapeHtml(s.description||'')}</small></div>`).join('')+'</div>'; }catch(e){box.textContent=e.message;} }
+async function loadSkillsPane(){ const box=$('#skills-body'); if(!box)return; try{ const d=await (await fetch('/skills')).json(); const learned=(d.learned||[]); const builtin=(d.builtin||d.skills||[]);
+  box.innerHTML=
+    skillEditorCardHtml()
+    +'<div class="v9-setting-card"><h3>🛒 Skill Marketplace</h3><div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Install ready-made skills. They behave like ones SHIMS learns on its own.</div><div id="marketplace-body"><small>Loading…</small></div></div>'
+    +'<div class="v9-setting-card"><h3>Learned skills & preferences</h3>'+(learned.length?learned.map(s=>`<div class="v9-chip"><b>${s.pinned?'📌 ':''}${escapeHtml(s.name)}</b><small>${escapeHtml(s.description||'')}</small> <button class="secondary" style="font-size:11px" onclick='editSkill(${JSON.stringify(JSON.stringify(s))})'>edit</button> <button class="secondary" style="font-size:11px" onclick="forgetSkill('${s.id}')">forget</button></div>`).join(''):'<small>None yet — SHIMS learns these from your chats, or create one above.</small>')+'</div>'
+    +'<div class="v9-setting-card"><h3>Built-in capabilities</h3>'+builtin.map(s=>`<div class="v9-chip"><b>${escapeHtml(s.name)}</b><small>${escapeHtml(s.description||'')}</small></div>`).join('')+'</div>';
+  loadMarketplace();
+ }catch(e){box.textContent=e.message;} }
+
+function skillEditorCardHtml(){
+  return '<div class="v9-setting-card"><h3 id="skill-editor-title">✎ Create a skill</h3>'
+    +'<input type="hidden" id="skill-edit-id">'
+    +'<div class="setting-row"><label>Name</label><input id="skill-name" placeholder="e.g. Always cite sources"></div>'
+    +'<div class="setting-row"><label>Summary</label><input id="skill-summary" placeholder="One line describing when to use it"></div>'
+    +'<div class="setting-row" style="align-items:flex-start"><label>Instruction</label><textarea id="skill-body" rows="3" style="width:100%;resize:vertical" placeholder="What SHIMS should do…"></textarea></div>'
+    +'<div class="setting-row"><label>Tags</label><input id="skill-tags" placeholder="comma,separated"></div>'
+    +'<div class="v9-row" style="margin-top:6px"><button class="v9-btn" onclick="saveSkill()">Save skill</button><button class="secondary" onclick="resetSkillEditor()">Clear</button></div></div>';
+}
+function resetSkillEditor(){ ['skill-edit-id','skill-name','skill-summary','skill-body','skill-tags'].forEach(id=>{const el=$('#'+id); if(el) el.value='';}); const t=$('#skill-editor-title'); if(t)t.textContent='✎ Create a skill'; }
+function editSkill(json){ try{ const s=JSON.parse(json); $('#skill-edit-id').value=s.id||''; $('#skill-name').value=s.name||''; $('#skill-summary').value=s.description||s.summary||''; $('#skill-body').value=s.body||''; $('#skill-tags').value=(s.tags||[]).join(', '); const t=$('#skill-editor-title'); if(t)t.textContent='✎ Edit skill'; $('#skill-name').scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){ toast('Could not load skill','err'); } }
+async function saveSkill(){
+  const name=($('#skill-name').value||'').trim(); if(!name){ toast('Name is required','warn'); return; }
+  const payload={ name, summary:($('#skill-summary').value||'').trim(), body:($('#skill-body').value||'').trim(),
+    tags:($('#skill-tags').value||'').split(',').map(t=>t.trim()).filter(Boolean), skill_id:($('#skill-edit-id').value||null) };
+  try{ const r=await fetch('/skills/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const d=await r.json();
+    if(d.ok){ toast('Skill saved'); resetSkillEditor(); loadSkillsPane(); } else { toast('Save failed','err'); } }
+  catch(e){ toast('Save failed: '+e.message,'err'); }
+}
+async function loadMarketplace(){ const box=$('#marketplace-body'); if(!box)return; try{ const d=await (await fetch('/marketplace/skills')).json(); const items=d.skills||[];
+  box.innerHTML = items.length? items.map(c=>`<div class="v9-chip"><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.summary||'')}</small> ${c.installed?'<span style="font-size:10px;color:var(--green)">installed</span>':`<button class="v9-btn" style="font-size:11px;padding:3px 8px" onclick="installSkill('${c.slug}')">install</button>`}</div>`).join('') : '<small>Marketplace unavailable.</small>';
+ }catch(e){ box.innerHTML='<small>Marketplace unavailable.</small>'; } }
+async function installSkill(slug){ try{ const r=await fetch('/marketplace/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}); const d=await r.json(); if(d.ok){ toast('Skill installed'); loadSkillsPane(); } else { toast('Install failed','err'); } }catch(e){ toast('Install failed: '+e.message,'err'); } }
 async function forgetSkill(id){ try{ await fetch('/skills/'+id,{method:'DELETE'}); loadSkillsPane(); toast('Skill forgotten'); }catch(e){ toast('Failed: '+e.message,'err'); } }
-window.forgetSkill=forgetSkill;
+window.forgetSkill=forgetSkill; window.saveSkill=saveSkill; window.editSkill=editSkill; window.resetSkillEditor=resetSkillEditor; window.installSkill=installSkill;
 async function loadFilesPane(){
   const box=$('#files-body'); if(!box)return;
   let ws='';
@@ -2694,14 +2725,121 @@ async function loadAgents(){
 }
 window.loadAgents=loadAgents;
 
+// ───────── Onboarding / first-run experience ─────────
+const ONBOARD_STEPS = [
+  { icon:'✦', title:'Welcome to SHIMS',
+    body:'Your private, local-first AI operating shell. It can read and write files, run code and shell commands, search the web, and remember how you work — on your machine.' },
+  { icon:'🌊', title:'It does the work',
+    body:'Switch on <b>Agent mode</b> and SHIMS plans a wave of tools, runs them in parallel, and reports back. Anything risky pauses for your one-tap approval.' },
+  { icon:'🧠', title:'It learns your way',
+    body:'Give answers a 👍 or 👎 and SHIMS distills them into reusable skills and preferences. Teach it once; it remembers.' },
+  { icon:'🔒', title:'Private by default',
+    body:'Runs on local models out of the box. Nothing leaves your machine unless you pick a cloud provider. You stay in control.' },
+];
+const ONBOARD_SAMPLES = [
+  'Summarise the files in this folder and suggest a cleanup.',
+  'Search the web for the latest on a topic and brief me.',
+  'Write a Python script to rename these files by date.',
+];
+
+function buildOnboarding(){
+  if (document.getElementById('onboard-overlay')) return;
+  const style = document.createElement('style');
+  style.textContent = `
+  #onboard-overlay{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;
+    background:rgba(2,6,22,.72);backdrop-filter:blur(10px);animation:obfade .3s ease}
+  @keyframes obfade{from{opacity:0}to{opacity:1}}
+  #onboard-card{width:min(560px,92vw);border:1px solid rgba(120,160,255,.22);border-radius:20px;
+    background:linear-gradient(180deg,rgba(12,22,52,.96),rgba(6,12,32,.96));box-shadow:0 30px 90px rgba(0,0,0,.6);
+    padding:34px 32px 26px;color:#dce6ff;font-family:inherit;position:relative;overflow:hidden}
+  #onboard-card .ob-orb{width:62px;height:62px;border-radius:50%;margin:0 auto 16px;
+    background:radial-gradient(circle at 35% 30%,#9fe9ff,#5563ff 45%,#1a1740 100%);
+    box-shadow:0 0 44px rgba(89,140,255,.6);display:grid;place-items:center;font-size:26px}
+  #onboard-card h2{margin:0 0 8px;text-align:center;font-size:23px;font-weight:800}
+  #onboard-card p.ob-body{margin:0 auto 20px;text-align:center;color:#9fb3df;max-width:42ch;line-height:1.55;font-size:15px}
+  #onboard-card .ob-samples{display:grid;gap:8px;margin:0 0 18px}
+  #onboard-card .ob-sample{text-align:left;border:1px solid rgba(120,160,255,.18);background:rgba(10,20,46,.5);
+    border-radius:11px;padding:11px 14px;cursor:pointer;color:#cfe;font-size:13.5px;transition:border-color .15s,transform .15s}
+  #onboard-card .ob-sample:hover{border-color:rgba(120,160,255,.5);transform:translateY(-1px)}
+  #onboard-card .ob-dots{display:flex;gap:7px;justify-content:center;margin:4px 0 18px}
+  #onboard-card .ob-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,160,255,.25);transition:.2s}
+  #onboard-card .ob-dot.on{background:linear-gradient(120deg,#43e7ff,#8b7bff);width:22px;border-radius:5px}
+  #onboard-card .ob-row{display:flex;gap:10px;justify-content:space-between;align-items:center}
+  #onboard-card button.ob-btn{font:inherit;font-weight:650;font-size:14px;border-radius:11px;padding:11px 20px;cursor:pointer;border:1px solid transparent}
+  #onboard-card .ob-next{background:linear-gradient(120deg,#43e7ff,#8b7bff);color:#05101f;box-shadow:0 8px 24px rgba(89,140,255,.34)}
+  #onboard-card .ob-next:hover{transform:translateY(-1px)}
+  #onboard-card .ob-skip{background:transparent;color:#8aa0d6;border-color:rgba(120,160,255,.2)}
+  `;
+  document.head.appendChild(style);
+
+  const ov = document.createElement('div');
+  ov.id = 'onboard-overlay';
+  ov.innerHTML = `<div id="onboard-card" role="dialog" aria-modal="true" aria-label="Welcome to SHIMS">
+    <div class="ob-orb" id="ob-icon">✦</div>
+    <h2 id="ob-title"></h2>
+    <p class="ob-body" id="ob-body"></p>
+    <div class="ob-samples" id="ob-samples" style="display:none"></div>
+    <div class="ob-dots" id="ob-dots"></div>
+    <div class="ob-row">
+      <button class="ob-btn ob-skip" id="ob-skip">Skip</button>
+      <button class="ob-btn ob-next" id="ob-next">Next →</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+
+  let step = 0;
+  const render = () => {
+    const s = ONBOARD_STEPS[step];
+    const last = step === ONBOARD_STEPS.length - 1;
+    document.getElementById('ob-icon').textContent = s.icon;
+    document.getElementById('ob-title').textContent = s.title;
+    document.getElementById('ob-body').innerHTML = s.body;
+    document.getElementById('ob-dots').innerHTML =
+      ONBOARD_STEPS.map((_, i) => `<span class="ob-dot ${i===step?'on':''}"></span>`).join('');
+    document.getElementById('ob-next').textContent = last ? 'Start using SHIMS →' : 'Next →';
+    const samplesBox = document.getElementById('ob-samples');
+    if (last) {
+      samplesBox.style.display = 'grid';
+      samplesBox.innerHTML = '<div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#5f74a8;text-align:center;margin-bottom:2px">Try one to get started</div>' +
+        ONBOARD_SAMPLES.map((t,i)=>`<div class="ob-sample" data-s="${i}">${t}</div>`).join('');
+      samplesBox.querySelectorAll('.ob-sample').forEach(el=>{
+        el.onclick = () => { prefillCommand(ONBOARD_SAMPLES[+el.dataset.s]); finishOnboarding(); };
+      });
+    } else {
+      samplesBox.style.display = 'none';
+    }
+  };
+  document.getElementById('ob-next').onclick = () => {
+    if (step < ONBOARD_STEPS.length - 1) { step++; render(); }
+    else finishOnboarding();
+  };
+  document.getElementById('ob-skip').onclick = () => finishOnboarding();
+  ov.addEventListener('keydown', e => { if (e.key === 'Escape') finishOnboarding(); });
+  render();
+}
+
+function prefillCommand(text){
+  const input = document.getElementById('input');
+  if (input) { input.value = text; input.focus(); }
+}
+
+function finishOnboarding(){
+  localStorage.shimsOnboardingDone = 'true';
+  const ov = document.getElementById('onboard-overlay');
+  if (ov) { ov.style.animation = 'obfade .25s ease reverse'; setTimeout(()=>ov.remove(), 230); }
+  try { toast('Welcome aboard — type a command or press TAB for voice.'); } catch(e){}
+}
+
 // ───────── Launch gate ─────────
 function checkOnboarding(){
-  localStorage.shimsOnboardingDone='true';
+  if (localStorage.shimsOnboardingDone === 'true') return;
+  // Defer slightly so the boot overlay clears first.
+  setTimeout(() => { try { buildOnboarding(); } catch(e){ localStorage.shimsOnboardingDone='true'; } }, 600);
 }
-function dismissOnboarding(){
-  localStorage.shimsOnboardingDone='true';
-}
+function dismissOnboarding(){ finishOnboarding(); }
+function startOnboarding(){ localStorage.removeItem('shimsOnboardingDone'); buildOnboarding(); }
 window.dismissOnboarding=dismissOnboarding;
+window.startOnboarding=startOnboarding;
 
 // ───────── Settings ─────────
 async function loadSettings(){

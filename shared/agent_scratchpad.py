@@ -49,6 +49,7 @@ class AgentScratchpad:
     def __init__(self, session_id: str | None):
         self.session_id = session_id or "default"
         self.path = _SCRATCHPAD_DIR / f"{self.session_id}.md"
+        self.json_path = _SCRATCHPAD_DIR / f"{self.session_id}.json"
         self.plan_steps: list[PlanStep] = []
         self.observations: list[Observation] = []
         self.notes: list[str] = []
@@ -150,20 +151,76 @@ class AgentScratchpad:
     # Persistence
     # ------------------------------------------------------------------ #
     def save(self) -> None:
-        """Persist to disk as markdown."""
+        """Persist to disk.
+
+        Writes JSON (authoritative, lossless round-trip for crash/restart
+        recovery) plus markdown (human-readable mirror).
+        """
+        try:
+            self.json_path.write_text(
+                json.dumps(self._to_dict(), indent=2, default=str, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
         try:
             self.path.write_text(self._to_markdown(), encoding="utf-8")
         except Exception:
             pass
 
+    def _to_dict(self) -> dict[str, Any]:
+        """Full structured state for lossless persistence."""
+        return {
+            "session_id": self.session_id,
+            "goal": self.goal,
+            "status": self.status,
+            "created_at": self.created_at,
+            "plan_steps": [asdict(s) for s in self.plan_steps],
+            "observations": [asdict(o) for o in self.observations],
+            "notes": self.notes,
+        }
+
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            text = self.path.read_text(encoding="utf-8")
-            self._from_markdown(text)
-        except Exception:
-            pass
+        """Restore state, preferring the lossless JSON sidecar."""
+        if self.json_path.exists():
+            try:
+                self._from_dict(json.loads(self.json_path.read_text(encoding="utf-8")))
+                return
+            except Exception:
+                pass
+        if self.path.exists():
+            try:
+                self._from_markdown(self.path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+    def _from_dict(self, data: dict[str, Any]) -> None:
+        """Rebuild in-memory state from the JSON sidecar."""
+        self.goal = data.get("goal", "")
+        self.status = data.get("status", "idle")
+        self.created_at = data.get("created_at", time.time())
+        self.notes = list(data.get("notes", []))
+        self.plan_steps = [
+            PlanStep(
+                idx=s.get("idx", i),
+                tool=s.get("tool", ""),
+                args=s.get("args") or {},
+                reason=s.get("reason", ""),
+                status=s.get("status", "pending"),
+                result_summary=s.get("result_summary", ""),
+            )
+            for i, s in enumerate(data.get("plan_steps", []))
+        ]
+        self.observations = [
+            Observation(
+                step_idx=o.get("step_idx", 0),
+                tool=o.get("tool", ""),
+                args=o.get("args") or {},
+                result=o.get("result") or {},
+                timestamp=o.get("timestamp", time.time()),
+            )
+            for o in data.get("observations", [])
+        ]
 
     def _to_markdown(self) -> str:
         lines = [
