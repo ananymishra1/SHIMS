@@ -2800,9 +2800,11 @@ function buildOnboarding(){
     const samplesBox = document.getElementById('ob-samples');
     if (last) {
       samplesBox.style.display = 'grid';
-      samplesBox.innerHTML = '<div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#5f74a8;text-align:center;margin-bottom:2px">Try one to get started</div>' +
+      samplesBox.innerHTML =
+        '<a class="ob-sample" href="/setup" style="display:block;border-color:rgba(120,160,255,.5);background:rgba(67,231,255,.06);text-decoration:none"><b>⚖️ Connect your AI Council</b> — add Gemini, Claude &amp; OpenAI in one click (or stay fully local)</a>' +
+        '<div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#5f74a8;text-align:center;margin:6px 0 2px">…or try a command now</div>' +
         ONBOARD_SAMPLES.map((t,i)=>`<div class="ob-sample" data-s="${i}">${t}</div>`).join('');
-      samplesBox.querySelectorAll('.ob-sample').forEach(el=>{
+      samplesBox.querySelectorAll('.ob-sample[data-s]').forEach(el=>{
         el.onclick = () => { prefillCommand(ONBOARD_SAMPLES[+el.dataset.s]); finishOnboarding(); };
       });
     } else {

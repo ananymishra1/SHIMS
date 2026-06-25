@@ -4570,6 +4570,15 @@ async def landing_page() -> HTMLResponse:
     return HTMLResponse(landing.read_text(encoding="utf-8"), headers=_NO_CACHE)
 
 
+@app.get("/setup", include_in_schema=False)
+async def setup_page() -> HTMLResponse:
+    # One-click provider/API-key setup + "Council of the Wise" convene wizard.
+    setup = FRONTEND_DIR / "setup.html"
+    if not setup.is_file():
+        return HTMLResponse((FRONTEND_DIR / "shims_omni.html").read_text(encoding="utf-8"), headers=_NO_CACHE)
+    return HTMLResponse(setup.read_text(encoding="utf-8"), headers=_NO_CACHE)
+
+
 @app.get("/omni-duobot", include_in_schema=False)
 async def omni_duobot_page() -> HTMLResponse:
     path = FRONTEND_DIR / "omni_duobot.html"

@@ -60,6 +60,16 @@ class TestLandingPage:
         r = client.get("/app")
         assert r.status_code == 200
 
+    def test_setup_wizard_served(self, client):
+        r = client.get("/setup")
+        assert r.status_code == 200
+        body = r.text
+        assert "Council" in body
+        # One-click key pages for the cloud council members.
+        assert "platform.openai.com" in body
+        assert "console.anthropic.com" in body
+        assert "aistudio.google.com" in body
+
 
 # --------------------------------------------------------------------------- #
 # Guardian hardening helpers
