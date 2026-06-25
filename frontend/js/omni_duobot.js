@@ -17,6 +17,67 @@
     local:"You are Factory, the on-premise local model. In the Council, you represent offline-first constraints, cost awareness, and local-tool availability. Flag when a cloud-only plan would break air-gapped deployments."
   };
 
+  // Council seats (member roster) + avatar glyphs for every speaker.
+  const SEATS=[
+    {role:'primary', name:'Omni', emoji:'✦', color:'var(--omni)', local:true},
+    {role:'local', name:'Factory', emoji:'🏭', color:'var(--local)', pid:'ollama', local:true},
+    {role:'gemini', name:'Gemini', emoji:'🔷', color:'var(--gemini)', pid:'gemini'},
+    {role:'anthropic', name:'Claude', emoji:'🟣', color:'var(--anthropic)', pid:'anthropic'},
+    {role:'openai', name:'OpenAI', emoji:'🟢', color:'var(--openai)', pid:'openai'},
+  ];
+  const AVATAR={user:'🧑', primary:'✦', local:'🏭', gemini:'🔷', anthropic:'🟣', openai:'🟢', chair:'⚖️', system:'⚙️', context:'📚'};
+  let providerStatus={};   // pid -> 'ready' | 'missing key' | 'offline'
+  let chairRole='primary';
+
+  async function refreshProviderStatus(){
+    try{ const d=await sysApi('GET','/system/providers');
+      (d.providers||[]).forEach(p=>{ providerStatus[p.id]=p.status; }); }catch(e){}
+  }
+
+  function seatEnabled(s){
+    if(s.role==='primary') return true;
+    if(s.role==='local') return providerStatus['ollama']==='ready';
+    return providerStatus[s.pid]==='ready';
+  }
+
+  function renderRoster(){
+    const box=document.getElementById('roster'); if(!box) return;
+    let html=SEATS.map(s=>{
+      const en=seatEnabled(s);
+      const isChair=(s.role===chairRole);
+      return `<div class="seat ${en?'enabled ready':''} ${isChair?'chair-seat':''}" data-role="${s.role}" style="--seat:${s.color}" title="${esc(s.name)}${isChair?' · Chair':''}${en?'':' · not connected'}">
+        <div class="av" style="color:${s.color}">${s.emoji}</div>
+        <div class="nm">${esc(s.name)}${isChair?' ⚖️':''}</div>
+        <div class="dot"></div>
+      </div>`;
+    }).join('');
+    const connected=SEATS.filter(seatEnabled).length;
+    if(connected<2){
+      html+=`<div class="chair-sep"></div><a class="seat" href="/setup" style="text-decoration:none" title="Connect more minds">
+        <div class="av" style="color:var(--accent);border-style:dashed">＋</div><div class="nm" style="color:var(--accent)">Add minds</div></a>`;
+    }
+    box.innerHTML=html;
+  }
+
+  function setRosterThinking(on){
+    document.querySelectorAll('#roster .seat[data-role]').forEach(el=>{
+      const role=el.dataset.role;
+      const s=SEATS.find(x=>x.role===role);
+      if(on && s && seatEnabled(s)) el.classList.add('thinking');
+      else el.classList.remove('thinking');
+    });
+  }
+  function markSpoke(roles){
+    const set=new Set(roles);
+    document.querySelectorAll('#roster .seat[data-role]').forEach(el=>{
+      el.classList.remove('thinking');
+      if(set.has(el.dataset.role)){
+        el.classList.add('spoke');
+        setTimeout(()=>el.classList.remove('spoke'), 2600);
+      }
+    });
+  }
+
   const CURATED_MODELS={
     anthropic:["claude-opus-4","claude-sonnet-4-6","claude-3-5-sonnet-latest","claude-3-haiku-20240307"],
     openai:["gpt-4o","gpt-4o-mini","o3-mini","o1-mini","gpt-4.1","gpt-4.1-mini"],
@@ -59,9 +120,12 @@
     div.className='msg '+role;
     const name=PERSONA_NAMES[role]||role;
     const meta=m.metadata||{};
-    const badge=role==='context'?'RAG Context':name;
+    const isChair=(role==='chair');
+    const badge=role==='context'?'RAG Context':(name+(isChair?' · Chair':''));
+    const av=AVATAR[role]||'•';
     const body=role==='context'?formatContext(m.content):esc(m.content);
-    div.innerHTML=`<div class="badge">${badge}</div><div class="body">${body}</div><div class="ts">${fmt(m.ts)}${meta.rag?' · '+meta.hits+' source chunks':''}</div>`;
+    div.innerHTML=`<div class="msg-head"><span class="av">${av}</span><span class="badge">${badge}</span></div>`+
+      `<div class="body">${body}</div><div class="ts">${fmt(m.ts)}${meta.rag?' · '+meta.hits+' source chunks':''}</div>`;
     return div;
   }
 
@@ -70,6 +134,8 @@
     const lines=text.split('\n');
     return '<div style="font-size:12px;opacity:.85;white-space:pre-wrap">'+esc(text).slice(0,1200)+'</div>';
   }
+
+  let _lastCount=0, _lastConv=null;
 
   async function loadConversation(id){
     const data=await api('GET','/conversations/'+id);
@@ -80,8 +146,25 @@
     const conv=data.conversation;
     document.getElementById('conv-subtitle').textContent=(conv.topic||'SHIMS continuous improvement')+' · Mode: '+(conv.mode||'free');
     setModeTab(conv.mode||'free');
-    (conv.messages||[]).forEach(m=>chat.appendChild(renderMsg(m)));
+    const msgs=conv.messages||[];
+    // Stagger-reveal only the messages that are new since the last render of
+    // this same conversation, so a fresh turn feels like members speaking.
+    const sameConv=(id===_lastConv);
+    const revealFrom=sameConv?_lastCount:msgs.length;
+    const newRoles=[];
+    msgs.forEach((m,i)=>{
+      const el=renderMsg(m);
+      if(i>=revealFrom){
+        el.classList.add('reveal');
+        el.style.animationDelay=((i-revealFrom)*0.45)+'s';
+        if(m.role && m.role!=='user' && m.role!=='system' && m.role!=='context') newRoles.push(m.role);
+      }
+      chat.appendChild(el);
+    });
+    _lastCount=msgs.length; _lastConv=id;
     chat.scrollTop=chat.scrollHeight;
+    renderRoster();
+    if(newRoles.length) markSpoke(newRoles);
     await Promise.all([renderConvList(), loadProposals(), loadCouncilActions(), loadTasks()]);
   }
 
@@ -117,14 +200,22 @@
     await loadConversation(convId);
   }
 
-  function setThinking(on){
+  function setThinking(on, label){
     const th=document.getElementById('thinking');
     if(th) th.classList.toggle('active', on);
+    const delib=document.getElementById('delib');
+    if(delib){
+      delib.classList.toggle('active', on);
+      const t=document.getElementById('delib-text');
+      if(t && label) t.textContent=label;
+    }
+    if(on){ const chat=document.getElementById('chat'); if(chat) chat.scrollTop=chat.scrollHeight; }
+    setRosterThinking(on);
   }
 
   async function runTurn(){
     if(!convId) await newConversation();
-    setThinking(true);
+    setThinking(true, 'The Council is deliberating…');
     const chat=document.getElementById('chat'); chat.scrollTop=chat.scrollHeight;
     const data=await api('POST','/conversations/'+convId+'/turn',{});
     setThinking(false);
@@ -150,7 +241,7 @@
 
   async function finalize(){
     if(!convId) return;
-    setThinking(true);
+    setThinking(true, 'The Chair is synthesising the verdict…');
     await api('POST','/conversations/'+convId+'/finalize',{});
     setThinking(false);
     await loadConversation(convId);
@@ -523,8 +614,11 @@
 
   (async function init(){
     renderStars();
+    await refreshProviderStatus();
+    renderRoster();
     await renderConvList();
     const {mode,topic}=getUrlParams();
+    if(mode==='council') setModeTab('council');
     if((mode==='council'||mode==='improvement'||mode==='free') && topic){
       const data=await api('POST','/conversations',{topic, mode});
       if(data.ok){
