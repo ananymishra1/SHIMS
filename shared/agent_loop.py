@@ -1173,6 +1173,36 @@ async def run_agent_loop(
     except Exception:
         pass
 
+    # v4: Inject hot-reloadable cortex prompt overlay + learned behavior signals.
+    # The behavior engine is the "small model predicts, LLM acts" bridge: it
+    # turns observed usage patterns into context the LLM can act on proactively.
+    try:
+        _extra_blocks: list[str] = []
+        try:
+            from .cortex import get_prompt_overlay
+            overlay = get_prompt_overlay()
+            if overlay:
+                _extra_blocks.append(overlay)
+        except Exception:
+            pass
+        try:
+            from .behavior_engine import get_behavior_engine
+            beng = get_behavior_engine(session_id or "default")
+            beng.record("chat_turn", context=(message or "")[:60])
+            bblock = beng.to_context()
+            if bblock:
+                _extra_blocks.append(bblock)
+        except Exception:
+            pass
+        if _extra_blocks:
+            joined = "\n\n".join(_extra_blocks)
+            if convo and convo[0].get("role") == "system":
+                convo[0]["content"] = convo[0].get("content", "") + "\n\n" + joined
+            else:
+                convo.insert(0, {"role": "system", "content": joined})
+    except Exception:
+        pass
+
     used_tools: list[str] = []
     answer = ""
     answer_streamed = False
@@ -1280,6 +1310,11 @@ async def run_agent_loop(
         # v3: Emit tool_call events before parallel execution
         for i, call in enumerate(calls):
             used_tools.append(call.name)
+            try:
+                from .behavior_engine import get_behavior_engine
+                get_behavior_engine(session_id or "default").record(call.name, context="tool")
+            except Exception:
+                pass
             yield {"type": "tool_call", "tool": call.name, "args": call.args, "step": wave, "index": i}
             yield {"type": "thought", "stage": "tool", "content": f"Wave {wave} · {call.name}: {call.purpose or 'executing'}"}
 

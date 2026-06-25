@@ -239,6 +239,15 @@ OLLAMA_MODEL_ALIASES = {
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
+# Growth & product API (behavior learning, licensing, skill marketplace, cortex).
+# Guarded so a problem here can never block app boot.
+try:
+    from backend.app.routes_growth import router as _growth_router
+    app.include_router(_growth_router)
+except Exception as _growth_exc:  # pragma: no cover - defensive
+    import logging as _logging
+    _logging.getLogger(__name__).warning("growth router not loaded: %s", _growth_exc)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=restricted_cors_origins(),
@@ -4542,8 +4551,23 @@ async def coder_v2_page() -> HTMLResponse:
 
 @app.get("/", include_in_schema=False)
 async def index() -> HTMLResponse:
+    # Public, sellable front door. Falls back to the app if the landing page
+    # is ever missing so the product is never unreachable.
+    landing = FRONTEND_DIR / "landing.html"
+    if landing.is_file():
+        return HTMLResponse(landing.read_text(encoding="utf-8"), headers=_NO_CACHE)
     path = FRONTEND_DIR / "shims_omni.html"
     return HTMLResponse(path.read_text(encoding="utf-8"), headers=_NO_CACHE)
+
+
+@app.get("/welcome", include_in_schema=False)
+@app.get("/landing", include_in_schema=False)
+async def landing_page() -> HTMLResponse:
+    landing = FRONTEND_DIR / "landing.html"
+    if not landing.is_file():
+        path = FRONTEND_DIR / "shims_omni.html"
+        return HTMLResponse(path.read_text(encoding="utf-8"), headers=_NO_CACHE)
+    return HTMLResponse(landing.read_text(encoding="utf-8"), headers=_NO_CACHE)
 
 
 @app.get("/omni-duobot", include_in_schema=False)
