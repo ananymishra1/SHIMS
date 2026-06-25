@@ -70,11 +70,12 @@ async def license_status() -> dict[str, Any]:
 @router.post("/license/activate")
 async def license_activate(req: LicenseActivateRequest) -> dict[str, Any]:
     import os
-    from shared.licensing import verify_license, current_entitlements
+    from shared.licensing import verify_license, current_entitlements, save_license_key
     lic = verify_license(req.key.strip())
     if not lic or not lic.valid:
         return {"ok": False, "error": "invalid_or_expired_license"}
     os.environ["SHIMS_LICENSE_KEY"] = req.key.strip()
+    save_license_key(req.key.strip())  # durable across restarts
     return {"ok": True, "entitlements": current_entitlements()}
 
 

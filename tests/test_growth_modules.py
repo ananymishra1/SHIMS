@@ -156,6 +156,16 @@ class TestLicensing:
         assert payload["required_tier"] == "enterprise"
         assert "upgrade_url" in payload
 
+    def test_durable_key_survives_without_env(self, tmp_path, monkeypatch):
+        # Activated key persists to a file and is honoured when env is unset.
+        store = tmp_path / "license.key"
+        monkeypatch.setattr(lic, "_license_file", lambda: store)
+        key = lic.issue_license("pro", "team@x.com", valid_days=10)
+        assert lic.save_license_key(key)
+        monkeypatch.delenv("SHIMS_LICENSE_KEY", raising=False)
+        assert lic.current_tier() == lic.Tier.PRO
+        assert lic.is_entitled("session_export")
+
 
 # --------------------------------------------------------------------------- #
 # Skill marketplace

@@ -3,6 +3,7 @@
   let convId=null;
   let auto=false;
   let autoTimer=null;
+  let currentMode='free';
 
   const PERSONA_NAMES={user:'You', primary:'Omni', local:'Factory', gemini:'Gemini', anthropic:'Claude', openai:'OpenAI', chair:'Chair'};
   const ROLE_COLOR={
@@ -78,6 +79,35 @@
     });
   }
 
+  function connectedCount(){ return SEATS.filter(seatEnabled).length; }
+
+  // Inline nudge: convening a council with <2 minds is underwhelming, so offer
+  // a one-click path to /setup instead of silently letting it run thin.
+  async function maybeNudgeSetup(force){
+    await refreshProviderStatus(); renderRoster();
+    if(!force && connectedCount()>=2) return false;
+    if(document.getElementById('nudge-overlay')) return true;
+    const ov=document.createElement('div');
+    ov.id='nudge-overlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;background:rgba(3,7,20,.74);backdrop-filter:blur(8px)';
+    const connected=connectedCount();
+    ov.innerHTML=`<div class="glass" style="width:460px;max-width:92%;padding:26px;text-align:center;border-radius:18px">
+      <div style="font-size:34px;margin-bottom:6px">⚖️</div>
+      <h2 style="margin:0 0 8px;font-size:20px">A council needs more than one mind</h2>
+      <p style="color:var(--muted);font-size:13.5px;margin:0 0 18px">
+        You have <b style="color:var(--text)">${connected}</b> connected. The Council of the Wise shines when
+        several AIs debate — connect Gemini, Claude or OpenAI in one click (local minds stay free and private).</p>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <a class="btn primary" href="/setup" style="text-decoration:none;padding:11px 18px">🔑 Connect minds</a>
+        <button class="btn" style="padding:11px 18px" onclick="duobot.dismissNudge()">Continue anyway</button>
+      </div>
+    </div>`;
+    ov.addEventListener('click',e=>{ if(e.target===ov) dismissNudge(); });
+    document.body.appendChild(ov);
+    return true;
+  }
+  function dismissNudge(){ const ov=document.getElementById('nudge-overlay'); if(ov) ov.remove(); }
+
   const CURATED_MODELS={
     anthropic:["claude-opus-4","claude-sonnet-4-6","claude-3-5-sonnet-latest","claude-3-haiku-20240307"],
     openai:["gpt-4o","gpt-4o-mini","o3-mini","o1-mini","gpt-4.1","gpt-4.1-mini"],
@@ -145,7 +175,8 @@
     chat.innerHTML='<div class="thinking" id="thinking"><div class="orb-lg"></div><div>Council is deliberating…</div></div>';
     const conv=data.conversation;
     document.getElementById('conv-subtitle').textContent=(conv.topic||'SHIMS continuous improvement')+' · Mode: '+(conv.mode||'free');
-    setModeTab(conv.mode||'free');
+    currentMode=conv.mode||'free';
+    setModeTab(currentMode);
     const msgs=conv.messages||[];
     // Stagger-reveal only the messages that are new since the last render of
     // this same conversation, so a fresh turn feels like members speaking.
@@ -215,7 +246,8 @@
 
   async function runTurn(){
     if(!convId) await newConversation();
-    setThinking(true, 'The Council is deliberating…');
+    if(currentMode==='council') return runCouncilStream();
+    setThinking(true, 'Thinking…');
     const chat=document.getElementById('chat'); chat.scrollTop=chat.scrollHeight;
     const data=await api('POST','/conversations/'+convId+'/turn',{});
     setThinking(false);
@@ -226,8 +258,72 @@
     await loadConversation(convId);
   }
 
+  let _streamedAny=false;
+  function appendStreamMsg(m){
+    const chat=document.getElementById('chat');
+    const th=document.getElementById('thinking'); if(th) th.classList.remove('active');
+    const el=renderMsg(m); el.classList.add('reveal');
+    chat.appendChild(el); chat.scrollTop=chat.scrollHeight;
+    _lastCount++; _streamedAny=true;
+    if(m.role && m.role!=='user' && m.role!=='system' && m.role!=='context') markSpoke([m.role]);
+  }
+
+  function handleStreamEvent(ev){
+    if(!ev||!ev.type) return;
+    if(ev.type==='council_start'){ setRosterThinking(true); return; }
+    if(ev.type==='chair_start'){
+      const t=document.getElementById('delib-text'); if(t) t.textContent='The Chair is synthesising the verdict…';
+      return;
+    }
+    if(ev.type==='message' && ev.message){ appendStreamMsg(ev.message); return; }
+    if(ev.type==='member_error'){ appendStreamMsg({role:'system', content:'A member could not respond: '+(ev.error||''), ts:Date.now()/1000}); return; }
+    if(ev.type==='error'){ appendStreamMsg({role:'system', content:'Turn stopped: '+(ev.error||'unknown'), ts:Date.now()/1000}); }
+  }
+
+  // Stream a council turn so each member surfaces live as they finish.
+  async function runCouncilStream(){
+    setThinking(true, 'The Council is deliberating…');
+    const chat=document.getElementById('chat'); chat.scrollTop=chat.scrollHeight;
+    let failed=null, sawDone=false; _streamedAny=false;
+    try{
+      const resp=await fetch(API+'/conversations/'+convId+'/turn/stream',
+        {method:'POST', headers:{'Content-Type':'application/json'}});
+      if(!resp.ok || !resp.body) throw new Error('stream unavailable');
+      const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
+      while(true){
+        const {value,done}=await reader.read(); if(done) break;
+        buf+=dec.decode(value,{stream:true});
+        let nl;
+        while((nl=buf.indexOf('\n'))>=0){
+          const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
+          if(!line) continue;
+          try{ const ev=JSON.parse(line); if(ev.type==='done') sawDone=true; else handleStreamEvent(ev); }catch(e){}
+        }
+      }
+      if(buf.trim()){ try{ const ev=JSON.parse(buf.trim()); if(ev.type!=='done') handleStreamEvent(ev); }catch(e){} }
+    }catch(e){ failed=e.message; }
+    setThinking(false);
+    if(failed && !_streamedAny){
+      // Nothing streamed — safe to run the non-streaming path so a turn still completes.
+      const data=await api('POST','/conversations/'+convId+'/turn',{});
+      if(!data.ok && auto) autoRunToggle();
+      await loadConversation(convId);
+      return;
+    }
+    if(failed || !sawDone){
+      // Stream broke mid-way after some output — re-sync from the server rather
+      // than re-running the turn (which would double-add members).
+      await loadConversation(convId);
+      return;
+    }
+    // Clean finish: sync side panels, keep the streamed bubbles in place.
+    await Promise.all([renderConvList(), loadProposals(), loadCouncilActions(), loadTasks()]);
+  }
+
   async function setMode(mode){
-    if(!convId) return;
+    currentMode=mode;
+    if(mode==='council') maybeNudgeSetup(false);
+    if(!convId){ setModeTab(mode); return; }
     await api('POST','/conversations/'+convId+'/mode',{mode});
     await loadConversation(convId);
   }
@@ -600,7 +696,7 @@
     newConversation, sendUser, runTurn, setMode, finalize, checkCapabilities,
     vote, delProposal, rethink, councilApprove, councilReject,
     autoRunToggle, openSettings, closeSettings, saveSettings, settingsTab,
-    memberProviderChanged, testKey,
+    memberProviderChanged, testKey, dismissNudge,
     startTask, taskRound, taskRun,
   };
 
@@ -618,7 +714,7 @@
     renderRoster();
     await renderConvList();
     const {mode,topic}=getUrlParams();
-    if(mode==='council') setModeTab('council');
+    if(mode==='council'){ currentMode='council'; setModeTab('council'); maybeNudgeSetup(false); }
     if((mode==='council'||mode==='improvement'||mode==='free') && topic){
       const data=await api('POST','/conversations',{topic, mode});
       if(data.ok){

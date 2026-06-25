@@ -1075,6 +1075,9 @@ async def run_council_turn(conv_id: str) -> dict[str, Any]:
 
     # Retrieve relevant SHIMS source context once and share it with all members.
     await _feed_council_context(conv_id)
+    # Re-read so members actually see the context message just added (otherwise
+    # the retrieved context is wasted until the next turn).
+    conv = get_conversation(conv_id) or conv
 
     # Each council member speaks in parallel.
     member_tasks = [_member_say(p, conv) for p in personas]
@@ -1115,6 +1118,84 @@ async def run_council_turn(conv_id: str) -> dict[str, Any]:
         "action_summary": action_summary,
         "conversation": get_conversation(conv_id),
     }
+
+
+async def run_council_turn_stream(conv_id: str):
+    """Streaming variant of :func:`run_council_turn`.
+
+    Yields event dicts as each council member finishes speaking (members run in
+    parallel, so they surface in genuine completion order — a live debate), then
+    the chair's verdict, any action summary, and a final ``done`` event carrying
+    the refreshed conversation.
+    """
+    conv = get_conversation(conv_id)
+    if not conv:
+        yield {"type": "error", "error": "conversation not found"}
+        return
+    if len(conv.get("messages", [])) >= MAX_MESSAGES:
+        yield {"type": "error", "error": f"This conversation has reached the {MAX_MESSAGES}-message safety limit."}
+        return
+
+    personas = conv.get("personas", [])
+    if not personas:
+        yield {"type": "error", "error": "council mode requires personas; switch mode and back to council to reset."}
+        return
+
+    pending = conv.get("pending_council_actions", [])
+    if pending:
+        yield {"type": "error", "error": f"There are {len(pending)} pending council action(s) awaiting approval. Approve them before continuing."}
+        return
+
+    await _feed_council_context(conv_id)
+    # Re-read so members see the freshly added RAG context (parity with the
+    # non-streaming path; otherwise the retrieved context is wasted this turn).
+    conv = get_conversation(conv_id) or conv
+    yield {"type": "council_start",
+           "members": [{"role": p["id"], "name": p.get("name", p["id"])} for p in personas]}
+
+    # Run all members in parallel; surface each as it completes (real debate order).
+    tasks = [asyncio.ensure_future(_member_say(p, conv)) for p in personas]
+    member_responses: list[dict[str, Any]] = []
+    for fut in asyncio.as_completed(tasks):
+        try:
+            msg = await fut
+        except Exception as exc:  # pragma: no cover - defensive
+            yield {"type": "member_error", "error": str(exc)[:200]}
+            continue
+        add_message(conv_id, msg["role"], msg["content"], msg.get("metadata"))
+        member_responses.append(msg)
+        yield {"type": "message", "message": msg}
+
+    # Chair synthesises the verdict.
+    yield {"type": "chair_start"}
+    decision = await _chair_decide(conv, member_responses)
+    chair_msg = {
+        "role": "chair",
+        "content": decision["final_answer"],
+        "ts": _now(),
+        "metadata": {"persona": "Chair", "actions": decision.get("actions", [])},
+    }
+    add_message(conv_id, chair_msg["role"], chair_msg["content"], chair_msg.get("metadata"))
+    yield {"type": "message", "message": chair_msg}
+
+    # Execute actions if any (mirrors run_council_turn's persistence).
+    action_summary = None
+    if decision.get("actions"):
+        action_summary = await _execute_council_actions(conv, decision["actions"])
+        convs = _load_all_conversations()
+        conv2 = convs.get(conv_id)
+        if conv2:
+            conv2.setdefault("council_action_log", []).append({
+                "ts": _now(),
+                "decision": decision["final_answer"],
+                "summary": action_summary,
+            })
+            if action_summary.get("pending"):
+                conv2["pending_council_actions"] = conv2.get("pending_council_actions", []) + action_summary["pending"]
+            _rewrite_conversations(convs)
+        yield {"type": "action_summary", "summary": action_summary}
+
+    yield {"type": "done", "conversation": get_conversation(conv_id)}
 
 
 def approve_council_action(conv_id: str, approval_id: str) -> dict[str, Any]:

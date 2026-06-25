@@ -4,9 +4,11 @@ Mounted on Instance A (primary) at /api/duobot and /omni-duobot.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import omni_duobot, duobot_tasks
@@ -115,6 +117,26 @@ async def add_message(conv_id: str, req: MessageRequest) -> dict[str, Any]:
 @router.post("/conversations/{conv_id}/turn")
 async def run_turn(conv_id: str) -> dict[str, Any]:
     return await omni_duobot.run_turn(conv_id)
+
+
+@router.post("/conversations/{conv_id}/turn/stream")
+async def run_turn_stream(conv_id: str) -> StreamingResponse:
+    """Stream a council turn as NDJSON, surfacing each member as they finish.
+
+    Falls back to a single ``done`` event for non-council conversations so the
+    client can use one code path.
+    """
+    async def _gen():
+        conv = omni_duobot.get_conversation(conv_id)
+        mode = (conv or {}).get("mode", "free")
+        if mode != "council":
+            result = await omni_duobot.run_turn(conv_id)
+            yield json.dumps({"type": "done", **result}, default=str).encode() + b"\n"
+            return
+        async for event in omni_duobot.run_council_turn_stream(conv_id):
+            yield json.dumps(event, default=str).encode() + b"\n"
+
+    return StreamingResponse(_gen(), media_type="application/x-ndjson")
 
 
 @router.post("/conversations/{conv_id}/mode")

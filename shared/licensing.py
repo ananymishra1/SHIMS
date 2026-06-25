@@ -63,6 +63,39 @@ def _secret() -> bytes:
     return os.getenv("SHIMS_LICENSE_SECRET", "shims-license-dev-secret").encode()
 
 
+def _license_file():
+    """Path to the durable activated-license store (survives restarts)."""
+    from pathlib import Path
+    try:
+        from .config import ROOT_DIR
+        base = Path(ROOT_DIR)
+    except Exception:
+        base = Path(".")
+    d = base / "data" / "state"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d / "license.key"
+
+
+def save_license_key(key: str) -> bool:
+    """Persist an activated key so it survives restarts (env var still wins)."""
+    try:
+        _license_file().write_text((key or "").strip(), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _stored_key() -> str:
+    try:
+        p = _license_file()
+        return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+    except Exception:
+        return ""
+
+
 def _sign(payload_b64: str) -> str:
     sig = hmac.new(_secret(), payload_b64.encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(sig).decode().rstrip("=")[:24]
@@ -139,8 +172,8 @@ def verify_license(key: str) -> Optional[License]:
 
 
 def current_license() -> License:
-    """Resolve the active license from env, or fall back to Community."""
-    key = os.getenv("SHIMS_LICENSE_KEY", "").strip()
+    """Resolve the active license from env (preferred) or the durable store."""
+    key = os.getenv("SHIMS_LICENSE_KEY", "").strip() or _stored_key()
     if key:
         lic = verify_license(key)
         if lic and lic.valid:
