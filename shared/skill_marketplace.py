@@ -92,10 +92,30 @@ def _load_catalog() -> list[dict[str, Any]]:
     return catalog
 
 
-def list_catalog(category: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
-    """Browse available skills, with installed-state annotated."""
+def list_catalog(category: str | None = None, query: str | None = None,
+                 include_registry: bool = True) -> list[dict[str, Any]]:
+    """Browse available skills, with installed-state annotated.
+
+    Merges the bundled catalog, this instance's locally-published registry
+    entries, and (if configured) a remote registry hub.
+    """
     installed_names = {s.get("name", "").lower() for s in skill_store.list_skills(limit=500)}
-    items = _load_catalog()
+    items = list(_load_catalog())
+    if include_registry:
+        try:
+            from . import skill_registry
+            seen = {c.get("slug") for c in items}
+            for e in skill_registry.published_catalog():
+                if e.get("slug") not in seen:
+                    items.append(e); seen.add(e.get("slug"))
+            if skill_registry.is_configured():
+                remote = skill_registry.fetch_remote_catalog(query=query)
+                for e in remote.get("skills", []):
+                    if e.get("slug") not in seen:
+                        e["remote"] = True
+                        items.append(e); seen.add(e.get("slug"))
+        except Exception:
+            pass
     if category and category.lower() != "all":
         items = [c for c in items if c.get("category", "").lower() == category.lower()]
     if query:
@@ -114,8 +134,20 @@ def categories() -> list[str]:
 
 
 def install(slug: str) -> dict[str, Any]:
-    """Install a catalog skill into the local skill store."""
+    """Install a catalog or registry skill into the local skill store."""
     item = next((c for c in _load_catalog() if c.get("slug") == slug), None)
+    if not item:
+        # Fall back to registry entries (locally published or remote).
+        try:
+            from . import skill_registry
+            item = next((c for c in skill_registry.published_catalog() if c.get("slug") == slug), None)
+            if not item and skill_registry.is_configured():
+                remote = skill_registry.fetch_remote_catalog()
+                item = next((c for c in remote.get("skills", []) if c.get("slug") == slug), None)
+            if item:
+                skill_registry.record_download(slug)
+        except Exception:
+            item = None
     if not item:
         return {"ok": False, "error": f"Unknown skill: {slug}"}
     saved = skill_store.save_skill(

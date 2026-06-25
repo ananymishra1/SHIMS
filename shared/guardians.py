@@ -6,6 +6,7 @@ and CORS hardening. Imported by backend, enterprise, and self-evolver.
 from __future__ import annotations
 
 import functools
+import hashlib
 import hmac
 import logging
 import os
@@ -108,6 +109,29 @@ def is_allowed_target(path: Path | str, allowed_roots: set[str] | None = None) -
     if set(parts) & FORBIDDEN_PATH_PARTS:
         return False, "blocked_path_component"
     return True, "ok"
+
+
+def create_session_token(subject: str, secret: str, ttl_seconds: int = 86400) -> str:
+    """Create a signed, expiring session token: ``subject:exp:sig``."""
+    exp = int(time.time()) + int(ttl_seconds)
+    payload = f"{subject}:{exp}"
+    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{payload}:{sig}"
+
+
+def verify_session_token(token: str, secret: str) -> str | None:
+    """Verify a session token; return the subject if valid and unexpired."""
+    parts = (token or "").split(":")
+    if len(parts) != 3:
+        return None
+    subject, exp_str, sig = parts
+    try:
+        if int(exp_str) < time.time():
+            return None
+    except ValueError:
+        return None
+    expected = hmac.new(secret.encode(), f"{subject}:{exp_str}".encode(), hashlib.sha256).hexdigest()[:32]
+    return subject if hmac.compare_digest(sig, expected) else None
 
 
 def constant_time_compare(a: str | bytes | None, b: str | bytes | None) -> bool:

@@ -57,8 +57,10 @@ Several "missing"/"broken" claims were already solved in the live 83K-line repo
   Thresholds: 0.85 auto · 0.70 suggest · 0.50 rank. Persists to JSON.
   Tests: `TestBehaviorEngine` (6).
 - ✅ API: `/behavior/suggestions`, `/behavior/record`, `/behavior/feedback`.
-- 🟡 Wire `to_context()` into the agent system prompt and record real tool/action
-  events from the chat loop (one call site in `agent_loop`/`main`).
+- ✅ **Wired into the live agent**: `agent_loop.py` now injects
+  `behavior_engine.to_context()` + `cortex.get_prompt_overlay()` into the system
+  prompt each turn, and records every tool call so the engine learns real
+  action sequences.
 
 ### Phase 4 — Self-Evolution as Kernel/Cortex (Weeks 5–6, parallel)
 - ✅ **`shared/cortex.py`** — formalizes Kernel (frozen: `shims_core/`, `backend/`,
@@ -74,7 +76,10 @@ Several "missing"/"broken" claims were already solved in the live 83K-line repo
 - ✅ API: `/marketplace/skills`, `/marketplace/install`, `/marketplace/export`,
   `/marketplace/import`.
 - ✅ **Skill editor UI** + marketplace browser in the Skills pane.
-- 🔴 Hosted registry + publishing/revenue share (needs a server + auth).
+- ✅ **Hosted registry** (`shared/skill_registry.py`): any SHIMS instance can BE
+  a registry (`/registry/skills`, `/registry/publish`) and/or pull from a remote
+  `SHIMS_REGISTRY_URL`. Marketplace merges bundled + local + remote catalogs.
+- 🔴 Public hub hosting + publishing auth/revenue share (needs a run-it server).
 
 ### Phase 6 — Licensing & Monetization (Weeks 9–10)
 - ✅ **`shared/licensing.py`** — offline, tamper-evident HMAC license keys; tiers
@@ -94,7 +99,14 @@ Several "missing"/"broken" claims were already solved in the live 83K-line repo
 ### Phase 8 — Enterprise (Weeks 11–12)
 - 🟢 GMP/QA-QC/regulatory modules already exist (`shared/`), plus Postgres RLS SQL.
 - ✅ Entitlement flags for `sso`, `audit_export`, `rls_multitenant`, `air_gapped_deploy`.
-- 🔴 Real SSO (OIDC/SAML), team management UI, signed audit-log export.
+- ✅ **Real OIDC SSO** (`shared/sso.py`): Authorization Code + PKCE, state/nonce,
+  claim mapping, allowed-domain filtering, session-token issuance. Works with
+  Google/Okta/Azure AD/Auth0/Keycloak via env config. SAML hook included.
+  API: `/auth/sso/{status,login,callback}`. Needs a live IdP for E2E.
+- ✅ **Team management** (`shared/teams.py`): workspaces, owner/admin/member roles,
+  invitations, and **seat limits enforced against the license**. API: `/teams*`.
+- ✅ Signed, expiring session tokens (`guardians.create/verify_session_token`).
+- 🔴 SAML (python3-saml) full flow; signed audit-log *export* bundle; teams UI.
 
 ### Phase 9 — Launch (Week 12)
 - ✅ Pricing surface live on the landing page.
