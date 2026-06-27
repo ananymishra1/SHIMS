@@ -1,0 +1,83 @@
+# SHIMS Self-Evolving Docker Compose
+# -------------------------------------------------------------
+# This compose mounts the source tree as writable volumes so
+# SHIMS can self-evolve: modify shared/, backend/, apps/ files
+# and persist changes back to the host.
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.self-evolving.yml up -d
+#   docker compose -f deploy/docker-compose.self-evolving.yml logs -f
+#   docker compose -f deploy/docker-compose.self-evolving.yml down
+# -------------------------------------------------------------
+
+version: "3.8"
+
+services:
+  shims-omni:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: shims:latest
+    container_name: shims-omni
+    command: >
+      python -m uvicorn backend.app.main:app
+      --host 0.0.0.0 --port 8010
+      --reload
+    ports:
+      - "8010:8010"
+    volumes:
+      # Mount source directories as writable so self-evolution works.
+      # The app lives in /app inside the container.
+      - ../backend:/app/backend
+      - ../shared:/app/shared
+      - ../apps:/app/apps
+      - ../shims_core:/app/shims_core
+      - ../shims_omni:/app/shims_omni
+      - ../shims_personal:/app/shims_personal
+      - ../desktop_bridge:/app/desktop_bridge
+      - ../frontend:/app/frontend
+      - ../scripts:/app/scripts
+      - ../tests:/app/tests
+      - ../tools:/app/tools
+      - ../config:/app/config
+      - ../docs:/app/docs
+      - ../release_checks:/app/release_checks
+      # Writable runtime directories
+      - ../data:/app/data
+      - ../storage:/app/storage
+      - ../generated:/app/generated
+      - ../logs:/app/logs
+    environment:
+      - SHIMS_HOST=0.0.0.0
+      - SHIMS_DB_PATH=/app/storage/shims.sqlite3
+      - SHIMS_DEMO_MODE=true
+      - SHIMS_SECRET_KEY=${SHIMS_SECRET_KEY:-change-me-in-production}
+      - SHIMS_BRIDGE_TOKEN=${SHIMS_BRIDGE_TOKEN:-change-me-in-production}
+      - ENTERPRISE_BRIDGE_TOKEN=${ENTERPRISE_BRIDGE_TOKEN:-change-me-in-production}
+      - PYTHONUNBUFFERED=1
+      - SHIMS_ALLOW_SELF_EVOLUTION=${SHIMS_ALLOW_SELF_EVOLUTION:-false}
+      - SHIMS_AUTO_EVOLUTION=${SHIMS_AUTO_EVOLUTION:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Optional: PostgreSQL for production-scale deployments.
+  # SHIMS defaults to SQLite; uncomment if you need Postgres.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: shims-postgres
+  #   environment:
+  #     POSTGRES_USER: shims
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shims-local}
+  #     POSTGRES_DB: shims
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   postgres-data:
