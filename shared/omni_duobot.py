@@ -279,7 +279,8 @@ def _default_settings() -> dict[str, Any]:
     provider = settings.ai_provider or "ollama"
     model = ""
     if provider == "kimi":
-        model = settings.kimi_model or "kimi-k2.6"
+        from .kimi_model_helper import normalize_kimi_model
+        model = normalize_kimi_model(settings.kimi_model)
     elif provider == "openai":
         model = settings.openai_model or "gpt-4o-mini"
     elif provider == "anthropic":
@@ -654,7 +655,8 @@ async def _primary_say(conv: dict[str, Any]) -> dict[str, Any]:
     provider = duo_settings.get("primary_provider") or settings.ai_provider or "ollama"
     model = duo_settings.get("primary_model", "")
     if provider == "kimi" and not model:
-        model = settings.kimi_model or "kimi-k2.6"
+        from .kimi_model_helper import normalize_kimi_model
+        model = normalize_kimi_model(settings.kimi_model)
     content = ""
     used_provider = provider
     used_model = model
@@ -861,7 +863,8 @@ def _resolve_member_model(member: dict[str, Any]) -> tuple[str, str]:
         provider = override_provider or duo.get("primary_provider") or settings.ai_provider or "ollama"
         model = override_model or duo.get("primary_model", "")
         if provider == "kimi" and not model:
-            model = settings.kimi_model or "kimi-k2.6"
+            from .kimi_model_helper import normalize_kimi_model
+            model = normalize_kimi_model(settings.kimi_model)
         return provider, model
     if mid == "local":
         provider = override_provider or "ollama"
@@ -1256,7 +1259,8 @@ async def finalize_conversation(conv_id: str) -> dict[str, Any]:
     provider = duo_settings.get("primary_provider") or settings.ai_provider or "ollama"
     model = duo_settings.get("primary_model", "")
     if provider == "kimi" and not model:
-        model = settings.kimi_model or "kimi-k2.6"
+        from .kimi_model_helper import normalize_kimi_model
+        model = normalize_kimi_model(settings.kimi_model)
 
     if ai_module:
         try:

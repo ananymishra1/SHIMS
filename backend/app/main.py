@@ -398,6 +398,12 @@ PROVIDER_DEFAULTS: dict[str, str] = {
     "qwen": os.getenv("QWEN_MODEL", "qwen-max"),
     "huggingface": DEFAULT_HUGGINGFACE_MODEL,
 }
+# Normalize Kimi model names at startup so "k2.6" → "kimi-k2.6" everywhere.
+_raw = PROVIDER_DEFAULTS.get("kimi", "")
+if _raw:
+    from shared.kimi_model_helper import normalize_kimi_model
+    PROVIDER_DEFAULTS["kimi"] = normalize_kimi_model(_raw)
+
 PROVIDER_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "kimi": "KIMI_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "qwen": "QWEN_API_KEY", "huggingface": "HUGGINGFACE_API_KEY"}
 LOCAL_HINTS = ("llama", "qwen", "mistral", "codellama", "phi", "gemma", "deepseek-r1", "nomic", "mixtral")
 CLOUD_HINTS = {"anthropic": ("claude", "sonnet", "haiku", "opus"), "openai": ("gpt", "o1", "o3", "o4", "openai"), "gemini": ("gemini",), "kimi": ("kimi", "moonshot"), "deepseek": ("deepseek-chat",), "qwen": ("qwen",)}
@@ -2688,32 +2694,45 @@ async def _openai_compatible_chat(provider: str, model: str, messages: list[dict
     base = base_urls.get(provider)
     if not base:
         return await _cloud_placeholder(provider, model)
-    # kimi-k2 series only accepts temperature=1.0.
-    temperature = 1.0 if provider == "kimi" and isinstance(model, str) and model.startswith("kimi-k2") else 0.2
-    payload = {"model": model, "messages": messages, "temperature": temperature, "stream": False, "max_tokens": 32000}
-    async with httpx.AsyncClient(timeout=120) as client:
-        try:
-            r = await client.post(f"{base}/chat/completions", headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
-            r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            detail = ""
+
+    # Normalize and build fallback chain for Kimi.
+    candidates = [model]
+    if provider == "kimi":
+        from shared.kimi_model_helper import normalize_kimi_model, kimi_fallback_chain
+        model = normalize_kimi_model(model)
+        candidates = kimi_fallback_chain(model)
+
+    last_error = ""
+    for attempt_model in candidates:
+        temperature = 1.0 if provider == "kimi" and isinstance(attempt_model, str) and attempt_model.startswith("kimi-k2") else 0.2
+        payload = {"model": attempt_model, "messages": messages, "temperature": temperature, "stream": False, "max_tokens": 32000}
+        async with httpx.AsyncClient(timeout=120) as client:
             try:
-                detail = exc.response.text[:400]
-            except Exception:
-                pass
-            if exc.response.status_code == 429:
-                return f"{provider.title()} API rate limit hit (429). Wait a moment and try again, or switch to a local Ollama model."
-            if exc.response.status_code == 401:
-                return f"{provider.title()} rejected this API key with 401 Unauthorized. Check {env} in Settings."
-            if exc.response.status_code == 404:
-                return f"{provider.title()} model `{model}` not found (404). Check the model name in Settings."
-            return f"{provider.title()} API error ({exc.response.status_code}): {detail or exc.response.reason_phrase}. Check {env}, billing, and that model `{model}` is available for your account/region."
-        except httpx.TimeoutException:
-            return f"{provider.title()} request timed out. The provider may be slow or unreachable. Try again or use a local Ollama model."
-        except httpx.RequestError as exc:
-            return f"{provider.title()} connection failed: {str(exc)[:200]}. Check your internet connection or use a local Ollama model."
-        data = r.json()
-    return ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip() or f"{provider.title()} returned an empty response."
+                r = await client.post(f"{base}/chat/completions", headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
+                r.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                detail = ""
+                try:
+                    detail = exc.response.text[:400]
+                except Exception:
+                    pass
+                if exc.response.status_code == 429:
+                    return f"{provider.title()} API rate limit hit (429). Wait a moment and try again, or switch to a local Ollama model."
+                if exc.response.status_code == 401:
+                    return f"{provider.title()} rejected this API key with 401 Unauthorized. Check {env} in Settings."
+                if exc.response.status_code == 404:
+                    if provider == "kimi" and attempt_model != candidates[-1]:
+                        last_error = f"Kimi model `{attempt_model}` not found (404)."
+                        continue  # try next fallback
+                    return f"{provider.title()} model `{attempt_model}` not found (404). Check the model name in Settings."
+                return f"{provider.title()} API error ({exc.response.status_code}): {detail or exc.response.reason_phrase}. Check {env}, billing, and that model `{attempt_model}` is available for your account/region."
+            except httpx.TimeoutException:
+                return f"{provider.title()} request timed out. The provider may be slow or unreachable. Try again or use a local Ollama model."
+            except httpx.RequestError as exc:
+                return f"{provider.title()} connection failed: {str(exc)[:200]}. Check your internet connection or use a local Ollama model."
+            data = r.json()
+            return ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip() or f"{provider.title()} returned an empty response."
+    return f"{provider.title()} exhausted all fallback models. {last_error}"
 
 
 async def _cloud_placeholder(provider: str, model: str) -> str:

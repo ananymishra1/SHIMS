@@ -41,7 +41,7 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
-@dataclass(frozen=True)
+@dataclass
 class Settings:
     app_name: str = os.getenv('SHIMS_APP_NAME', 'SHIMS')
     environment: str = os.getenv('SHIMS_ENV', 'local')
@@ -100,6 +100,21 @@ class Settings:
     # Rate limiting
     rate_limit_requests: int = env_int('SHIMS_RATE_LIMIT_REQUESTS', 60)
     rate_limit_window: int = env_int('SHIMS_RATE_LIMIT_WINDOW_SECONDS', 60)
+
+    def __post_init__(self) -> None:
+        # Normalize Kimi model names so "k2.6" → "kimi-k2.6" automatically.
+        try:
+            from .kimi_model_helper import normalize_kimi_model
+            self.kimi_model = normalize_kimi_model(self.kimi_model)
+        except Exception:
+            pass
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Allow __post_init__ to mutate fields despite frozen dataclass.
+        if name == 'kimi_model':
+            object.__setattr__(self, name, value)
+        else:
+            super().__setattr__(name, value)
 
 
 def _validate_settings() -> None:

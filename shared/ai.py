@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet
 from .config import settings
 from .database import db
 from .provider_registry import clean_secret
+from .kimi_model_helper import normalize_kimi_model, kimi_fallback_chain
 
 
 @dataclass
@@ -213,36 +214,63 @@ class OpenAICompatibleProvider(AIProvider):
         local_no_key = self.provider_name == 'chemdfm'
         if not api_key and not local_no_key:
             return await FallbackProvider().complete(prompt, system, tools, model=model)
-        used_model = model or (stored or {}).get('default_model') or self.default_model
+        raw_model = model or (stored or {}).get('default_model') or self.default_model
+        # Normalize Kimi model names (e.g. "k2.6" → "kimi-k2.6")
+        used_model = normalize_kimi_model(raw_model) if self.provider_name == 'kimi' else raw_model
         base_url = ((stored or {}).get('base_url') or self.default_base_url).rstrip('/')
-        payload = {
-            'model': used_model,
-            'messages': [
-                {'role': 'system', 'content': system or 'You are SHIMS.'},
-                {'role': 'user', 'content': prompt},
-            ],
-            'temperature': 0.2,
-        }
-        # Kimi K2.x models only accept temperature=1.
-        if self.provider_name == 'kimi' and isinstance(used_model, str) and used_model.startswith('kimi-k2'):
-            payload['temperature'] = 1
-        headers = {'Content-Type': 'application/json'}
-        if api_key:
-            headers['Authorization'] = f'Bearer {api_key}'
-        try:
-            async with httpx.AsyncClient(timeout=90) as client:
-                res = await client.post(f'{base_url}/chat/completions', json=payload, headers=headers)
-                res.raise_for_status()
-                data = res.json()
-            text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
-            return AIResult(text=(text or '').strip(), provider=self.provider_name, model=used_model, route=f'{self.provider_name}:openai-compatible', raw=data)
-        except Exception as exc:
-            fallback = await FallbackProvider().complete(prompt, system, tools, model=model)
-            fallback.text = f'{self.provider_name} unavailable ({exc}). {fallback.text}'
-            fallback.ok = False
-            fallback.error = str(exc)
-            fallback.route = f'{self.provider_name}:fallback'
-            return fallback
+
+        # Build candidate list: for Kimi, try fallback chain on 404.
+        candidates = [used_model]
+        if self.provider_name == 'kimi':
+            candidates = kimi_fallback_chain(used_model)
+
+        last_error = ""
+        for attempt_model in candidates:
+            payload = {
+                'model': attempt_model,
+                'messages': [
+                    {'role': 'system', 'content': system or 'You are SHIMS.'},
+                    {'role': 'user', 'content': prompt},
+                ],
+                'temperature': 0.2,
+            }
+            # Kimi K2.x models only accept temperature=1.
+            if self.provider_name == 'kimi' and isinstance(attempt_model, str) and attempt_model.startswith('kimi-k2'):
+                payload['temperature'] = 1
+            headers = {'Content-Type': 'application/json'}
+            if api_key:
+                headers['Authorization'] = f'Bearer {api_key}'
+            try:
+                async with httpx.AsyncClient(timeout=90) as client:
+                    res = await client.post(f'{base_url}/chat/completions', json=payload, headers=headers)
+                    res.raise_for_status()
+                    data = res.json()
+                text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                return AIResult(
+                    text=(text or '').strip(),
+                    provider=self.provider_name,
+                    model=attempt_model,
+                    route=f'{self.provider_name}:openai-compatible',
+                    raw=data,
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404 and self.provider_name == 'kimi':
+                    last_error = f"Kimi model `{attempt_model}` not found (404)."
+                    continue  # try next fallback
+                # Non-404 or non-Kimi: fall through to general fallback
+                last_error = str(exc)
+                break
+            except Exception as exc:
+                last_error = str(exc)
+                break
+
+        # All candidates exhausted or non-retryable error.
+        fallback = await FallbackProvider().complete(prompt, system, tools, model=model)
+        fallback.text = f'{self.provider_name} unavailable ({last_error}). {fallback.text}'
+        fallback.ok = False
+        fallback.error = last_error
+        fallback.route = f'{self.provider_name}:fallback'
+        return fallback
 
 def get_provider(name: Optional[str] = None) -> AIProvider:
     provider = (name or settings.ai_provider or 'ollama').lower().strip()
@@ -253,7 +281,8 @@ def get_provider(name: Optional[str] = None) -> AIProvider:
     if provider in {'anthropic', 'claude'}:
         return AnthropicProvider()
     if provider == 'kimi':
-        return OpenAICompatibleProvider('kimi', settings.kimi_base_url, settings.kimi_model, 'KIMI_API_KEY')
+        from .kimi_model_helper import normalize_kimi_model
+        return OpenAICompatibleProvider('kimi', settings.kimi_base_url, normalize_kimi_model(settings.kimi_model), 'KIMI_API_KEY')
     if provider == 'qwen':
         return OpenAICompatibleProvider('qwen', settings.qwen_base_url, settings.qwen_model, 'QWEN_API_KEY')
     if provider == 'deepseek':
