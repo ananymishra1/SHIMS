@@ -24,7 +24,7 @@
     "extraResources": [
       { "from": "../../frontend", "to": "frontend" }
     ],
-    "win": { "target": ["nsis"], "icon": "../../frontend/favicon.svg" },
+    "win": { "target": ["nsis"], "signAndEditExecutable": false },
     "mac": { "target": ["dmg"], "category": "public.app-category.productivity" },
     "linux": { "target": ["AppImage"], "category": "Utility" }
   }
