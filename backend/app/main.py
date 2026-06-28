@@ -5435,6 +5435,28 @@ async def api_settings_auto_evolution(req: Request) -> dict[str, Any]:
     return {"ok": True, "auto_evolution": enabled, "note": "Auto-evolution " + ("enabled" if enabled else "disabled")}
 
 
+@app.get("/api/settings/omnipotent")
+async def api_get_omnipotent() -> dict[str, Any]:
+    """Return current omnipotent mode state."""
+    from shared.config import settings
+    return {"ok": True, "omnipotent_mode": settings.omnipotent_mode}
+
+
+@app.post("/api/settings/omnipotent")
+async def api_set_omnipotent(req: Request) -> dict[str, Any]:
+    """Toggle omnipotent (full-access) mode at runtime — no restart required."""
+    from shared.config import settings
+    body = await req.json()
+    enabled = bool(body.get("enabled", True))
+    settings.omnipotent_mode = enabled
+    return {
+        "ok": True,
+        "omnipotent_mode": enabled,
+        "note": "Omnipotent mode " + ("enabled" if enabled else "disabled") + ". "
+                + ("SHIMS will now act without asking for approval." if enabled else "Approval gates are back on.")
+    }
+
+
 # ── Browser Agent API (Kimi Claw) ──
 @app.post("/api/browser/visit")
 async def browser_visit(req: Request) -> dict[str, Any]:

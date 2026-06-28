@@ -1954,7 +1954,7 @@ function ensureSettingsEnhancements(){
 
 function openPane(name){
   closePane(); const pane=$('#pane-'+name); if(pane) pane.classList.add('open');
-  if(name==='memory') loadMemoryPane(); if(name==='skills') loadSkillsPane(); if(name==='agents') loadAgentsPane(); if(name==='docs') loadDocsPane(); if(name==='media') loadMediaPane(); if(name==='self'||name==='forge') loadSelfPane(); if(name==='files') loadFilesPane(); if(name==='mailbox') loadMailboxPane(); if(name==='operator') loadOperatorPane(); if(name==='settings'){ ensureSettingsEnhancements(); ensureMailboxSettingsCard(); loadModelList(); loadVoiceProfiles(); loadMailboxSettings(); loadSttModels(); loadMediaSettings(); } if(name==='rd') loadRdPane(); if(name==='scanner') loadScannerPane();
+  if(name==='memory') loadMemoryPane(); if(name==='skills') loadSkillsPane(); if(name==='behavior') loadBehaviorPane(); if(name==='cortex') loadCortexPane(); if(name==='agents') loadAgentsPane(); if(name==='docs') loadDocsPane(); if(name==='media') loadMediaPane(); if(name==='self'||name==='forge') loadSelfPane(); if(name==='files') loadFilesPane(); if(name==='mailbox') loadMailboxPane(); if(name==='operator') loadOperatorPane(); if(name==='settings'){ ensureSettingsEnhancements(); ensureMailboxSettingsCard(); ensureOmnipotentToggle(); loadModelList(); loadVoiceProfiles(); loadMailboxSettings(); loadSttModels(); loadMediaSettings(); } if(name==='rd') loadRdPane(); if(name==='scanner') loadScannerPane();
 }
 function closePane(){ $$('.pane-overlay').forEach(p=>p.classList.remove('open')); }
 window.openPane=openPane; window.closePane=closePane;
@@ -3180,6 +3180,106 @@ async function handleDocIngest(input) {
   }
 }
 window.handleDocIngest = handleDocIngest;
+
+/* ==================== BEHAVIOR & CORTEX PANES + OMNIPOTENT TOGGLE ==================== */
+
+async function loadBehaviorPane(){
+  const box = $('#behavior-body'); if(!box) return;
+  try{
+    const d = await (await fetch('/behavior/suggestions')).json();
+    const stats = d.stats || {};
+    const top = stats.top || [];
+    const suggestion = d.suggestion;
+    let html = '<div class="v9-setting-card"><h3>📈 Behavior Predictions</h3>';
+    if(suggestion){
+      html += '<div class="v9-chip" style="border-left:3px solid var(--amber)"><b>Top prediction:</b> ' + escapeHtml(suggestion.action) + ' <small>(' + (suggestion.confidence*100).toFixed(0) + '%)</small></div>';
+    }
+    if(top.length){
+      html += '<div style="margin-top:8px"><b>Learned patterns</b></div>';
+      top.forEach(p => {
+        html += '<div class="v9-chip"><b>' + escapeHtml(p.action) + '</b> <small>' + (p.confidence*100).toFixed(0) + '% — ' + escapeHtml(p.tier) + '</small></div>';
+      });
+    } else {
+      html += '<small>No behavior patterns learned yet. Chat more and SHIMS will detect your habits.</small>';
+    }
+    html += '</div><div class="v9-setting-card"><h3>Engine Stats</h3><div class="v9-list"><div class="v9-chip"><b>' + (stats.events || 0) + ' events</b><small>observed</small></div><div class="v9-chip"><b>' + (stats.actions_known || 0) + ' actions</b><small>learned</small></div></div></div>';
+    box.innerHTML = html;
+  }catch(e){ box.innerHTML = '<div class="empty-pane">Error loading behavior: ' + escapeHtml(e.message) + '</div>'; }
+}
+window.loadBehaviorPane = loadBehaviorPane;
+
+async function loadCortexPane(){
+  const box = $('#cortex-body'); if(!box) return;
+  try{
+    const d = await (await fetch('/cortex/status')).json();
+    const kernel = d.kernel || {};
+    const cortex = d.cortex || {};
+    const gates = d.gates || {};
+    let html = '<div class="v9-setting-card"><h3>⚡ Cortex Status</h3>';
+    html += '<div class="v9-list"><div class="v9-chip"><b>Architecture</b><small>' + escapeHtml(d.architecture || '—') + '</small></div>';
+    html += '<div class="v9-chip"><b>Kernel frozen</b><small>' + (kernel.frozen ? 'Yes' : 'No') + '</small></div>';
+    html += '<div class="v9-chip"><b>Engine available</b><small>' + (kernel.engine_available ? 'Yes' : 'No') + '</small></div>';
+    html += '<div class="v9-chip"><b>Hot-reloadable</b><small>' + escapeHtml((cortex.hot_reloadable || []).join(', ')) + '</small></div>';
+    html += '<div class="v9-chip"><b>Skills</b><small>' + (cortex.skill_count || 0) + '</small></div>';
+    html += '</div></div>';
+    html += '<div class="v9-setting-card"><h3>Prompt Overlay</h3><div id="cortex-overlay-display" style="font-size:11px;color:var(--text-dim);white-space:pre-wrap"></div><div class="v9-row" style="margin-top:8px"><textarea id="cortex-overlay-input" style="width:100%;min-height:80px;background:rgba(0,0,0,.25);color:#e9fbff;border:1px solid rgba(124,240,255,.2);border-radius:8px;padding:10px" placeholder="Add a prompt overlay (injected into every system prompt)..."></textarea><button class="v9-btn" onclick="saveCortexOverlay()">Save Overlay</button></div></div>';
+    html += '<div class="v9-setting-card"><h3>Approval Gates</h3><div class="v9-list"><div class="v9-chip"><b>Code changes</b><small>' + escapeHtml(gates.code_changes || '—') + '</small></div><div class="v9-chip"><b>Auto-apply confidence</b><small>' + (gates.cortex_auto_apply_confidence || '—') + '</small></div></div></div>';
+    box.innerHTML = html;
+    // fetch current overlay text
+    try{
+      const od = await (await fetch('/cortex/status')).json();
+      const disp = $('#cortex-overlay-display');
+      if(disp) disp.textContent = (od.cortex && od.cortex.prompt_overlay_active) ? 'Active overlay set.' : 'No overlay active.';
+    }catch(_){}
+  }catch(e){ box.innerHTML = '<div class="empty-pane">Error loading cortex: ' + escapeHtml(e.message) + '</div>'; }
+}
+window.loadCortexPane = loadCortexPane;
+
+async function saveCortexOverlay(){
+  const text = $('#cortex-overlay-input'); if(!text) return;
+  try{
+    const r = await fetch('/cortex/prompt-overlay', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text.value, reason:'ui'})});
+    const d = await r.json();
+    toast(d.ok ? 'Overlay saved' : 'Failed: ' + (d.error || ''), d.ok ? 'ok' : 'err');
+    loadCortexPane();
+  }catch(e){ toast('Save failed: ' + e.message, 'err'); }
+}
+window.saveCortexOverlay = saveCortexOverlay;
+
+/* Full Access / Omnipotent Toggle */
+let _omnipotentState = false;
+async function ensureOmnipotentToggle(){
+  const body = $('#pane-settings .pane-body'); if(!body || $('#omnipotent-toggle-card')) return;
+  const card = document.createElement('div'); card.id = 'omnipotent-toggle-card'; card.className = 'v9-setting-card';
+  card.innerHTML = '<h3>🔓 Full Access Toggle</h3><p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">When ON, SHIMS acts without asking for approval. Use with caution.</p><div class="v9-row"><button id="btn-omnipotent" class="v9-btn" onclick="toggleOmnipotent()">Loading...</button><span id="omnipotent-status" style="font-size:11px"></span></div>';
+  body.insertBefore(card, body.firstChild);
+  await refreshOmnipotentState();
+}
+window.ensureOmnipotentToggle = ensureOmnipotentToggle;
+
+async function refreshOmnipotentState(){
+  try{
+    const d = await (await fetch('/api/settings/omnipotent')).json();
+    _omnipotentState = d.omnipotent_mode || false;
+    const btn = $('#btn-omnipotent');
+    const st = $('#omnipotent-status');
+    if(btn){ btn.textContent = _omnipotentState ? 'Disable Full Access' : 'Enable Full Access'; btn.style.background = _omnipotentState ? '#ef4444' : 'var(--accent)'; }
+    if(st){ st.textContent = _omnipotentState ? 'Full Access is ON — SHIMS acts without approval' : 'Full Access is OFF — approval gates active'; st.style.color = _omnipotentState ? '#ef4444' : 'var(--text-dim)'; }
+  }catch(e){ console.log('omnipotent state error', e); }
+}
+window.refreshOmnipotentState = refreshOmnipotentState;
+
+async function toggleOmnipotent(){
+  const next = !_omnipotentState;
+  try{
+    const r = await fetch('/api/settings/omnipotent', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:next})});
+    const d = await r.json();
+    if(d.ok){ toast(d.note || ('Full Access ' + (next ? 'enabled' : 'disabled')), next ? 'warn' : 'ok'); }
+    else { toast(d.error || 'Toggle failed', 'err'); }
+    await refreshOmnipotentState();
+  }catch(e){ toast('Toggle failed: ' + e.message, 'err'); }
+}
+window.toggleOmnipotent = toggleOmnipotent;
 
 /* ==================== BACKGROUND TASKS SIDEBAR ==================== */
 async function loadBackgroundTasks(){
