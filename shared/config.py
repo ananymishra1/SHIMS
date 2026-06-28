@@ -13,8 +13,9 @@ try:
     env_file = Path(os.getenv('SHIMS_ENV_FILE', ROOT_DIR / '.env')).expanduser().resolve()
     if not env_file.exists():
         env_file = ROOT_DIR / '.env'
-    # Load defaults from the env file, but do NOT override env vars already set by a launcher.
-    load_dotenv(env_file, override=False)
+    # Load .env values so they take precedence over system env vars.
+    # This ensures SHIMS-specific config (KIMI_BASE_URL, etc.) is honored.
+    load_dotenv(env_file, override=True)
 except Exception:
     pass
 

@@ -2292,6 +2292,28 @@ async def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str
     return out[:max_results]
 
 
+async def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
+    """Use the duckduckgo-search Python library for reliable no-key search."""
+    if not _settings.get("web", {}).get("duckduckgo_fallback", True):
+        return []
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as ddgs:
+            results = ddgs.text(query, max_results=max(1, min(max_results, 10)), region="wt-wt")
+            out: list[dict[str, str]] = []
+            for r in results:
+                out.append(_normalize_search_item(
+                    r.get("title", ""),
+                    r.get("href", ""),
+                    r.get("body", ""),
+                    "duckduckgo"
+                ))
+            return out
+    except Exception as exc:
+        # Library not installed or blocked — silently fall back to empty
+        return []
+
+
 async def _web_search(query: str, max_results: int = 6, provider: str | None = None, planned_query: dict[str, Any] | None = None) -> dict[str, Any]:
     started = time.perf_counter()
     provider = (provider or "auto").strip().lower()
@@ -2314,11 +2336,12 @@ async def _web_search(query: str, max_results: int = 6, provider: str | None = N
     errors=[]
     attempts=[]
     order=[]
+    # DuckDuckGo goes first as the no-key default; API-key providers follow.
+    if provider in {"auto", "duckduckgo"}: order.append(("duckduckgo", _search_duckduckgo))
     if provider in {"auto", "searxng"}: order.append(("searxng", _search_searxng))
     if provider in {"auto", "tavily"}: order.append(("tavily", _search_tavily))
     if provider in {"auto", "brave"}: order.append(("brave", _search_brave))
     if provider in {"auto", "serpapi"}: order.append(("serpapi", _search_serpapi))
-    if provider in {"auto", "duckduckgo"}: order.append(("duckduckgo", _search_duckduckgo))
     for candidate in candidate_queries:
         candidate = (candidate or "").strip()
         if not candidate:
@@ -2334,7 +2357,7 @@ async def _web_search(query: str, max_results: int = 6, provider: str | None = N
                 errors.append(f"{name}({candidate}): {str(exc)[:180]}")
     primary = str(plan.get("primary_query") or query)
     log_event("web.search.error", route="tool:web_search", provider=provider, model="search", ok=False, latency_ms=(time.perf_counter()-started)*1000, message=primary, metadata={"errors": errors, "original_query": original_query, "query_plan": plan, "attempts": attempts})
-    return {"ok": False, "query": primary, "original_query": original_query, "query_plan": plan, "provider": provider, "results": [], "attempts": attempts, "errors": errors, "status": _search_provider_status(), "message": "No web search provider returned results. Configure SHIMS_SEARXNG_URL or a Tavily/Brave/SerpAPI key, or check internet connectivity."}
+    return {"ok": False, "query": primary, "original_query": original_query, "query_plan": plan, "provider": provider, "results": [], "attempts": attempts, "errors": errors, "status": _search_provider_status(), "message": "No web search provider returned results. Try the DuckDuckGo fallback (no key needed), or configure SHIMS_SEARXNG_URL or a Tavily/Brave/SerpAPI key."}
 
 
 async def _run_web_search_with_plan(query: str, max_results: int = 6, provider: str | None = None, planned_query: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2716,10 +2739,8 @@ async def _openai_compatible_chat(provider: str, model: str, messages: list[dict
                     detail = exc.response.text[:400]
                 except Exception:
                     pass
-                if exc.response.status_code == 429:
-                    return f"{provider.title()} API rate limit hit (429). Wait a moment and try again, or switch to a local Ollama model."
                 if exc.response.status_code == 401:
-                    return f"{provider.title()} rejected this API key with 401 Unauthorized. Check {env} in Settings."
+                    return f"{provider.title()} rejected this API key with 401 Unauthorized. The key is invalid — it may be expired, revoked, or copied incorrectly. Get a fresh key from https://platform.moonshot.cn/settings/api-keys and update {env} in Settings."
                 if exc.response.status_code == 404:
                     if provider == "kimi" and attempt_model != candidates[-1]:
                         last_error = f"Kimi model `{attempt_model}` not found (404)."

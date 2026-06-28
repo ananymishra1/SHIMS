@@ -40,3 +40,4 @@ pystray>=0.19
 keyboard>=0.13
 pyperclip>=1.8
 plyer>=2.1
+duckduckgo-search>=8.0
