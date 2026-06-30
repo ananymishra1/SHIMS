@@ -4266,7 +4266,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     turn_history = history[-50:] if conversation_enabled else [{"role": "user", "content": req.message}]
     messages = [{"role": "system", "content": _system_prompt() + "\n\n" + brain_addendum}] + turn_history
 
-    # Determine agent provider before the gate so we can skip Ollama wave loop
+    # Determine agent provider before the gate (Ollama runs the wave loop too, see below)
     user_provider = (req.provider or plan.provider or "ollama").strip().lower()
     if user_provider in ("anthropic", "openai", "gemini", "deepseek", "kimi"):
         agent_provider = user_provider
@@ -4274,14 +4274,20 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         agent_provider = "ollama"
 
     # ---- Agentic tool-use loop: run/edit/code/web/self-modify on real machine ----
-    # Agent mode is the default. For Ollama, the wave-based agent loop is too slow
-    # (router+executor+synthesis can take 60-120s). Instead, skip waves and use the
-    # basic LLM + simple direct tool execution which is much faster.
-    if req.agent_mode and agent_provider not in {"ollama", "huggingface"}:
+    # Agent mode is the default for every provider, including local Ollama models.
+    # Local models stay fast by (a) using the compact ESSENTIAL_TOOLS set instead of
+    # the full 128-tool registry, and (b) auto-picking a tool-capable installed model
+    # via _agent_tool_model() instead of trusting an arbitrary requested model.
+    if req.agent_mode:
         deep = _needs_deep_model(req.message)
         agent_model = req.model or plan.model or ""
-        # If the selected model is a local Ollama model, switch to the cloud default
-        if not agent_model or _looks_local_model(agent_model) or agent_model in (await _ollama_names()):
+        if agent_provider == "ollama":
+            # Only keep the requested model if it's actually installed and tool-capable;
+            # otherwise pick a known tool-capable local model for the wave loop.
+            ollama_names = await _ollama_names()
+            if not agent_model or agent_model not in ollama_names or not is_tool_capable(agent_model):
+                agent_model = await _agent_tool_model(deep=deep) or PROVIDER_DEFAULTS.get(agent_provider, "")
+        elif not agent_model or _looks_local_model(agent_model) or agent_model in (await _ollama_names()):
             agent_model = PROVIDER_DEFAULTS.get(agent_provider, "")
 
         if agent_model:
