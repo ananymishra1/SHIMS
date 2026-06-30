@@ -332,59 +332,22 @@ RECOMMENDED_MODELS = [
     {"name": "qwen2.5:3b", "provider": "ollama", "role": "fast Qwen live chat", "size": "light", "tool_capable": True, "notes": "Small Qwen with tool support for quick tasks."},
     {"name": "mistral-nemo", "provider": "ollama", "role": "quality local reasoning", "size": "heavier", "tool_capable": True, "notes": "Strong Mistral tool-calling variant."},
     {"name": "llama3.1", "provider": "ollama", "role": "Meta tool-capable", "size": "medium", "tool_capable": True, "notes": "Llama 3.1 has native tool support."},
-    # --- Anthropic / Claude ---
+    # --- Anthropic / Claude (pioneer + fast tier only) ---
     {"name": "claude-opus-4-6", "provider": "anthropic", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Most capable Claude for hard tasks."},
-    {"name": "claude-sonnet-4-6", "provider": "anthropic", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Balanced cloud tool-calling model."},
-    {"name": "claude-3-7-sonnet-20250219", "provider": "anthropic", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Earlier Sonnet generation."},
-    {"name": "claude-3-5-haiku-20241022", "provider": "anthropic", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Fast, cost-effective Claude."},
-    # --- OpenAI / ChatGPT ---
-    {"name": "gpt-5.5", "provider": "openai", "role": "cloud frontier reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. OpenAI's first fully retrained base since GPT-4.5 (April 2026). 1M context, best for agentic tool sequencing and computer-use automation."},
-    {"name": "gpt-5.5-instant", "provider": "openai", "role": "fast cloud frontier", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Low-latency GPT-5.5 variant for quick tasks."},
-    {"name": "gpt-5.5-thinking", "provider": "openai", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Reasoning-optimized GPT-5.5 for complex multi-step problems."},
-    {"name": "gpt-5.5-pro", "provider": "openai", "role": "cloud highest accuracy", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Higher-accuracy GPT-5.5 variant for hardest professional, legal, and research tasks."},
-    {"name": "gpt-4o", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Strong general-purpose model."},
-    {"name": "gpt-4o-mini", "provider": "openai", "role": "fast cloud fallback", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Fast and cheap cloud tool support."},
-    {"name": "gpt-4.5-preview", "provider": "openai", "role": "cloud advanced", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Larger GPT-4.5 series preview."},
-    {"name": "gpt-4.1", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. GPT-4.1 series."},
-    {"name": "gpt-4.1-mini", "provider": "openai", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Smaller GPT-4.1."},
-    {"name": "gpt-4.1-nano", "provider": "openai", "role": "fastest cloud", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Cheapest GPT-4.1."},
-    {"name": "o3-mini", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Reasoning-optimized model."},
-    {"name": "o4-mini", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Reasoning-optimized model."},
-    {"name": "o1", "provider": "openai", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Full o1 reasoning model."},
-    {"name": "o1-mini", "provider": "openai", "role": "fast cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Lightweight o1 reasoning."},
-    {"name": "o1-preview", "provider": "openai", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Early o1 preview."},
-    {"name": "gpt-4o-latest", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Always points to the latest GPT-4o snapshot."},
-    {"name": "chatgpt-4o-latest", "provider": "openai", "role": "cloud chat", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. ChatGPT-optimized GPT-4o variant."},
-    {"name": "gpt-4-turbo", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. GPT-4 Turbo with vision and tools."},
-    {"name": "gpt-4-turbo-preview", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Preview alias for GPT-4 Turbo."},
-    {"name": "gpt-4", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Original GPT-4 base model."},
-    {"name": "gpt-3.5-turbo", "provider": "openai", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Fast, cheap GPT-3.5 generation."},
-    # --- Gemini / Google ---
-    {"name": "gemini-3.5-flash", "provider": "gemini", "role": "fast cloud frontier", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Gemini 3.5 Flash (GA May 2026). Beats Gemini 3.1 Pro on coding/agentic benchmarks. 1M context, 4x faster output, natively multimodal."},
-    {"name": "gemini-3.5-pro", "provider": "gemini", "role": "cloud deep frontier", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Gemini 3.5 Pro (rolling out June 2026). Highest-capability Gemini for hardest reasoning tasks."},
-    {"name": "gemini-2.5-pro", "provider": "gemini", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Most capable Gemini 2.5 series."},
-    {"name": "gemini-2.5-flash", "provider": "gemini", "role": "fast cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Fast tool-calling model."},
-    {"name": "gemini-2.0-flash", "provider": "gemini", "role": "fast cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Gemini 2.0 Flash generation."},
-    {"name": "gemini-2.0-flash-lite-preview-02-05", "provider": "gemini", "role": "fastest cloud", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Lightweight Gemini 2.0 Flash preview."},
-    {"name": "gemini-2.0-pro-exp-02-05", "provider": "gemini", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Experimental Gemini 2.0 Pro."},
-    {"name": "gemini-1.5-pro-latest", "provider": "gemini", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Earlier 1.5 Pro generation."},
-    {"name": "gemini-1.5-flash-latest", "provider": "gemini", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Earlier 1.5 Flash generation."},
-    {"name": "gemini-1.5-flash-8b-latest", "provider": "gemini", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Smaller, cheaper 1.5 Flash 8B."},
-    {"name": "gemini-1.0-pro-latest", "provider": "gemini", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Original Gemini 1.0 Pro generation."},
-    # --- Kimi / Moonshot ---
-    {"name": "kimi-k2.7", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. k2.7 series (temperature must be 1.0)."},
-    {"name": "kimi-k2.6", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. k2.6 series (temperature must be 1.0)."},
-    {"name": "kimi-k2-0711-preview", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. k2 preview (temperature must be 1.0)."},
-    {"name": "moonshot-v1-8k", "provider": "kimi", "role": "cloud chat", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. Classic Moonshot 8k context."},
-    {"name": "moonshot-v1-32k", "provider": "kimi", "role": "cloud chat", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. Classic Moonshot 32k context."},
-    {"name": "moonshot-v1-128k", "provider": "kimi", "role": "cloud chat", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. Classic Moonshot 128k context."},
-    # --- DeepSeek ---
-    {"name": "deepseek-chat", "provider": "deepseek", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires DEEPSEEK_API_KEY. General chat model."},
-    {"name": "deepseek-reasoner", "provider": "deepseek", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires DEEPSEEK_API_KEY. Reasoning/R1-style model."},
-    # --- Qwen / Alibaba ---
+    {"name": "claude-sonnet-4-6", "provider": "anthropic", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Balanced cloud tool-calling model — default Claude pick."},
+    # --- OpenAI / ChatGPT (pioneer + fast tier only) ---
+    {"name": "gpt-5.5-pro", "provider": "openai", "role": "cloud highest accuracy", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Highest-accuracy GPT-5.5 variant for hardest professional, legal, and research tasks."},
+    {"name": "gpt-4o-mini", "provider": "openai", "role": "fast cloud fallback", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Fast, cheap, generous free-tier quota."},
+    # --- Gemini / Google (pioneer + free-tier-friendly fast model) ---
+    {"name": "gemini-3.5-pro", "provider": "gemini", "role": "cloud deep frontier", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Highest-capability Gemini for hardest reasoning tasks."},
+    {"name": "gemini-2.5-flash", "provider": "gemini", "role": "fast cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Fast, generous free-tier quota via AI Studio."},
+    # --- Kimi / Moonshot (current flagship only) ---
+    {"name": "kimi-k2.7", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. Current flagship (temperature must be 1.0)."},
+    # --- DeepSeek (both current, free-tier-friendly) ---
+    {"name": "deepseek-chat", "provider": "deepseek", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires DEEPSEEK_API_KEY. General chat model, very low cost."},
+    {"name": "deepseek-reasoner", "provider": "deepseek", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires DEEPSEEK_API_KEY. Reasoning/R1-style model, very low cost."},
+    # --- Qwen / Alibaba (flagship only) ---
     {"name": "qwen-max", "provider": "qwen", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires QWEN_API_KEY. Best DashScope model."},
-    {"name": "qwen-plus", "provider": "qwen", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires QWEN_API_KEY. Strong DashScope model."},
-    {"name": "qwen-turbo", "provider": "qwen", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires QWEN_API_KEY. Fast DashScope model."},
     # --- Local Hugging Face endpoint models (TGI/vLLM/llama.cpp server) ---
     {"name": "meta-llama/Llama-3.1-8B-Instruct", "provider": "huggingface", "role": "local HF chat", "size": "medium", "tool_capable": True, "notes": "Requires HUGGINGFACE_BASE_URL pointing to a local OpenAI-compatible endpoint."},
     {"name": "Qwen/Qwen2.5-7B-Instruct", "provider": "huggingface", "role": "local HF chat", "size": "medium", "tool_capable": True, "notes": "Requires HUGGINGFACE_BASE_URL pointing to a local OpenAI-compatible endpoint."},
@@ -404,9 +367,9 @@ _TOOL_CAPABLE_MODELS = frozenset(
 
 PROVIDER_DEFAULTS: dict[str, str] = {
     "ollama": DEFAULT_OLLAMA_MODEL,
-    "openai": os.getenv("OPENAI_MODEL", "gpt-4o"),
+    "openai": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
     "anthropic": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-    "gemini": os.getenv("GEMINI_MODEL", "gemini-2.5-pro"),
+    "gemini": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
     "kimi": os.getenv("KIMI_MODEL", "kimi-k2.7"),
     "deepseek": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     "qwen": os.getenv("QWEN_MODEL", "qwen-max"),
@@ -678,6 +641,11 @@ class VoiceConfigRequest(BaseModel):
 class OllamaPullRequest(BaseModel):
     model: str
     stream: bool = True
+
+
+class LmstudioPullRequest(BaseModel):
+    model: str
+    quantization: str | None = None
 
 
 
@@ -958,6 +926,7 @@ class SettingsRequest(BaseModel):
     lmstudio_base_url: str | None = None
     lmstudio_api_key: str | None = None
     lmstudio_model: str | None = None
+    ollama_base_url: str | None = None
     local_access_token: str | None = None
     shims_peer_url: str | None = None
 
@@ -5415,6 +5384,69 @@ async def ollama_delete(model: str) -> dict[str, Any]:
     return {"ok": True, "deleted": model}
 
 
+@app.post("/lmstudio/pull")
+async def lmstudio_pull(req: LmstudioPullRequest) -> StreamingResponse:
+    """Download a model into LM Studio. Mirrors /ollama/pull's NDJSON shape so the
+    same frontend pull-progress UI works for both providers. LM Studio's download
+    API is job-based (start -> poll status) rather than a single streamed response,
+    so we poll it server-side and re-emit progress as NDJSON."""
+    model = (req.model or "").strip()
+    if not model:
+        raise HTTPException(400, "Invalid model name")
+    async def gen() -> AsyncGenerator[bytes, None]:
+        yield _jsonl({"type": "start", "model": model, "status": f"Resolving {model}"})
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as ping:
+                pr = await ping.get(f"{LMSTUDIO_HOST}/api/v1/models")
+                pr.raise_for_status()
+        except Exception as exc:
+            yield _jsonl({"type": "error", "model": model, "detail": f"LM Studio not reachable at {LMSTUDIO_HOST}: {exc}"})
+            return
+        payload: dict[str, Any] = {"model": model}
+        if req.quantization:
+            payload["quantization"] = req.quantization
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(f"{LMSTUDIO_HOST}/api/v1/models/download", json=payload)
+                if r.status_code >= 400:
+                    detail = r.text[:300]
+                    try:
+                        detail = r.json().get("error", {}).get("message", detail)
+                    except Exception:
+                        pass
+                    yield _jsonl({"type": "error", "model": model, "detail": detail})
+                    return
+                job = r.json()
+                job_id = job.get("job_id") or job.get("id")
+            if not job_id:
+                yield _jsonl({"type": "error", "model": model, "detail": "LM Studio did not return a download job id"})
+                return
+            yield _jsonl({"type": "progress", "model": model, "status": f"Downloading {model}...", "job_id": job_id})
+            last_pct = -1
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                for _ in range(3600):  # up to ~1 hour for very large models
+                    await asyncio.sleep(1.0)
+                    sr = await client.get(f"{LMSTUDIO_HOST}/api/v1/models/download/status/{job_id}")
+                    if sr.status_code >= 400:
+                        continue
+                    status = sr.json()
+                    pct = status.get("progress") or status.get("percent") or 0
+                    state = (status.get("status") or "").lower()
+                    if pct != last_pct:
+                        last_pct = pct
+                        yield _jsonl({"type": "progress", "model": model, "status": f"Downloading {model}: {pct}%", "job_id": job_id})
+                    if state in ("completed", "success", "done"):
+                        yield _jsonl({"type": "done", "model": model, "status": f"Installed {model}"})
+                        return
+                    if state in ("failed", "error", "cancelled"):
+                        yield _jsonl({"type": "error", "model": model, "detail": status.get("error") or f"Download {state}"})
+                        return
+            yield _jsonl({"type": "error", "model": model, "detail": "Download timed out after 1 hour"})
+        except Exception as exc:
+            yield _jsonl({"type": "error", "model": model, "detail": str(exc)[:500]})
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
 @app.post("/brain/turn")
 async def brain_turn(req: ChatRequest) -> StreamingResponse:
     return StreamingResponse(_safe_brain_stream(req), media_type="application/x-ndjson")
@@ -7913,6 +7945,12 @@ async def set_settings(req: SettingsRequest) -> dict[str, Any]:
         DEFAULT_LMSTUDIO_MODEL = model
         PROVIDER_DEFAULTS["lmstudio"] = model
         saved.append("lmstudio")
+    if req.ollama_base_url is not None:
+        url = str(req.ollama_base_url).strip().rstrip("/")
+        _set_env_persistent("OLLAMA_HOST", url)
+        global OLLAMA_HOST
+        OLLAMA_HOST = url or OLLAMA_HOST
+        saved.append("ollama")
     return {"ok": True, "saved": saved, "providers": {p: {"configured": _provider_configured(p), "model": PROVIDER_DEFAULTS[p]} for p in PROVIDER_DEFAULTS}}
 
 @app.post("/system/reset-local")
@@ -8520,6 +8558,19 @@ async def api_settings_models() -> dict[str, Any]:
             {"id": "qwen2.5:7b", "name": "Qwen 2.5", "description": "Smart, detailed", "ram_mb": 6000},
             {"id": "phi3:latest", "name": "Phi-3", "description": "Lightweight", "ram_mb": 2500},
         ]
+    lmstudio_models = []
+    try:
+        for m in await _lmstudio_models_raw(timeout=1.5):
+            size_gb = round((m.get("size") or 0) / (1024**3), 1)
+            lmstudio_models.append({
+                "id": m["name"],
+                "name": m["name"] + (" (loaded)" if m.get("loaded") else ""),
+                "description": f"{m.get('family', 'local')} · {m.get('parameters', '')} · {size_gb}GB".strip(" ·"),
+                "ram_mb": int(size_gb * 1024),
+                "tool_capable": bool(m.get("tool_capable")),
+            })
+    except Exception:
+        pass
     return {
         "ok": True,
         "providers": [
@@ -8534,17 +8585,17 @@ async def api_settings_models() -> dict[str, Any]:
             {"id": "qwen", "name": "Qwen / Alibaba", "requires_internet": True, "privacy": "cloud"},
             {"id": "auto", "name": "Auto-Select", "requires_internet": False, "privacy": "mixed"},
         ],
-        "models": _build_settings_models(ollama_models)
+        "models": _build_settings_models(ollama_models, lmstudio_models)
     }
 
 
-def _build_settings_models(ollama_models: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _build_settings_models(ollama_models: list[dict[str, Any]], lmstudio_models: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
     """Group curated RECOMMENDED_MODELS by provider for the Settings dropdowns.
 
     This keeps the Settings model pickers in sync with /chat/models so users can
     choose any known latest or older model for each provider.
     """
-    models: dict[str, list[dict[str, Any]]] = {"ollama": ollama_models}
+    models: dict[str, list[dict[str, Any]]] = {"ollama": ollama_models, "lmstudio": lmstudio_models or []}
     for pid in ["openai", "anthropic", "gemini", "deepseek", "kimi", "qwen", "huggingface"]:
         entries: list[dict[str, Any]] = []
         for m in RECOMMENDED_MODELS:

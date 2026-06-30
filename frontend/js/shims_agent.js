@@ -470,10 +470,10 @@
     const composer = qs('.composer'); if(!composer || qs('#agent-toolbar')) return;
     const bar = document.createElement('div'); bar.id='agent-toolbar';
     bar.innerHTML =
-      '<button type="button" id="atb-stop" title="Stop the agent">■ Stop</button>'+
-      '<button type="button" id="atb-cap" title="What SHIMS can do">⚡ Capabilities</button>'+
-      '<button type="button" id="atb-palette" title="Command palette (Ctrl/Cmd-K)">⌘K</button>'+
-      '<label id="atb-agent" title="Let SHIMS use tools (run commands, edit files, build, self-patch)"><input type="checkbox" id="atb-agent-cb"> Agent</label>';
+      '<button type="button" id="atb-stop" title="Stop the agent" data-icon="■">■ Stop</button>'+
+      '<button type="button" id="atb-cap" title="What SHIMS can do" data-icon="⚡">⚡ Capabilities</button>'+
+      '<button type="button" id="atb-palette" title="Command palette (Ctrl/Cmd-K)" data-icon="⌘K">⌘K</button>'+
+      '<label id="atb-agent" title="Let SHIMS use tools (run commands, edit files, build, self-patch)" data-icon="🤖"><input type="checkbox" id="atb-agent-cb"> Agent</label>';
     composer.parentElement.insertBefore(bar, composer);
     qs('#atb-stop', bar).onclick = () => { window.shimsAbort && window.shimsAbort(); toastMsg('Stopped','warn'); };
     qs('#atb-cap', bar).onclick = showCapabilities;

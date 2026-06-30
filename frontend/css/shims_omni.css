@@ -504,15 +504,25 @@ a.nav-row{text-decoration:none;color:inherit}
   backdrop-filter:blur(14px);
   padding:10px 16px;
   display:flex;align-items:center;gap:10px;
-  max-height:72px;overflow:hidden;
+  max-height:72px;overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:thin;
 }
+/* Safety net: at narrow widths the toolbar groups (agent toolbar, mode
+   pills, provider pills) can collectively exceed the dock's width. Rather
+   than silently clip them with overflow:hidden, let the dock scroll so
+   every control stays reachable instead of invisibly cut off. */
+.dock::-webkit-scrollbar{height:3px}
+.dock::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 /* Provider selector pills — always visible in dock */
 .provider-select{display:none!important}
 .dock-modes{display:flex;gap:6px;flex-shrink:0}
 .provider-pills{
-  display:flex;gap:5px;flex-wrap:wrap;align-items:center;
-  flex-shrink:0;max-width:420px;overflow:hidden;
+  display:flex;gap:5px;flex-wrap:nowrap;align-items:center;
+  flex-shrink:1;min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:thin;
 }
+.provider-pills::-webkit-scrollbar{height:3px}
+.provider-pills::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 .provider-pill{
   padding:5px 10px;border:1px solid var(--line);border-radius:999px;
   font-size:10px;letter-spacing:.06em;color:var(--text-dim);background:rgba(2,6,22,.6);
@@ -582,6 +592,18 @@ a.nav-row{text-decoration:none;color:inherit}
 .mode-pill.on{color:var(--amber);border-color:var(--amber);background:rgba(255,158,68,.1);box-shadow:0 0 12px rgba(255,158,68,.25)}
 .mode-pill .led{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.4}
 .mode-pill.on .led{opacity:1;box-shadow:0 0 6px currentColor}
+
+/* Below ~1300px the dock (agent toolbar + mode pills + provider pills +
+   composer) no longer fits a single row at full text width. Compact the
+   secondary toolbar text down to icons so the chat input stays the
+   priority element instead of everything fighting for space. */
+@media(max-width:1300px){
+  .mode-pill{padding:7px 9px;font-size:0;gap:0}
+  .mode-pill .led{font-size:9.5px}
+  .mode-pill::after{content:attr(data-short);font-size:9px;letter-spacing:.1em;margin-left:4px}
+  #agent-toolbar button,#agent-toolbar label{font-size:0;padding:6px 8px}
+  #agent-toolbar button::before,#agent-toolbar label::before{content:attr(data-icon);font-size:13px}
+}
 
 /* privacy mode toggle */
 .privacy-bar{display:flex;gap:4px;align-items:center;flex-shrink:0}
@@ -790,6 +812,16 @@ a.nav-row{text-decoration:none;color:inherit}
   font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--cyan);
   margin:10px 0 6px;padding-bottom:6px;border-bottom:1px solid var(--line);
 }
+.local-provider-block{
+  border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 10px;
+  background:rgba(10,18,42,.3);
+}
+details.settings-advanced{margin:6px 0}
+details.settings-advanced summary{cursor:pointer;list-style:none}
+details.settings-advanced summary::-webkit-details-marker{display:none}
+details.settings-advanced summary::before{content:"▸ ";color:var(--text-dim);font-size:10px}
+details.settings-advanced[open] summary::before{content:"▾ "}
+details.settings-advanced summary:hover{color:var(--cyan)}
 .test-btn{
   padding:6px 14px;border:1px solid var(--line);border-radius:4px;
   background:rgba(10,18,42,.5);color:var(--text-dim);font-size:10px;

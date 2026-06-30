@@ -1839,19 +1839,27 @@ function renderModelMenu(data=state.models){
 window.renderModelMenu = renderModelMenu;
 
 function populateProviderModelSelects(data=state.models){
-  // Only show the best/latest model for each top provider. No noise.
+  // Pioneer (flagship) + free-tier-friendly fast model only. No deprecated noise.
   const bestModels = {
-    openai: ['gpt-4.5-preview','gpt-4o','o4-mini','gpt-4.1-mini'],
-    anthropic: ['claude-sonnet-4-6','claude-opus-4-6'],
-    gemini: ['gemini-2.5-pro','gemini-2.5-flash'],
-    kimi: ['kimi-k2.7','kimi-k2.6'],
+    openai: ['gpt-5.5-pro','gpt-4o-mini'],
+    anthropic: ['claude-opus-4-6','claude-sonnet-4-6'],
+    gemini: ['gemini-3.5-pro','gemini-2.5-flash'],
+    kimi: ['kimi-k2.7'],
     deepseek: ['deepseek-chat','deepseek-reasoner'],
+    qwen: ['qwen-max'],
     huggingface: ['meta-llama/Llama-3.1-8B-Instruct','Qwen/Qwen2.5-7B-Instruct']
   };
-  for(const pid of ['openai','anthropic','gemini','kimi','deepseek','huggingface']){
+  for(const pid of ['openai','anthropic','gemini','kimi','deepseek','qwen','huggingface']){
     const sel=$('#model-'+pid); if(!sel) continue;
     const opts=bestModels[pid]||[];
     sel.innerHTML = '<option value="">Default / auto</option>' + opts.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+  }
+  // LM Studio is whatever the user has actually downloaded — list real installed
+  // models (loaded ones first) instead of a fixed/guessed catalog.
+  const lmSel=$('#model-lmstudio');
+  if(lmSel){
+    const lmModels=(data.installed||[]).filter(m=>m.provider==='lmstudio').slice().sort((a,b)=>(b.loaded?1:0)-(a.loaded?1:0));
+    lmSel.innerHTML = '<option value="">Default / auto</option>' + lmModels.map(m=>`<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${m.loaded?' (loaded)':''}</option>`).join('');
   }
   populateAgentModelSelects(data);
 }
@@ -2596,6 +2604,48 @@ async function saveProviderKeys(){
 }
 window.saveProviderKeys=saveProviderKeys;
 
+async function saveLmstudioSettings(){
+  const url=$('#lmstudio-url'); const model=$('#model-lmstudio');
+  if(!url && !model) return;
+  const payload={};
+  if(url && url.value.trim()) payload.lmstudio_base_url=url.value.trim();
+  if(model && model.value.trim() && !/Auto-populate|Default/.test(model.value)) payload.lmstudio_model=model.value.trim();
+  if(!Object.keys(payload).length) return;
+  try{
+    const r=await fetch('/system/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await r.json();
+    if(d.ok) toast('LM Studio settings saved');
+    else toast('LM Studio settings failed','warn');
+  }catch(e){ toast('LM Studio settings failed: '+e.message,'err'); }
+}
+
+async function saveOllamaSettings(){
+  const url=$('#ollama-url');
+  if(!url || !url.value.trim()) return;
+  try{
+    const r=await fetch('/system/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ollama_base_url:url.value.trim()})});
+    const d=await r.json();
+    if(d.ok) toast('Ollama settings saved');
+    else toast('Ollama settings failed','warn');
+  }catch(e){ toast('Ollama settings failed: '+e.message,'err'); }
+}
+
+async function pullLmstudioModel(){
+  const input=$('#lmstudio-pull-name');
+  const model = input ? input.value.trim() : '';
+  if(!model) return toast('Enter a model name or HuggingFace URL','warn');
+  const log=$('#lmstudio-pull-log'); if(log) log.textContent='Resolving '+model+'...';
+  let hadError = false;
+  try{
+    const r=await fetch('/lmstudio/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model})});
+    const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){ const {done,value}=await reader.read(); if(done) break; buf += dec.decode(value,{stream:true}); const lines=buf.split(/\r?\n/); buf=lines.pop()||''; for(const line of lines){ if(!line.trim()) continue; let obj={}; try{obj=JSON.parse(line)}catch(e){} if(obj.type==='error' || obj.error || obj.detail && obj.type==='error'){ hadError=true; } if(log) log.textContent = (obj.status || obj.detail || obj.error || JSON.stringify(obj)).slice(0,500); } }
+    if(hadError){ toast('Download failed for '+model+' — see log','err'); return; }
+    state.provider='lmstudio'; state.selectedModel=model; persist(); toast('Download finished and selected: '+model); await loadModelList();
+  }catch(e){ if(log) log.textContent='Download failed: '+e.message; toast('Download failed: '+e.message,'err'); }
+}
+window.pullLmstudioModel = pullLmstudioModel;
+
 async function saveHfSettings(){
   const url=$('#hf-url'); const key=$('#key-huggingface'); const model=$('#model-huggingface');
   if(!url && !key && !model) return;
@@ -2645,6 +2695,8 @@ async function saveSettings(){
   updateModeButtons();
   await saveProviderKeys();
   await saveHfSettings();
+  await saveLmstudioSettings();
+  await saveOllamaSettings();
   await saveAgentModels();
   await saveMediaSettings();
   const token=$('#key-token'); if(token && token.value.trim()) localStorage.shimsAccessToken = token.value.trim();

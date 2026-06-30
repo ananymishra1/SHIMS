@@ -336,20 +336,15 @@
       </button>
     </div>
     <div class="dock-modes">
-      <button class="mode-pill" id="mode-converse"><span class="led"></span>CONVERSE</button>
-      <button class="mode-pill" id="mode-web"><span class="led"></span>WEB ALLOW</button>
-      <button class="mode-pill" id="mode-peers"><span class="led"></span>PEERS</button>
+      <button class="mode-pill" id="mode-converse" data-short="CONV"><span class="led"></span>CONVERSE</button>
+      <button class="mode-pill" id="mode-web" data-short="WEB"><span class="led"></span>WEB ALLOW</button>
+      <button class="mode-pill" id="mode-peers" data-short="PEER"><span class="led"></span>PEERS</button>
     </div>
     <div class="provider-pills" id="provider-pills" title="Click to select AI provider">
+      <button class="provider-pill" data-provider="auto" data-model="" onclick="setProviderPill(this)">✨ Auto</button>
       <button class="provider-pill" data-provider="lmstudio" data-model="" onclick="setProviderPill(this)">⚡ LM Studio (GPU)<span class="pill-model" id="pill-model-lmstudio"></span></button>
       <button class="provider-pill" data-provider="ollama" data-model="" onclick="setProviderPill(this)">🦙 Ollama<span class="pill-model" id="pill-model-ollama"></span></button>
-      <button class="provider-pill" data-provider="huggingface" data-model="" onclick="setProviderPill(this)">🤗 HuggingFace<span class="pill-model" id="pill-model-huggingface"></span></button>
-      <button class="provider-pill" data-provider="anthropic" data-model="claude-sonnet-4-6" onclick="setProviderPill(this)">🟠 Claude</button>
-      <button class="provider-pill" data-provider="openai" data-model="gpt-4o-mini" onclick="setProviderPill(this)">🟢 GPT</button>
-      <button class="provider-pill" data-provider="gemini" data-model="gemini-2.5-flash" onclick="setProviderPill(this)">🔵 Gemini</button>
-      <button class="provider-pill" data-provider="kimi" data-model="kimi-k2.6" onclick="setProviderPill(this)">🌙 Kimi</button>
-      <button class="provider-pill" data-provider="deepseek" data-model="deepseek-chat" onclick="setProviderPill(this)">🐋 DeepSeek</button>
-      <button class="provider-pill" data-provider="qwen" data-model="qwen-max" onclick="setProviderPill(this)">🌀 Qwen</button>
+      <button class="provider-pill" id="pill-more" data-provider="" data-model="" title="More providers — cloud (Claude, GPT, Gemini, Kimi, DeepSeek, Qwen) and HuggingFace" onclick="document.getElementById('btn-model').click()">☁️ More ▾</button>
     </div>
     <div class="privacy-bar" id="privacy-bar" title="Privacy mode controls whether sensitive data can leave this machine">
       <button class="privacy-btn" data-mode="strict" onclick="setPrivacyMode('strict')">🔒 Strict</button>
@@ -463,24 +458,46 @@
   <div class="pane-header"><div class="pane-title">&#9881; Settings</div><button class="pane-close" onclick="closePane()">&#10005;</button></div>
   <div class="pane-body">
     <div class="pane-section-title">AI Model</div>
-    <div class="setting-row"><label>Provider</label><select class="mf-select" id="set-provider" onchange="loadSettings()"><option value="auto">Auto-Select</option><option value="ollama">Local (Ollama)</option><option value="huggingface">HuggingFace Local</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="kimi">Kimi</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen / Alibaba</option></select></div>
+    <div class="setting-row"><label>Provider</label><select class="mf-select" id="set-provider" onchange="loadSettings()"><option value="auto">Auto-Select</option><option value="lmstudio">Local (LM Studio, GPU)</option><option value="ollama">Local (Ollama)</option><option value="huggingface">HuggingFace Local</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="kimi">Kimi</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen / Alibaba</option></select></div>
     <div class="setting-row"><label>Model</label><select class="mf-select" id="set-model"><option value="auto">Auto</option></select></div>
     <div class="setting-row"><label>Voice Language</label><select class="mf-select" id="set-voice-lang"><option value="en-IN">Indian English</option><option value="hi-IN">Hindi</option><option value="en-US">US English</option></select></div>
     <div class="setting-row"><label>Speech Model (STT)</label><select class="mf-select" id="set-stt-model" onchange="setSttModel(this.value)"><option value="">Loading...</option></select></div>
     <div class="setting-row" style="font-size:11px;color:var(--text-dim);flex-wrap:wrap;gap:8px"><span id="stt-model-status">base = faster, small = more accurate on CPU. Switch applies on your next spoken command.</span><button class="mf-gen-btn secondary" style="font-size:11px;padding:4px 10px" onclick="resetSttCache()">Reset STT cache</button></div>
-    <div class="pane-section-title">Cloud Provider Keys</div>
+    <div class="pane-section-title">⚡ Local Providers <span style="font-weight:400;font-size:10px;color:var(--text-dim)">— free, run on this machine</span></div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">LM Studio is the recommended default — it uses your GPU when available and is usually fastest. Ollama works everywhere as a fallback. Both share the same downloaded model files.</div>
+
+    <div class="local-provider-block">
+      <div class="setting-row"><label>⚡ LM Studio</label><div class="set-row"><input class="key-input" id="lmstudio-url" placeholder="http://127.0.0.1:1234"/><button class="set-test" id="test-lmstudio" onclick="testConnection('lmstudio')">Test</button></div><select class="mf-select set-model" id="model-lmstudio"><option>Auto-populate</option></select></div>
+      <div class="setting-row" style="font-size:11px;color:var(--text-dim);flex-wrap:wrap;gap:8px">
+        <span>Start LM Studio's server first (<code>lms server start</code>, or the LM Studio app's Developer tab).</span>
+      </div>
+      <div class="setting-row"><label>Download a model</label><div class="set-row"><input class="key-input" id="lmstudio-pull-name" placeholder="e.g. qwen2.5-coder-7b or a huggingface.co URL"/><button class="set-test" onclick="pullLmstudioModel()">Download</button></div></div>
+      <div class="setting-row" style="font-size:11px;color:var(--text-dim)" id="lmstudio-pull-log"></div>
+    </div>
+
+    <div class="local-provider-block">
+      <div class="setting-row"><label>🦙 Ollama</label><div class="set-row"><input class="key-input" id="ollama-url" placeholder="http://127.0.0.1:11434"/><button class="set-test" id="test-ollama" onclick="testConnection('ollama')">Test</button></div><select class="mf-select set-model" id="model-ollama"><option>Auto-populate</option></select></div>
+      <div class="setting-row"><label>Download a model</label><div class="set-row"><input class="key-input" id="v9-pull-model" placeholder="e.g. qwen2.5-coder:14b"/><button class="set-test" onclick="pullModel()">Download</button></div></div>
+      <div class="setting-row" style="font-size:11px;color:var(--text-dim)" id="v9-pull-log"></div>
+    </div>
+
+    <div class="local-provider-block">
+      <div class="setting-row"><label>🤗 HuggingFace</label><div class="set-row"><input class="key-input" id="hf-url" placeholder="http://127.0.0.1:8080"/><button class="set-test" id="test-huggingface" onclick="testConnection('huggingface')">Test</button></div><select class="mf-select set-model" id="model-huggingface"><option>Auto-populate</option></select></div>
+      <div class="setting-row" style="font-size:11px;color:var(--text-dim);flex-wrap:wrap;gap:8px">
+        <span>For an existing <b>local OpenAI-compatible server</b> (TGI, vLLM, llama.cpp server) — not for downloading new models. Most people don't need this; use LM Studio or Ollama instead.</span>
+      </div>
+      <div class="setting-row"><label>HF Token (optional)</label><input class="key-input" id="key-huggingface" type="password" placeholder="hf_... (only for gated model downloads)"/></div>
+    </div>
+
+    <div class="pane-section-title">☁️ Cloud Providers <span style="font-weight:400;font-size:10px;color:var(--text-dim)">— pioneer models only, requires API key</span></div>
     <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Only configure the ones you use. Click <b>Get Key</b> to open the provider's signup page.</div>
     <div class="setting-row"><label>🟢 OpenAI</label><div class="set-row"><input class="key-input" id="key-openai" type="password" placeholder="sk-..."/><a href="https://platform.openai.com/api-keys" target="_blank" class="set-test" style="text-decoration:none">Get Key</a><button class="set-test" id="test-openai" onclick="testConnection('openai')">Test</button></div><select class="mf-select set-model" id="model-openai"><option>Auto-populate</option></select></div>
     <div class="setting-row"><label>🟣 Anthropic Claude</label><div class="set-row"><input class="key-input" id="key-anthropic" type="password" placeholder="sk-ant-..."/><a href="https://console.anthropic.com/settings/keys" target="_blank" class="set-test" style="text-decoration:none">Get Key</a><button class="set-test" id="test-anthropic" onclick="testConnection('anthropic')">Test</button></div><select class="mf-select set-model" id="model-anthropic"><option>Auto-populate</option></select></div>
     <div class="setting-row"><label>🔵 Gemini / Google</label><div class="set-row"><input class="key-input" id="key-gemini" type="password" placeholder="AI..."/><a href="https://aistudio.google.com/app/apikey" target="_blank" class="set-test" style="text-decoration:none">Get Key</a><button class="set-test" id="test-gemini" onclick="testConnection('gemini')">Test</button></div><select class="mf-select set-model" id="model-gemini"><option>Auto-populate</option></select></div>
     <div class="setting-row"><label>🌙 Kimi / Moonshot</label><div class="set-row"><input class="key-input" id="key-kimi" type="password" placeholder="..."/><a href="https://platform.moonshot.cn/console/api-keys" target="_blank" class="set-test" style="text-decoration:none">Get Key</a><button class="set-test" id="test-kimi" onclick="testConnection('kimi')">Test</button></div><select class="mf-select set-model" id="model-kimi"><option>Auto-populate</option></select></div>
     <div class="setting-row"><label>🔥 DeepSeek</label><div class="set-row"><input class="key-input" id="key-deepseek" type="password" placeholder="..."/><a href="https://platform.deepseek.com/api_keys" target="_blank" class="set-test" style="text-decoration:none">Get Key</a><button class="set-test" id="test-deepseek" onclick="testConnection('deepseek')">Test</button></div><select class="mf-select set-model" id="model-deepseek"><option>Auto-populate</option></select></div>
+    <div class="setting-row"><label>🌀 Qwen / Alibaba</label><div class="set-row"><input class="key-input" id="key-qwen" type="password" placeholder="..."/><a href="https://dashscope.console.aliyun.com/apiKey" target="_blank" class="set-test" style="text-decoration:none">Get Key</a><button class="set-test" id="test-qwen" onclick="testConnection('qwen')">Test</button></div><select class="mf-select set-model" id="model-qwen"><option>Auto-populate</option></select></div>
 
-    <div class="pane-section-title">Local HuggingFace Endpoint</div>
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Connect to a <b>local OpenAI-compatible server</b> running on your machine (TGI, vLLM, llama.cpp server, etc.). Set the URL below, then Test to fetch available models. The model names shown are whatever your local server exposes — they are not downloaded from HuggingFace Hub.</div>
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px"><b>Setup:</b> 1) Start a local server (e.g. <code>vllm serve meta-llama/Llama-3.1-8B-Instruct</code>), 2) Paste the URL here, 3) Click Test. The HF Token is only for gated downloads — not needed for inference.</div>
-    <div class="setting-row"><label>Endpoint URL</label><div class="set-row"><input class="key-input" id="hf-url" placeholder="http://127.0.0.1:8080"/><button class="set-test" id="test-huggingface" onclick="testConnection('huggingface')">Test</button></div><select class="mf-select set-model" id="model-huggingface"><option>Auto-populate</option></select></div>
-    <div class="setting-row"><label>HF Token (optional)</label><input class="key-input" id="key-huggingface" type="password" placeholder="hf_... (for gated model downloads)"/></div>
     <div class="pane-section-title">Agent Specialist Models</div>
     <div class="setting-row"><label>Router</label><select class="mf-select agent-model-select" id="agent-model-router" data-env="SHIMS_ROUTER_MODEL"><option value="">Auto</option></select></div>
     <div class="setting-row"><label>Fast</label><select class="mf-select agent-model-select" id="agent-model-fast" data-env="SHIMS_FAST_MODEL"><option value="">Auto</option></select></div>
@@ -491,16 +508,20 @@
     <div class="setting-row"><label>Research</label><select class="mf-select agent-model-select" id="agent-model-research" data-env="SHIMS_RESEARCH_MODEL"><option value="">Auto</option></select></div>
     <div class="pane-section-title">Privacy & Data Safety</div>
     <div class="setting-row"><label>Privacy Mode</label><select class="mf-select" id="set-privacy-mode"><option value="strict">🔒 Strict — Local only, never cloud</option><option value="balanced">⚖️ Balanced — Auto-detect sensitive data</option><option value="performance">🚀 Performance — Prefer cloud, ask for sensitive</option></select></div>
-    <div class="pane-section-title">Online Audio / Video APIs</div>
-    <div class="setting-row"><label>Audio Provider</label><select class="mf-select" id="set-audio-backend"><option value="auto">Auto</option><option value="openai">OpenAI TTS</option><option value="generic">Generic webhook</option><option value="local">Local fallback</option></select></div>
-    <div class="setting-row"><label>OpenAI TTS</label><div class="set-row"><input class="key-input" id="set-openai-tts-model" placeholder="gpt-4o-mini-tts"/><input class="key-input" id="set-openai-tts-voice" placeholder="alloy"/></div></div>
-    <div class="setting-row"><label>Generic Audio API</label><div class="set-row"><input class="key-input" id="set-audio-api-url" placeholder="https://your-audio-api/generate"/><input class="key-input" id="set-audio-api-key" type="password" placeholder="optional audio API key"/></div></div>
-    <div class="setting-row"><label>Video Provider</label><select class="mf-select" id="set-video-backend"><option value="auto">Auto</option><option value="openai">OpenAI Sora</option><option value="qwen">Qwen / Alibaba Video</option><option value="generic">Generic webhook</option><option value="local">Local storyboard/FFmpeg</option></select></div>
-    <div class="setting-row"><label>OpenAI Video</label><div class="set-row"><input class="key-input" id="set-openai-video-model" placeholder="sora-2"/><input class="key-input" id="set-openai-video-size" placeholder="1280x720"/><input class="key-input" id="set-openai-video-seconds" type="number" min="1" max="20" placeholder="4"/></div></div>
-    <div class="setting-row"><label>Generic Video API</label><div class="set-row"><input class="key-input" id="set-video-api-url" placeholder="https://your-video-api/generate"/><input class="key-input" id="set-video-api-key" type="password" placeholder="optional video API key"/></div></div>
-    <div class="pane-section-title">Hosting &amp; Access</div>
-    <div class="setting-row"><label>Local Access Token</label><input class="key-input" id="key-token" type="password" placeholder="Paste hosting access token..."/></div>
-    <div class="setting-row"><label>Peer URL (v1 &#8596; v2)</label><input class="key-input" id="key-peer" placeholder="http://127.0.0.1:8001"/></div>
+    <details class="settings-advanced">
+      <summary class="pane-section-title">Online Audio / Video APIs <span style="font-weight:400;font-size:10px;color:var(--text-dim)">— optional, click to expand</span></summary>
+      <div class="setting-row"><label>Audio Provider</label><select class="mf-select" id="set-audio-backend"><option value="auto">Auto</option><option value="openai">OpenAI TTS</option><option value="generic">Generic webhook</option><option value="local">Local fallback</option></select></div>
+      <div class="setting-row"><label>OpenAI TTS</label><div class="set-row"><input class="key-input" id="set-openai-tts-model" placeholder="gpt-4o-mini-tts"/><input class="key-input" id="set-openai-tts-voice" placeholder="alloy"/></div></div>
+      <div class="setting-row"><label>Generic Audio API</label><div class="set-row"><input class="key-input" id="set-audio-api-url" placeholder="https://your-audio-api/generate"/><input class="key-input" id="set-audio-api-key" type="password" placeholder="optional audio API key"/></div></div>
+      <div class="setting-row"><label>Video Provider</label><select class="mf-select" id="set-video-backend"><option value="auto">Auto</option><option value="openai">OpenAI Sora</option><option value="qwen">Qwen / Alibaba Video</option><option value="generic">Generic webhook</option><option value="local">Local storyboard/FFmpeg</option></select></div>
+      <div class="setting-row"><label>OpenAI Video</label><div class="set-row"><input class="key-input" id="set-openai-video-model" placeholder="sora-2"/><input class="key-input" id="set-openai-video-size" placeholder="1280x720"/><input class="key-input" id="set-openai-video-seconds" type="number" min="1" max="20" placeholder="4"/></div></div>
+      <div class="setting-row"><label>Generic Video API</label><div class="set-row"><input class="key-input" id="set-video-api-url" placeholder="https://your-video-api/generate"/><input class="key-input" id="set-video-api-key" type="password" placeholder="optional video API key"/></div></div>
+    </details>
+    <details class="settings-advanced">
+      <summary class="pane-section-title">Hosting &amp; Access <span style="font-weight:400;font-size:10px;color:var(--text-dim)">— optional, click to expand</span></summary>
+      <div class="setting-row"><label>Local Access Token</label><input class="key-input" id="key-token" type="password" placeholder="Paste hosting access token..."/></div>
+      <div class="setting-row"><label>Peer URL (v1 &#8596; v2)</label><input class="key-input" id="key-peer" placeholder="http://127.0.0.1:8001"/></div>
+    </details>
     <div class="pane-section-title">Appearance</div>
     <div class="setting-row"><label>Theme Preview</label><div class="set-theme">
       <button class="theme-chip on" data-theme="dark" onclick="setThemePreview('dark')">Dark</button>
