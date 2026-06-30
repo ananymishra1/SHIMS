@@ -1672,6 +1672,32 @@ async def _lmstudio_names() -> list[str]:
     return [m["name"] for m in await _lmstudio_models_raw()]
 
 
+async def _lmstudio_free_memory_for(target_model: str, timeout: float = 15.0) -> None:
+    """Unload any other currently-loaded LM Studio model so a large model can
+    JIT-load without failing from memory contention. This hardware can hold at
+    most one ~40GB+ model at a time alongside everything else running, so
+    loading a fallback model on top of an already-loaded one reliably fails
+    around 80-90% rather than falling back to CPU swap."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(f"{LMSTUDIO_HOST}/api/v1/models")
+            r.raise_for_status()
+            data = r.json()
+            for item in data.get("models", []):
+                if item.get("key") == target_model:
+                    continue
+                for inst in item.get("loaded_instances") or []:
+                    inst_id = inst.get("id")
+                    if not inst_id:
+                        continue
+                    try:
+                        await client.post(f"{LMSTUDIO_HOST}/api/v1/models/unload", json={"instance_id": inst_id})
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+
 async def _hf_names() -> list[str]:
     return [m["name"] for m in await _hf_models_raw()]
 
@@ -4653,6 +4679,56 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                 return
             except Exception as exc:
                 log_event("provider.stream_error", route="ollama-stream-error", provider="ollama", model=stream_model, ok=False, message=str(exc)[:180], metadata={"session_id": session_id})
+                # Prefer the exact same model via LM Studio (GPU-fast) over falling
+                # back to a different Ollama model — if every installed Ollama model
+                # is large (no small/fast one), the old fallback just picked another
+                # slow CPU model and timed out again. Same weights, same answer
+                # quality, just not stuck on CPU.
+                lm_equivalent = stream_model.replace(":", "-")
+                lm_names_fb = await _lmstudio_names()
+                if lm_equivalent in lm_names_fb:
+                    yield _jsonl({"type": "status", "content": f"{stream_model} was too slow on Ollama (CPU); switching to the same model via LM Studio (GPU)"})
+                    # Loading a large model on top of an already-loaded one reliably
+                    # fails from memory contention on this hardware — free other
+                    # loaded models first so the JIT-load actually succeeds.
+                    await _lmstudio_free_memory_for(lm_equivalent)
+                    lm_answer = ""
+                    pending_lm_fb: list[bytes] = []
+
+                    async def collect_lm_fb(delta: str) -> None:
+                        nonlocal lm_answer
+                        lm_answer += delta
+                        pending_lm_fb.append(_jsonl({"type": "token", "content": delta}))
+
+                    try:
+                        # Generous first-token timeout: this may be a cold JIT-load of a
+                        # large model (tens of GB from disk) before generation even starts.
+                        collect_task = asyncio.create_task(_collect_lmstudio_stream(
+                            lm_equivalent, messages, realtime=realtime_request,
+                            max_tokens=response_max_tokens, on_delta=collect_lm_fb,
+                            first_token_timeout=180.0,
+                        ))
+                        while not collect_task.done():
+                            while pending_lm_fb:
+                                yield pending_lm_fb.pop(0)
+                            await asyncio.sleep(0.02)
+                        lm_answer = await collect_task
+                        while pending_lm_fb:
+                            yield pending_lm_fb.pop(0)
+                        if lm_answer.strip():
+                            trust = build_trust(
+                                route="lmstudio-local-stream-fallback",
+                                evidence=context_evidence,
+                                missing_evidence=[] if context_evidence else ["No tool, web, or retrieved RAG evidence was attached to this model response."],
+                                requested_level="draft",
+                            )
+                            _store_assistant_turn(lm_answer)
+                            _remember_session_turn(session_id, req.message, lm_answer, route="lmstudio-local-stream-fallback", agent=plan.agent, provider="lmstudio", model=lm_equivalent, metadata={"brain_context": brain_ctx, "trust": trust, "fallback_from": f"ollama:{stream_model}"})
+                            log_event("turn.done", route="lmstudio-local-stream-fallback", provider="lmstudio", model=lm_equivalent, latency_ms=(time.perf_counter()-started)*1000, ok=True, message=req.message, metadata={"session_id": session_id, "fallback_from": stream_model})
+                            yield _jsonl({"type": "done", "session_id": session_id, "model": lm_equivalent, "provider": "lmstudio", "route": "lmstudio-local-stream-fallback", **_trust_fields(trust)})
+                            return
+                    except Exception as lm_fb_exc:
+                        log_event("provider.stream_error", route="lmstudio-fallback-stream-error", provider="lmstudio", model=lm_equivalent, ok=False, message=str(lm_fb_exc)[:180], metadata={"session_id": session_id, "fallback_from": stream_model})
                 fallback = _preferred_local_model(names, realtime=True, exclude={stream_model}, prefer_tiny=True)
                 if fallback in names and fallback != stream_model:
                     yield _jsonl({"type": "status", "content": f"{stream_model} was too slow; switching to {fallback}"})
@@ -4760,6 +4836,12 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             answer = ""
             route = "lmstudio-local-stream"
             try:
+                # Only free other loaded models if we're about to cold-load a
+                # different one — skip this when the target is already warm so
+                # we don't pay an unload+reload cost on every single turn.
+                target_loaded = any(m["name"] == stream_model and m.get("loaded") for m in lm_models)
+                if not target_loaded:
+                    await _lmstudio_free_memory_for(stream_model)
                 pending_lm_chunks: list[bytes] = []
                 async def collect_lm_delta(delta: str) -> None:
                     nonlocal answer
