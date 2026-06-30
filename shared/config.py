@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Standard logger for shared/* modules (e.g. get_logger("agent_loop"))."""
+    return logging.getLogger(f"shims.{name}")
 
 try:
     from dotenv import load_dotenv

@@ -235,7 +235,7 @@ function updateModeButtons(){
   $$('.provider-pill').forEach(p=>{
     const on = p.dataset.provider === (state.provider||'ollama');
     p.classList.toggle('on', on);
-    if(on && p.dataset.provider==='ollama'){
+    if(on && (p.dataset.provider==='ollama' || p.dataset.provider==='lmstudio' || p.dataset.provider==='huggingface')){
       const modelSpan = p.querySelector('.pill-model');
       if(modelSpan) modelSpan.textContent = state.selectedModel ? ' · '+state.selectedModel.slice(0,18) : '';
     }
@@ -249,6 +249,8 @@ window.setProviderPill = function setProviderPill(btn){
   state.provider = provider;
   if(provider === 'ollama'){
     state.selectedModel = chooseDefaultLocal(state.models);
+  } else if(provider === 'lmstudio'){
+    state.selectedModel = chooseDefaultLmstudio(state.models);
   } else {
     state.selectedModel = model;
   }
@@ -267,9 +269,17 @@ window.setPrivacyMode = setPrivacyMode;
 function isCloudModelName(name){ return /claude|sonnet|haiku|opus|gpt-|gpt_|gemini|moonshot|kimi/i.test(String(name||'')); }
 function isLocalModelName(name){ return /^(llama|qwen|mistral|codellama|phi|gemma|deepseek-r1|mixtral)/i.test(String(name||'')) || (String(name||'').includes(':') && !isCloudModelName(name)); }
 function chooseDefaultLocal(data=state.models){
-  const names=(data.installed||[]).map(m=>m.name);
+  const names=(data.installed||[]).filter(m=>!m.provider||m.provider==='ollama').map(m=>m.name);
   for(const x of ['qwen2.5:7b','llama3.2:latest','llama3.2','qwen2.5:14b','mistral-small:latest']) if(names.includes(x)) return x;
   return names[0] || data.default || 'llama3.2:latest';
+}
+function chooseDefaultLmstudio(data=state.models){
+  const models=(data.installed||[]).filter(m=>m.provider==='lmstudio');
+  const loaded=models.filter(m=>m.loaded);
+  const pickFrom = loaded.length ? loaded : models;
+  if(!pickFrom.length) return '';
+  // Prefer the smallest (fastest to cold-load / already-loaded) model.
+  return pickFrom.slice().sort((a,b)=>(a.size||Infinity)-(b.size||Infinity))[0].name;
 }
 function syncProviderModel(data=state.models){
   const installed=(data.installed||[]).map(m=>m.name);
@@ -277,6 +287,11 @@ function syncProviderModel(data=state.models){
   if((state.provider||'ollama') === 'ollama'){
     if(!state.selectedModel || isCloudModelName(state.selectedModel) || (state.selectedModel||'').includes('/') || (installed.length && !installed.includes(state.selectedModel) && !isLocalModelName(state.selectedModel))){
       state.selectedModel = chooseDefaultLocal(data);
+    }
+  } else if(state.provider === 'lmstudio'){
+    const lmNames=(data.installed||[]).filter(m=>m.provider==='lmstudio').map(m=>m.name);
+    if(!state.selectedModel || !lmNames.includes(state.selectedModel)){
+      state.selectedModel = chooseDefaultLmstudio(data);
     }
   } else {
     // User explicitly chose a provider — keep it, but pick a model from that provider if none is set
@@ -323,7 +338,7 @@ function setBubbleMeta(b, meta){
   const route = (meta.route || '').toLowerCase();
   if(route.includes('privacy-guard')){
     badge = '<span class="provider-badge privacy" title="Sensitive data detected — forced local processing">🔒 Privacy Guard</span>';
-  } else if(provider === 'ollama' || provider === 'local'){
+  } else if(provider === 'ollama' || provider === 'local' || provider === 'lmstudio' || provider === 'huggingface'){
     badge = '<span class="provider-badge local" title="Data stays on this machine">🏠 Local</span>';
   } else if(provider && provider !== 'tool' && provider !== 'web'){
     badge = '<span class="provider-badge cloud" title="Data sent to cloud provider">☁️ ' + escapeHtml(provider.toUpperCase()) + '</span>';
@@ -1781,6 +1796,16 @@ function renderModelMenu(data=state.models){
   const installed=data.installed||[]; const rec=data.recommended||[]; const cloud=data.all_cloud||data.cloud||[];
   const toolBadge = (m) => m.tool_capable ? ' <span title="Tool-capable" style="color:#74ffb9;font-size:10px">🛠</span>' : '';
   let html='';
+  // LM Studio models (GPU-accelerated local) — shown first since it's the fast path
+  const lmModels = installed.filter(m=>m.provider==='lmstudio');
+  if(lmModels.length){
+    html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">⚡ LM Studio (GPU)</div>';
+    html += lmModels.map(m=>{
+      const loadedBadge = m.loaded ? ' <span title="Loaded — instant response" style="color:#74ffb9;font-size:10px">●</span>' : '';
+      const tc = m.tool_capable ? toolBadge(m) : '';
+      return `<button class="model-card" data-provider="lmstudio" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}${tc}${loadedBadge}</div><div class="m-meta">${escapeHtml([m.parameters,m.family,m.quantization].filter(Boolean).join(' · ')||'local model')}</div></button>`;
+    }).join('');
+  }
   // Installed models
   html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">📦 Installed</div>';
   if(installed.length){

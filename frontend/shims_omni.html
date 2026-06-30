@@ -341,6 +341,7 @@
       <button class="mode-pill" id="mode-peers"><span class="led"></span>PEERS</button>
     </div>
     <div class="provider-pills" id="provider-pills" title="Click to select AI provider">
+      <button class="provider-pill" data-provider="lmstudio" data-model="" onclick="setProviderPill(this)">⚡ LM Studio (GPU)<span class="pill-model" id="pill-model-lmstudio"></span></button>
       <button class="provider-pill" data-provider="ollama" data-model="" onclick="setProviderPill(this)">🦙 Ollama<span class="pill-model" id="pill-model-ollama"></span></button>
       <button class="provider-pill" data-provider="huggingface" data-model="" onclick="setProviderPill(this)">🤗 HuggingFace<span class="pill-model" id="pill-model-huggingface"></span></button>
       <button class="provider-pill" data-provider="anthropic" data-model="claude-sonnet-4-6" onclick="setProviderPill(this)">🟠 Claude</button>
