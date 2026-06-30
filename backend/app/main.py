@@ -222,6 +222,8 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", os.getenv("OLLAMA_BASE_URL", "http://127.
 DEFAULT_OLLAMA_MODEL = os.getenv("SHIMS_OLLAMA_MODEL", os.getenv("OLLAMA_MODEL", "llama3.2:latest"))
 HUGGINGFACE_HOST = os.getenv("HUGGINGFACE_BASE_URL", settings.huggingface_base_url).rstrip("/")
 DEFAULT_HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", settings.huggingface_model)
+LMSTUDIO_HOST = os.getenv("LMSTUDIO_BASE_URL", settings.lmstudio_base_url).rstrip("/")
+DEFAULT_LMSTUDIO_MODEL = os.getenv("LMSTUDIO_MODEL", settings.lmstudio_model)
 ENTERPRISE_ENABLED = settings.enterprise_pairing_enabled
 ENTERPRISE_URL = os.getenv("SHIMS_ENTERPRISE_URL", settings.enterprise_url).rstrip("/")
 OLLAMA_MODEL_ALIASES = {
@@ -409,6 +411,7 @@ PROVIDER_DEFAULTS: dict[str, str] = {
     "deepseek": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     "qwen": os.getenv("QWEN_MODEL", "qwen-max"),
     "huggingface": DEFAULT_HUGGINGFACE_MODEL,
+    "lmstudio": DEFAULT_LMSTUDIO_MODEL,
 }
 # Normalize Kimi model names at startup so "k2.6" → "kimi-k2.6" everywhere.
 _raw = PROVIDER_DEFAULTS.get("kimi", "")
@@ -952,6 +955,9 @@ class SettingsRequest(BaseModel):
     huggingface_base_url: str | None = None
     huggingface_api_key: str | None = None
     huggingface_model: str | None = None
+    lmstudio_base_url: str | None = None
+    lmstudio_api_key: str | None = None
+    lmstudio_model: str | None = None
     local_access_token: str | None = None
     shims_peer_url: str | None = None
 
@@ -1561,7 +1567,7 @@ def _cloud_provider_from_model(model: str | None) -> str | None:
 
 
 def _provider_configured(provider: str) -> bool:
-    if provider in {"ollama", "huggingface"}:
+    if provider in {"ollama", "huggingface", "lmstudio"}:
         return True
     env = PROVIDER_ENV.get(provider)
     return bool(env and _clean_secret(os.getenv(env)))
@@ -1643,6 +1649,58 @@ async def _hf_models_raw(timeout: float = 2.5) -> list[dict[str, Any]]:
         return [seen[k] for k in sorted(seen)]
     except Exception:
         return []
+
+
+async def _lmstudio_models_raw(timeout: float = 2.5) -> list[dict[str, Any]]:
+    """List models LM Studio has downloaded/available.
+
+    Uses LM Studio's native /api/v1/models endpoint rather than the OpenAI-
+    compatible /v1/models because it reports real size, architecture, whether
+    the model is currently loaded (loaded_instances), and whether it was
+    actually trained for tool use — all of which beat guessing from the
+    model name the way the generic is_tool_capable() heuristic does.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            headers: dict[str, str] = {}
+            key = _clean_secret(os.getenv("LMSTUDIO_API_KEY"))
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+            r = await client.get(f"{LMSTUDIO_HOST}/api/v1/models", headers=headers)
+            r.raise_for_status()
+            data = r.json()
+        out: list[dict[str, Any]] = []
+        for item in data.get("models", []):
+            if item.get("type") != "llm":
+                continue
+            name = item.get("key")
+            if not name:
+                continue
+            caps = item.get("capabilities") or {}
+            size_bytes = item.get("size_bytes") or 0
+            out.append({
+                "name": name,
+                "model": name,
+                "provider": "lmstudio",
+                "family": item.get("architecture") or "",
+                "parameters": item.get("params_string") or "",
+                "quantization": (item.get("quantization") or {}).get("name", "") if isinstance(item.get("quantization"), dict) else "",
+                "modified_at": None,
+                "size": size_bytes,
+                "installed": True,
+                "loaded": bool(item.get("loaded_instances")),
+                "is_default": name == DEFAULT_LMSTUDIO_MODEL,
+                "tool_capable": bool(caps.get("trained_for_tool_use")) or is_tool_capable(name),
+            })
+        out = mark_tool_capable(out)
+        seen: dict[str, dict[str, Any]] = {m["name"]: m for m in out}
+        return [seen[k] for k in sorted(seen)]
+    except Exception:
+        return []
+
+
+async def _lmstudio_names() -> list[str]:
+    return [m["name"] for m in await _lmstudio_models_raw()]
 
 
 async def _hf_names() -> list[str]:
@@ -1834,6 +1892,42 @@ def _ollama_aliases_payload() -> dict[str, str]:
     return dict(sorted(OLLAMA_MODEL_ALIASES.items()))
 
 
+async def _lmstudio_pick_default(lm_models: list[dict[str, Any]]) -> str:
+    """Pick the best LM Studio model when none was explicitly requested.
+
+    Prefers a model that's already loaded (instant response, no JIT-load
+    wait) over the smallest available model (fastest to cold-load) over
+    whatever sorts first alphabetically — picking the largest installed
+    model (e.g. a 104B) as a "default" would make every auto-routed chat
+    eat a multi-minute load time.
+    """
+    names = {m["name"] for m in lm_models}
+    if DEFAULT_LMSTUDIO_MODEL and DEFAULT_LMSTUDIO_MODEL in names:
+        return DEFAULT_LMSTUDIO_MODEL
+    loaded = [m for m in lm_models if m.get("loaded")]
+    if loaded:
+        return sorted(loaded, key=lambda m: m.get("size") or 0)[0]["name"]
+    if lm_models:
+        return sorted(lm_models, key=lambda m: m.get("size") or float("inf"))[0]["name"]
+    return ""
+
+
+async def _local_default_provider_model() -> tuple[str, str]:
+    """Pick the best local backend when no explicit choice was made.
+
+    LM Studio is preferred over Ollama when it has a model loaded/available:
+    on this hardware LM Studio's Vulkan/GPU backend is dramatically faster than
+    Ollama's CPU fallback for the same GGUF weights. Ollama remains the
+    fallback so nothing breaks if LM Studio isn't running.
+    """
+    lm_models = await _lmstudio_models_raw()
+    if lm_models:
+        default = await _lmstudio_pick_default(lm_models)
+        return "lmstudio", default
+    names = await _ollama_names()
+    return "ollama", _preferred_local_model(names)
+
+
 async def _resolve_provider_model(provider: str | None, model: str | None, *, privacy_mode: str = "balanced", text: str | None = None) -> tuple[str, str, str]:
     """Single source of truth for model/provider routing.
 
@@ -1844,7 +1938,17 @@ async def _resolve_provider_model(provider: str | None, model: str | None, *, pr
     requested_provider = (provider or "auto").strip().lower() or "auto"
     requested_model = _normalize_ollama_model_name(model)
     names = await _ollama_names()
+    lm_names = await _lmstudio_names()
     local_default = _preferred_local_model(names)
+    local_provider, local_model = await _local_default_provider_model()
+
+    if requested_provider == "lmstudio":
+        if requested_model and requested_model in lm_names:
+            return "lmstudio", requested_model, "selected-local"
+        if lm_names:
+            default = local_model if local_provider == "lmstudio" else lm_names[0]
+            return "lmstudio", default, "forced-local-from-provider"
+        return "ollama", local_default, "lmstudio-not-configured-fallback-local"
 
     if requested_provider in {"local", "ollama"}:
         if requested_model and requested_model in names:
@@ -1852,6 +1956,9 @@ async def _resolve_provider_model(provider: str | None, model: str | None, *, pr
         if requested_model and _looks_local_model(requested_model) and requested_model not in _cloud_model_names():
             return "ollama", requested_model, "local-requested"
         return "ollama", local_default, "forced-local-from-provider"
+
+    if requested_model and requested_model in lm_names:
+        return "lmstudio", requested_model, "local-model-overrides-stale-provider"
 
     if requested_model and (_looks_local_model(requested_model) or requested_model in names):
         return "ollama", requested_model, "local-model-overrides-stale-provider"
@@ -1863,28 +1970,30 @@ async def _resolve_provider_model(provider: str | None, model: str | None, *, pr
         if text:
             from shared.privacy_guard import classify_sensitivity
             if classify_sensitivity(text) == "high":
-                return "ollama", local_default, "privacy-guard-high-explicit-override"
+                return local_provider, local_model, "privacy-guard-high-explicit-override"
         p = requested_provider
         m = requested_model if requested_model and not _looks_local_model(requested_model) else PROVIDER_DEFAULTS[p]
-        if not _provider_configured(p) and names:
-            return "ollama", local_default, f"cloud-{p}-not-configured-fallback-local"
+        if not _provider_configured(p) and (names or lm_names):
+            return local_provider, local_model, f"cloud-{p}-not-configured-fallback-local"
         return p, m, "explicit-cloud-provider"
 
     # Privacy guard: check if text contains sensitive data before routing to cloud (auto mode only)
     if text:
         allowed, reason = can_use_cloud(text, privacy_mode)
         if not allowed:
-            return "ollama", local_default, f"privacy-guard-{reason}"
+            return local_provider, local_model, f"privacy-guard-{reason}"
 
     cloud_provider = _cloud_provider_from_model(requested_model)
     if cloud_provider:
         if _provider_configured(cloud_provider):
             return cloud_provider, requested_model or PROVIDER_DEFAULTS[cloud_provider], "cloud-model-selected"
-        if names:
-            return "ollama", local_default, f"cloud-{cloud_provider}-not-configured-fallback-local"
+        if names or lm_names:
+            return local_provider, local_model, f"cloud-{cloud_provider}-not-configured-fallback-local"
         return cloud_provider, requested_model or PROVIDER_DEFAULTS[cloud_provider], "cloud-model-no-local-fallback"
 
-    return "ollama", requested_model or local_default, "auto-local-first"
+    if requested_model:
+        return local_provider, requested_model, "auto-local-first"
+    return local_provider, local_model, "auto-local-first"
 
 
 def _guard_duplicate(session_id: str, user_text: str, source: str | None) -> bool:
@@ -2467,11 +2576,30 @@ async def _make_plan(req: ChatRequest) -> TurnPlan:
         )
     # Agent-aware defaults: if the user left provider/model on auto, pick a
     # specialist model for the detected agent (e.g. coder → SHIMS_CODER_MODEL).
-    agent_default_provider, agent_default_model, _ = agent_model_router.resolve_agent(agent)
+    agent_default_provider, agent_default_model, agent_reason = agent_model_router.resolve_agent(agent)
     requested_provider = (req.provider or "").strip().lower()
     requested_model = (req.model or "").strip()
     if requested_provider in ("", "auto"):
         requested_provider = agent_default_provider
+        if requested_provider == "ollama":
+            # agent_model_router (including explicit SHIMS_*_MODEL env pins
+            # written before LM Studio existed) only knows about Ollama.
+            # If the exact same GGUF is also linked into LM Studio (we hard-
+            # link Ollama's blobs in, so it's literally the same weights),
+            # transparently prefer it — it's the same model, just GPU-backed
+            # instead of CPU-only, so this changes speed, not the answer.
+            lm_equivalent = agent_default_model.replace(":", "-")
+            lm_names = await _lmstudio_names()
+            if lm_equivalent in lm_names:
+                requested_provider = "lmstudio"
+                agent_default_model = lm_equivalent
+            elif agent_reason in ("default", "neural_governor"):
+                # No pinned model and no LM Studio twin of it — fall back to
+                # whatever LM Studio has loaded/available rather than CPU Ollama.
+                local_provider, local_model = await _local_default_provider_model()
+                if local_provider == "lmstudio":
+                    requested_provider = local_provider
+                    agent_default_model = local_model
     if requested_model in ("", "auto"):
         requested_model = agent_default_model
     provider, model, reason = await _resolve_provider_model(requested_provider, requested_model, privacy_mode=req.privacy_mode, text=req.message)
@@ -2581,6 +2709,91 @@ async def _hf_chat_stream(model: str, messages: list[dict[str, str]], *, realtim
                 delta = (choice.get("delta") or {}).get("content") or ""
                 if delta:
                     yield delta
+
+
+def _lmstudio_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    key = _clean_secret(os.getenv("LMSTUDIO_API_KEY"))
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
+def _lmstudio_payload(model: str, messages: list[dict[str, str]], *, stream: bool = False, max_tokens: int | None = None) -> dict[str, Any]:
+    brain = _settings["brain"]
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+        "temperature": float(brain.get("temperature", 0.12)),
+        "top_p": float(brain.get("top_p", 0.82)),
+    }
+    if max_tokens:
+        payload["max_tokens"] = int(max_tokens)
+    return payload
+
+
+async def _lmstudio_chat(model: str, messages: list[dict[str, str]], *, realtime: bool = False, max_tokens: int | None = None) -> str:
+    async with httpx.AsyncClient(timeout=300) as client:
+        r = await client.post(
+            f"{LMSTUDIO_HOST}/v1/chat/completions",
+            headers=_lmstudio_headers(),
+            json=_lmstudio_payload(model, messages, stream=False, max_tokens=max_tokens),
+        )
+        r.raise_for_status()
+        data = r.json()
+    choice = (data.get("choices") or [{}])[0]
+    return (choice.get("message") or {}).get("content") or ""
+
+
+async def _lmstudio_chat_stream(model: str, messages: list[dict[str, str]], *, realtime: bool = False, max_tokens: int | None = None) -> AsyncGenerator[str, None]:
+    read_timeout = 240.0
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, read=read_timeout)) as client:
+        async with client.stream(
+            "POST",
+            f"{LMSTUDIO_HOST}/v1/chat/completions",
+            headers=_lmstudio_headers(),
+            json=_lmstudio_payload(model, messages, stream=True, max_tokens=max_tokens),
+        ) as r:
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                payload_str = line[6:].strip()
+                if payload_str == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(payload_str)
+                except Exception:
+                    continue
+                choice = (obj.get("choices") or [{}])[0]
+                delta = (choice.get("delta") or {}).get("content") or ""
+                if delta:
+                    yield delta
+
+
+async def _collect_lmstudio_stream(
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    realtime: bool = False,
+    max_tokens: int | None = None,
+    on_delta: Callable[[str], Any],
+    first_token_timeout: float = 60.0,
+) -> str:
+    """Stream LM Studio output, calling on_delta for each chunk. Returns full answer."""
+    answer = ""
+    got_first = False
+    agen = _lmstudio_chat_stream(model, messages, realtime=realtime, max_tokens=max_tokens).__aiter__()
+    while True:
+        try:
+            delta = await asyncio.wait_for(agen.__anext__(), timeout=first_token_timeout if not got_first else 240.0)
+        except StopAsyncIteration:
+            break
+        got_first = True
+        answer += delta
+        await on_delta(delta)
+    return answer
 
 
 async def _extract_durable_facts_llm(
@@ -2832,6 +3045,13 @@ async def _run_llm(
         return (await _gemini_chat(model, messages), "gemini")
     if provider == "huggingface":
         return (await _hf_chat(model, messages, realtime=realtime, max_tokens=max_tokens), "huggingface-local")
+    if provider == "lmstudio":
+        names = await _lmstudio_names()
+        if names and model not in names:
+            model = names[0]
+        if not names:
+            return (f"LM Studio is not reachable at {LMSTUDIO_HOST}. Start LM Studio's server (Settings or `lms server start`) and load a model.", "lmstudio-offline")
+        return (await _lmstudio_chat(model, messages, realtime=realtime, max_tokens=max_tokens), "lmstudio-local")
     if provider in {"kimi", "deepseek", "qwen"}:
         return (await _openai_compatible_chat(provider, model, messages), provider)
     return (await _cloud_placeholder(provider, model), f"{provider}-placeholder")
@@ -4155,7 +4375,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     # Privacy guard indicator
     if "privacy-guard" in plan.route:
         yield _jsonl({"type": "thought", "stage": "plan", "content": f"🔒 Privacy guard activated: sensitive data detected. Forced local processing. Mode: {req.privacy_mode}"})
-    elif plan.provider != "ollama" and plan.provider != "local":
+    elif plan.provider not in ("ollama", "local", "lmstudio", "huggingface"):
         yield _jsonl({"type": "thought", "stage": "plan", "content": f"☁️ Cloud provider selected ({plan.provider}). Data will leave this machine."})
     else:
         yield _jsonl({"type": "thought", "stage": "plan", "content": f"🏠 Local provider selected. Data stays on this machine."})
@@ -4266,9 +4486,11 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     turn_history = history[-50:] if conversation_enabled else [{"role": "user", "content": req.message}]
     messages = [{"role": "system", "content": _system_prompt() + "\n\n" + brain_addendum}] + turn_history
 
-    # Determine agent provider before the gate (Ollama runs the wave loop too, see below)
+    # Determine agent provider before the gate (local providers run the wave loop too, see below)
     user_provider = (req.provider or plan.provider or "ollama").strip().lower()
     if user_provider in ("anthropic", "openai", "gemini", "deepseek", "kimi"):
+        agent_provider = user_provider
+    elif user_provider in ("lmstudio", "huggingface"):
         agent_provider = user_provider
     else:
         agent_provider = "ollama"
@@ -4287,6 +4509,17 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             ollama_names = await _ollama_names()
             if not agent_model or agent_model not in ollama_names or not is_tool_capable(agent_model):
                 agent_model = await _agent_tool_model(deep=deep) or PROVIDER_DEFAULTS.get(agent_provider, "")
+        elif agent_provider == "lmstudio":
+            # Same idea as Ollama: keep the requested model only if LM Studio actually
+            # has it and it's known tool-capable, otherwise pick the best available one
+            # (preferring an already-loaded model so we don't eat a cold-load delay).
+            lm_models = await _lmstudio_models_raw()
+            lm_names = [m["name"] for m in lm_models]
+            if not agent_model or agent_model not in lm_names or not is_tool_capable(agent_model):
+                capable = [m for m in lm_models if m.get("tool_capable")]
+                loaded_capable = [m for m in capable if m.get("loaded")]
+                pick_from = loaded_capable or capable or lm_models
+                agent_model = (sorted(pick_from, key=lambda m: m.get("size") or float("inf"))[0]["name"] if pick_from else "") or PROVIDER_DEFAULTS.get(agent_provider, "")
         elif not agent_model or _looks_local_model(agent_model) or agent_model in (await _ollama_names()):
             agent_model = PROVIDER_DEFAULTS.get(agent_provider, "")
 
@@ -4315,7 +4548,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                 # they actually emit valid calls and respond in reasonable time.
                 agent_tool_names = (
                     agent_loop.ESSENTIAL_TOOLS
-                    if agent_provider in {"kimi", "deepseek", "qwen", "ollama", "huggingface"}
+                    if agent_provider in {"kimi", "deepseek", "qwen", "ollama", "huggingface", "lmstudio"}
                     else None
                 )
                 async for ev in agent_loop.run_agent_loop(
@@ -4550,6 +4783,51 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             except Exception as exc:
                 log_event("provider.stream_error", route="huggingface-stream-error", provider="huggingface", model=stream_model, ok=False, message=str(exc)[:180], metadata={"session_id": session_id})
                 # Fall through to non-streaming _run_llm
+    elif plan.provider == "lmstudio":
+        lm_models = await _lmstudio_models_raw()
+        lm_names = [m["name"] for m in lm_models]
+        stream_model = plan.model if plan.model in lm_names else (await _lmstudio_pick_default(lm_models) or plan.model)
+        if stream_model in lm_names:
+            answer = ""
+            route = "lmstudio-local-stream"
+            try:
+                pending_lm_chunks: list[bytes] = []
+                async def collect_lm_delta(delta: str) -> None:
+                    nonlocal answer
+                    answer += delta
+                    pending_lm_chunks.append(_jsonl({"type": "token", "content": delta}))
+
+                collect_task = asyncio.create_task(_collect_lmstudio_stream(
+                    stream_model,
+                    messages,
+                    realtime=realtime_request,
+                    max_tokens=response_max_tokens,
+                    on_delta=collect_lm_delta,
+                ))
+                while not collect_task.done():
+                    while pending_lm_chunks:
+                        yield pending_lm_chunks.pop(0)
+                    await asyncio.sleep(0.02)
+                answer = await collect_task
+                while pending_lm_chunks:
+                    yield pending_lm_chunks.pop(0)
+                if not answer.strip():
+                    answer = "I am connected to LM Studio but received an empty response. Check that the model is loaded and the server is healthy."
+                    yield _jsonl({"type": "token", "content": answer})
+                _store_assistant_turn(answer)
+                trust = build_trust(
+                    route=route,
+                    evidence=context_evidence,
+                    missing_evidence=[] if context_evidence else ["No tool, web, or retrieved RAG evidence was attached to this model response."],
+                    requested_level="draft",
+                )
+                _remember_session_turn(session_id, req.message, answer, route=route, agent=plan.agent, provider=plan.provider, model=stream_model, metadata={"brain_context": brain_ctx, "trust": trust})
+                log_event("turn.done", route=route, provider=plan.provider, model=stream_model, latency_ms=(time.perf_counter()-started)*1000, ok=True, message=req.message, metadata={"session_id": session_id, "answer_preview": answer[:240]})
+                yield _jsonl({"type": "done", "session_id": session_id, "model": stream_model, "provider": plan.provider, "route": route, **_trust_fields(trust)})
+                return
+            except Exception as exc:
+                log_event("provider.stream_error", route="lmstudio-stream-error", provider="lmstudio", model=stream_model, ok=False, message=str(exc)[:180], metadata={"session_id": session_id})
+                # Fall through to non-streaming _run_llm
     try:
         answer, route = await _run_llm(plan.provider, plan.model, messages, realtime=realtime_request, max_tokens=response_max_tokens)
     except Exception as exc:
@@ -4559,6 +4837,9 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         elif plan.provider == "huggingface":
             answer = f"Hugging Face endpoint at `{HUGGINGFACE_HOST}` failed for `{plan.model}`: {str(exc)[:180]}. Verify the endpoint is running and the model is available."
             route = "huggingface-error"
+        elif plan.provider == "lmstudio":
+            answer = f"LM Studio at `{LMSTUDIO_HOST}` failed for `{plan.model}`: {str(exc)[:180]}. Verify LM Studio's server is running (`lms server start`) and the model is loaded."
+            route = "lmstudio-error"
         else:
             answer = f"{plan.provider.title()} route failed for `{plan.model}`: {str(exc)[:180]}. Select an installed Ollama model or configure the provider key."
             route = f"{plan.provider}-error"
@@ -4870,15 +5151,17 @@ async def api_chat(req: ChatRequest) -> dict[str, Any]:
 async def chat_models() -> dict[str, Any]:
     installed = await _ollama_models_raw()
     hf_installed = await _hf_models_raw()
+    lm_installed = await _lmstudio_models_raw()
     installed.extend(hf_installed)
+    installed.extend(lm_installed)
     installed = mark_tool_capable(installed)
     names = {m["name"] for m in installed}
     show_all = os.getenv("SHIMS_SHOW_ALL_MODELS", "").strip().lower() in {"1", "true", "yes", "on"}
     rec_source = RECOMMENDED_MODELS if show_all else [m for m in RECOMMENDED_MODELS if m.get("tool_capable")]
-    rec = mark_tool_capable([{**m, "installed": (m["provider"] not in {"ollama", "huggingface"}) or m["name"] in names, "configured": _provider_configured(m["provider"]) or m["provider"] == "huggingface"} for m in rec_source])
+    rec = mark_tool_capable([{**m, "installed": (m["provider"] not in {"ollama", "huggingface", "lmstudio"}) or m["name"] in names, "configured": _provider_configured(m["provider"]) or m["provider"] in {"huggingface", "lmstudio"}} for m in rec_source])
     cloud = [m for m in rec if m["provider"] != "ollama"]
     # Full curated list for the per-provider model pickers (includes chat-only options).
-    all_rec = mark_tool_capable([{**m, "installed": (m["provider"] not in {"ollama", "huggingface"}) or m["name"] in names, "configured": _provider_configured(m["provider"]) or m["provider"] == "huggingface"} for m in RECOMMENDED_MODELS])
+    all_rec = mark_tool_capable([{**m, "installed": (m["provider"] not in {"ollama", "huggingface", "lmstudio"}) or m["name"] in names, "configured": _provider_configured(m["provider"]) or m["provider"] in {"huggingface", "lmstudio"}} for m in RECOMMENDED_MODELS])
     all_cloud = [m for m in all_rec if m["provider"] != "ollama"]
     return {"ok": True, "default": _preferred_local_model(list(names), realtime=True) if names else DEFAULT_OLLAMA_MODEL, "selected_provider": "ollama", "providers": list(PROVIDER_DEFAULTS), "installed": installed, "recommended": rec, "models": installed, "cloud": cloud, "all_cloud": all_cloud, "all_recommended": all_rec, "aliases": _ollama_aliases_payload(), "show_all": show_all}
 
@@ -7520,7 +7803,10 @@ async def providers() -> dict[str, Any]:
     installed = await _ollama_models_raw()
     hf_names = await _hf_names()
     hf_ready = bool(hf_names)
+    lm_models = await _lmstudio_models_raw()
+    lm_ready = bool(lm_models)
     return {"providers": [
+        {"id":"lmstudio", "label":"LM Studio Local (GPU)", "configured": True, "status":"ready" if lm_ready else "offline", "model": (await _lmstudio_pick_default(lm_models) if lm_ready else DEFAULT_LMSTUDIO_MODEL)},
         {"id":"ollama", "label":"Ollama Local", "configured": True, "status":"ready" if installed else "offline", "model": _preferred_local_model([m["name"] for m in installed])},
         {"id":"huggingface", "label":"Hugging Face Local", "configured": True, "status":"ready" if hf_ready else "offline", "model": hf_names[0] if hf_ready else DEFAULT_HUGGINGFACE_MODEL},
         *[{ "id":p, "label": p.title() if p != "anthropic" else "Anthropic / Claude", "configured": _provider_configured(p), "status":"ready" if _provider_configured(p) else "missing key", "model": PROVIDER_DEFAULTS[p]} for p in ["openai", "anthropic", "gemini", "kimi", "deepseek", "qwen"]]
@@ -7542,6 +7828,9 @@ async def provider_test(pid: str, request: Request) -> dict[str, Any]:
     if pid == "ollama":
         names = await _ollama_names()
         return {"ok": bool(names), "reply": "Ollama online" if names else f"Ollama offline at {OLLAMA_HOST}", "models": names}
+    if pid == "lmstudio":
+        names = await _lmstudio_names()
+        return {"ok": bool(names), "reply": "LM Studio online" if names else f"LM Studio offline at {LMSTUDIO_HOST}", "models": names}
     if pid not in PROVIDER_DEFAULTS:
         raise HTTPException(400, "Unknown provider")
     if not _provider_configured(pid):
@@ -7608,6 +7897,22 @@ async def set_settings(req: SettingsRequest) -> dict[str, Any]:
         DEFAULT_HUGGINGFACE_MODEL = model
         PROVIDER_DEFAULTS["huggingface"] = model
         saved.append("huggingface")
+    # LM Studio endpoint settings (local OpenAI-compatible server, default port 1234)
+    if req.lmstudio_base_url is not None:
+        url = str(req.lmstudio_base_url).strip().rstrip("/")
+        _set_env_persistent("LMSTUDIO_BASE_URL", url)
+        global LMSTUDIO_HOST
+        LMSTUDIO_HOST = url or LMSTUDIO_HOST
+    if req.lmstudio_api_key is not None:
+        key = _clean_secret(req.lmstudio_api_key)
+        _set_env_persistent("LMSTUDIO_API_KEY", key)
+    if req.lmstudio_model is not None:
+        model = str(req.lmstudio_model).strip()
+        _set_env_persistent("LMSTUDIO_MODEL", model)
+        global DEFAULT_LMSTUDIO_MODEL
+        DEFAULT_LMSTUDIO_MODEL = model
+        PROVIDER_DEFAULTS["lmstudio"] = model
+        saved.append("lmstudio")
     return {"ok": True, "saved": saved, "providers": {p: {"configured": _provider_configured(p), "model": PROVIDER_DEFAULTS[p]} for p in PROVIDER_DEFAULTS}}
 
 @app.post("/system/reset-local")
@@ -8218,6 +8523,7 @@ async def api_settings_models() -> dict[str, Any]:
     return {
         "ok": True,
         "providers": [
+            {"id": "lmstudio", "name": "Local AI (LM Studio, GPU)", "requires_internet": False, "privacy": "on-device"},
             {"id": "ollama", "name": "Local AI (Ollama)", "requires_internet": False, "privacy": "on-device"},
             {"id": "openai", "name": "OpenAI", "requires_internet": True, "privacy": "cloud"},
             {"id": "anthropic", "name": "Anthropic", "requires_internet": True, "privacy": "cloud"},

@@ -180,6 +180,7 @@ FALLBACK_CHAIN: list[tuple[str, str]] = [
     ("openai", "gpt-4o"),
     ("google", "gemini-1.5-pro"),
     ("huggingface", settings.huggingface_model),
+    ("lmstudio", settings.lmstudio_model),
     ("ollama", settings.ollama_model),
 ]
 
@@ -249,6 +250,8 @@ async def _llm_chat(
             result = await _google_chat_raw(model, messages, tools or [], timeout=timeout)
         elif provider == "huggingface":
             result = await _hf_chat_raw(model, messages, tools or [], timeout=timeout)
+        elif provider == "lmstudio":
+            result = await _lmstudio_chat_raw(model, messages, tools or [], timeout=timeout)
         else:
             result = await _ollama_chat_raw(model, messages, tools or [], timeout=timeout)
         success = True
@@ -370,6 +373,113 @@ async def _hf_chat_raw(model: str, messages: list[dict[str, Any]], tools: list[d
             args = fn.get("arguments") or {}
         tool_calls.append({"function": {"name": fn.get("name", ""), "arguments": args}})
     return {"content": content, "tool_calls": tool_calls}
+
+
+async def _lmstudio_chat_raw(model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], timeout: float = 120.0) -> dict[str, Any]:
+    """Non-streaming LM Studio chat turn. LM Studio exposes an OpenAI-compatible
+    server (default http://127.0.0.1:1234). Returns {content, tool_calls}."""
+    base = settings.lmstudio_base_url.rstrip("/")
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "temperature": 0.2,
+    }
+    if tools:
+        payload["tools"] = tools
+    headers = {"Content-Type": "application/json"}
+    key = (settings.lmstudio_api_key or "").strip()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(f"{base}/v1/chat/completions", json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    content = msg.get("content") or ""
+    tool_calls: list[Any] = []
+    for tc in msg.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        try:
+            args = json.loads(fn.get("arguments", "{}"))
+        except Exception:
+            args = fn.get("arguments") or {}
+        tool_calls.append({"function": {"name": fn.get("name", ""), "arguments": args}})
+    return {"content": content, "tool_calls": tool_calls}
+
+
+async def _lmstudio_chat_stream(model: str, messages: list[dict[str, Any]],
+                                 tools: list[dict[str, Any]], on_delta: Callable) -> dict[str, Any]:
+    """Streaming LM Studio chat turn over its OpenAI-compatible SSE endpoint.
+    Mirrors _ollama_chat_stream's prose-vs-JSON buffering so raw tool calls
+    never flicker into the UI. Returns {content, tool_calls}."""
+    base = settings.lmstudio_base_url.rstrip("/")
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "temperature": 0.2,
+    }
+    if tools:
+        payload["tools"] = tools
+    headers = {"Content-Type": "application/json"}
+    key = (settings.lmstudio_api_key or "").strip()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    content = ""
+    tool_calls_acc: dict[int, dict[str, Any]] = {}
+    mode: str | None = None
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            async with client.stream("POST", f"{base}/v1/chat/completions", json=payload, headers=headers) as r:
+                r.raise_for_status()
+                async for line in r.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:"):].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data_str)
+                    except Exception:
+                        continue
+                    choice = (obj.get("choices") or [{}])[0]
+                    delta_obj = choice.get("delta") or {}
+                    for tc in delta_obj.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        slot = tool_calls_acc.setdefault(idx, {"function": {"name": "", "arguments": ""}})
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["function"]["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            slot["function"]["arguments"] += fn["arguments"]
+                    delta = delta_obj.get("content") or ""
+                    if delta:
+                        content += delta
+                        if mode is None:
+                            stripped = content.lstrip()
+                            if stripped:
+                                mode = "json" if (stripped[0] == "{" or stripped.startswith("`")) else "prose"
+                                if mode == "prose":
+                                    await on_delta(content)
+                        elif mode == "prose":
+                            await on_delta(delta)
+    except Exception as exc:
+        if content or tool_calls_acc:
+            return {"content": content, "tool_calls": list(tool_calls_acc.values()), "truncated": True,
+                    "error": str(exc)[:160]}
+        from .llm_gateway import LLMUnavailable
+        code = "timeout" if isinstance(exc, httpx.TimeoutException) else "stream_failed"
+        raise LLMUnavailable(code, provider="lmstudio", detail=str(exc)[:200]) from exc
+    final_tool_calls: list[Any] = []
+    for slot in tool_calls_acc.values():
+        try:
+            args = json.loads(slot["function"]["arguments"] or "{}")
+        except Exception:
+            args = slot["function"]["arguments"] or {}
+        final_tool_calls.append({"function": {"name": slot["function"]["name"], "arguments": args}})
+    return {"content": content, "tool_calls": final_tool_calls}
 
 
 async def _ollama_chat_stream(model: str, messages: list[dict[str, Any]],
@@ -1267,6 +1377,10 @@ async def run_agent_loop(
                 return await _anthropic_chat_stream_raw(model, synth_messages, [])
             elif _is_openai_compatible(provider):
                 return await _openai_compatible_chat_raw(provider, model, synth_messages, [], timeout=120.0)
+            elif provider == "huggingface":
+                return await _hf_chat_raw(model, synth_messages, [], timeout=120.0)
+            elif provider == "lmstudio":
+                return await _lmstudio_chat_raw(model, synth_messages, [], timeout=120.0)
             else:
                 return await _ollama_chat_raw(model, synth_messages, [], timeout=120.0)
         except Exception as exc:
@@ -1453,6 +1567,16 @@ async def run_agent_loop(
                     answer = f"Final answer synthesis failed: {err}"
                 else:
                     answer = (fmsg.get("content") or "").strip()
+            elif provider == "lmstudio":
+                ftask = asyncio.create_task(_lmstudio_chat_stream(model, convo, [], _fin_delta))
+                while not ftask.done():
+                    while fin_pending:
+                        yield {"type": "token", "content": fin_pending.pop(0)}
+                    await asyncio.sleep(0.02)
+                while fin_pending:
+                    yield {"type": "token", "content": fin_pending.pop(0)}
+                fmsg = await ftask
+                answer = (fmsg.get("content") or "").strip()
             else:
                 ftask = asyncio.create_task(_ollama_chat_stream(model, convo, [], _fin_delta))
                 while not ftask.done():

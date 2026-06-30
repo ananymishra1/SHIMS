@@ -78,6 +78,13 @@ class Settings:
     huggingface_api_key: str = os.getenv('HUGGINGFACE_API_KEY', '')
     huggingface_model: str = os.getenv('HUGGINGFACE_MODEL', 'meta-llama/Llama-3.1-8B-Instruct')
 
+    # LM Studio: local OpenAI-compatible server (default port 1234). Preferred over
+    # Ollama when running, since it can use GPU backends (Vulkan/Metal/CUDA) that
+    # Ollama's bundled llama.cpp build may not support for a given GPU/arch.
+    lmstudio_base_url: str = os.getenv('LMSTUDIO_BASE_URL', 'http://127.0.0.1:1234')
+    lmstudio_api_key: str = os.getenv('LMSTUDIO_API_KEY', '')
+    lmstudio_model: str = os.getenv('LMSTUDIO_MODEL', '')
+
     enterprise_url: str = os.getenv('SHIMS_ENTERPRISE_URL', 'http://127.0.0.1:8020')
     bridge_token: str = os.getenv('SHIMS_BRIDGE_TOKEN', 'change-me-bridge-token')
     enterprise_pairing_enabled: bool = env_bool('SHIMS_ENTERPRISE_PAIRING_ENABLED', False)
