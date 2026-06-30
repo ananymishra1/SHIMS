@@ -38,6 +38,54 @@ def _parse_nvidia_smi() -> dict[str, Any]:
     }
 
 
+def _parse_amd_gpu() -> dict[str, Any]:
+    """Detect AMD GPU via Windows registry or DirectML."""
+    # Try DirectML first (PyTorch)
+    try:
+        import torch
+        import torch_directml
+        device_count = torch_directml.device_count()
+        if device_count > 0:
+            name = torch_directml.device_name(0)
+            # Unified memory on AMD APUs = shared system RAM
+            import psutil
+            vram_gb = round(psutil.virtual_memory().total / (1024**3), 2)
+            return {
+                "gpu_name": name,
+                "vram_total_mb": vram_gb * 1024,
+                "vram_used_mb": 0,
+                "driver_version": "directml",
+            }
+    except Exception:
+        pass
+    # Fallback: Windows registry for AMD GPU
+    if platform.system().lower() == 'windows':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}")
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    subkey_name = winreg.EnumKey(key, i)
+                    subkey = winreg.OpenKey(key, subkey_name)
+                    adapter_str, _ = winreg.QueryValueEx(subkey, "AdapterString")
+                    winreg.CloseKey(subkey)
+                    if "AMD" in adapter_str or "Radeon" in adapter_str:
+                        import psutil
+                        vram_gb = round(psutil.virtual_memory().total / (1024**3), 2)
+                        return {
+                            "gpu_name": adapter_str,
+                            "vram_total_mb": vram_gb * 1024,
+                            "vram_used_mb": 0,
+                            "driver_version": "amd",
+                        }
+                except Exception:
+                    continue
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+    return {}
+
+
 def _detect_cuda_version() -> str:
     out = _run_cmd(["nvcc", "--version"])
     if out:
@@ -47,6 +95,16 @@ def _detect_cuda_version() -> str:
     # Fallback: parse from nvidia-smi driver
     nv = _parse_nvidia_smi()
     return nv.get("driver_version", "")
+
+
+def _detect_gpu_version() -> str:
+    nv = _parse_nvidia_smi()
+    if nv:
+        return nv.get("driver_version", "")
+    amd = _parse_amd_gpu()
+    if amd:
+        return amd.get("driver_version", "")
+    return ""
 
 
 def _detect_internet() -> bool:
@@ -109,14 +167,16 @@ def _get_disk_gb() -> float:
 def profile_hardware() -> HardwareProfile:
     """Build a complete hardware profile of the current machine."""
     nv = _parse_nvidia_smi()
-    vram_gb = round(nv.get("vram_total_mb", 0) / 1024, 2) if nv else 0.0
+    amd = _parse_amd_gpu()
+    gpu = nv if nv else amd
+    vram_gb = round(gpu.get("vram_total_mb", 0) / 1024, 2) if gpu else 0.0
 
     return HardwareProfile(
         total_ram_gb=_get_ram_gb(),
         vram_gb=vram_gb,
         cpu_cores=_get_cpu_cores(),
         cuda_available=vram_gb > 0,
-        cuda_version=_detect_cuda_version(),
+        cuda_version=_detect_gpu_version(),
         internet_available=_detect_internet(),
         battery_powered=_detect_battery(),
         disk_space_gb=_get_disk_gb(),

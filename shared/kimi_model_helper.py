@@ -8,6 +8,7 @@ from __future__ import annotations
 
 # Aliases that users commonly type without the kimi- prefix.
 KIMI_MODEL_ALIASES: dict[str, str] = {
+    "k2.7": "kimi-k2.7",
     "k2.6": "kimi-k2.6",
     "k2.5": "kimi-k2.5",
     "k2": "kimi-k2-0711-preview",
@@ -23,6 +24,7 @@ KIMI_MODEL_ALIASES: dict[str, str] = {
 
 # Fallback chain when a model returns 404. Each entry is tried in order.
 KIMI_FALLBACK_CHAIN: list[str] = [
+    "kimi-k2.7",
     "kimi-k2.6",
     "kimi-k2.5",
     "kimi-k2-0711-preview",

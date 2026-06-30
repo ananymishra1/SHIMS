@@ -19,24 +19,28 @@ TOOL_CAPABLE_PATTERNS: tuple[str, ...] = (
     "qwen2.5-coder",
     "qwen2.5",
     "qwen3",
-    # Llama family (3.1/3.2 have native tool support)
+    # Llama family (3.1/3.2/3.3 have native tool support)
     "llama3.1",
     "llama3.2",
+    "llama3.3",
     # Mistral family
     "mistral-nemo",
     "mistral-small",
     "mixtral",
-    # Cohere / Microsoft
+    # Cohere / Microsoft / Google
     "command-r",
     "phi4",
+    "gemma3",
+    # DeepSeek
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "deepseek-coder",
     # Major cloud families (all current API versions support tools)
     "claude",
     "gpt-",
     "o1",
     "o3",
     "gemini",
-    "deepseek-chat",
-    "deepseek-reasoner",
     "qwen-max",
     "qwen-plus",
     "qwen-turbo",

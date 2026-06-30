@@ -221,7 +221,7 @@ async def _llm_chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     temperature: float = 0.2,
-    timeout: float = 120.0,
+    timeout: float = 180.0,
     is_fallback: bool = False,
 ) -> tuple[dict[str, Any], bool, float, str]:
     """Unified LLM call. Returns ({content, tool_calls}, success, latency_ms, error)."""
@@ -270,7 +270,7 @@ async def _chat_with_fallback(
     preferred_provider: str,
     preferred_model: str,
     temperature: float = 0.2,
-    timeout: float = 120.0,
+    timeout: float = 180.0,
 ) -> tuple[dict[str, Any], str, str]:
     """Try LLM with fallback chain. Returns ({content, tool_calls}, provider, model)."""
     chain = [(preferred_provider, preferred_model)] + [
@@ -300,7 +300,7 @@ async def _generate_plan(
         {"role": "system", "content": PLAN_SYSTEM},
         {"role": "user", "content": f"Create a plan for: {user_message}"},
     ]
-    result, prov, mdl = await _chat_with_fallback(plan_messages, [], provider, model, temperature=0.1, timeout=45.0)
+    result, prov, mdl = await _chat_with_fallback(plan_messages, [], provider, model, temperature=0.1, timeout=90.0)
     content = result.get("content", "")
 
     plan = []
@@ -326,7 +326,7 @@ async def _generate_plan(
 # LLM backends
 # ------------------------------------------------------------------ #
 
-async def _ollama_chat_raw(model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], timeout: float = 120.0) -> dict[str, Any]:
+async def _ollama_chat_raw(model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], timeout: float = 180.0) -> dict[str, Any]:
     """Non-streaming Ollama chat turn. Returns {content, tool_calls}."""
     base = settings.ollama_base_url.rstrip("/")
     payload = {"model": model, "messages": messages, "tools": tools, "stream": False,
@@ -1242,7 +1242,7 @@ async def run_agent_loop(
                 raise RuntimeError("router_not_loaded")
         # Use non-streaming raw chat for speed
         try:
-            result, success, _, error = await _llm_chat(router_provider, router_model, wave_messages, specs, temperature=0.2, timeout=30.0)
+            result, success, _, error = await _llm_chat(router_provider, router_model, wave_messages, specs, temperature=0.2, timeout=15.0)
             if success and (result.get("content") is not None or result.get("tool_calls")):
                 return result
         except Exception:
@@ -1253,7 +1253,7 @@ async def run_agent_loop(
     async def _executor_chat(wave_messages: list[dict[str, Any]]) -> dict[str, Any]:
         """Larger model for wave planning when router fails."""
         try:
-            result, success, _, _ = await _llm_chat(provider, model, wave_messages, specs, temperature=0.2, timeout=120.0)
+            result, success, _, _ = await _llm_chat(provider, model, wave_messages, specs, temperature=0.2, timeout=25.0)
             if success and (result.get("content") is not None or result.get("tool_calls")):
                 return result
         except Exception:

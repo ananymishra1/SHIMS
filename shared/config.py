@@ -67,7 +67,7 @@ class Settings:
     qwen_base_url: str = os.getenv('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
 
     kimi_api_key: str = os.getenv('KIMI_API_KEY', '')
-    kimi_model: str = os.getenv('KIMI_MODEL', 'moonshot-v1-8k')
+    kimi_model: str = os.getenv('KIMI_MODEL', 'kimi-k2.7')
     kimi_base_url: str = os.getenv('KIMI_BASE_URL', 'https://api.moonshot.ai/v1')
 
     deepseek_api_key: str = os.getenv('DEEPSEEK_API_KEY', '')

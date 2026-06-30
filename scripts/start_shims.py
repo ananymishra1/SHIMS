@@ -218,6 +218,7 @@ def _start_omni(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
         "SHIMS_DESKTOP_BRIDGE_TOKEN": cfg["bridge_token"],
         "HF_HUB_ENABLE_HF_TRANSFER": "",
         "HF_XET_HIGH_PERFORMANCE": "1",
+        "SHIMS_DISABLE_WHISPER": "1",
     }
     cmd = [
         str(_python()),
@@ -355,11 +356,13 @@ def main() -> int:
         print("[starter] waiting for services to come online ...")
         ok = True
         if not args.no_bridge:
-            ok &= _wait_for_port(cfg["bridge_port"], "bridge", timeout=20)
+            ok &= _wait_for_port(cfg["bridge_port"], "bridge", timeout=45)
         if not args.no_omni:
-            ok &= _wait_for_port(cfg["omni_port"], "omni", timeout=60)
+            ok &= _wait_for_port(cfg["omni_port"], "omni", timeout=120)
         if not ok:
             print("[starter] ERROR: one or more services failed to start in time.")
+            print("[starter] Try running with --no-verify to skip health checks,")
+            print("[starter] or check the service windows for error messages.")
             return 1
 
     _print_summary(cfg)

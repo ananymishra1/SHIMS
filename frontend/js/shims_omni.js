@@ -556,7 +556,7 @@ async function sendText(text, source='typed'){
       auto_peer_consultation:state.peersMode,
       privacy_mode:state.privacyMode || 'balanced',
       locale:state.voiceLang || 'en-IN',
-      agent_mode:(window.shimsAgentMode === true),
+      agent_mode:true,
       source,
       realtime: source === 'voice',
       max_tokens: source === 'voice' ? (Number(localStorage.shimsVoiceMaxTokens || 220) || 220) : undefined
@@ -1781,7 +1781,8 @@ function renderModelMenu(data=state.models){
   const installed=data.installed||[]; const rec=data.recommended||[]; const cloud=data.all_cloud||data.cloud||[];
   const toolBadge = (m) => m.tool_capable ? ' <span title="Tool-capable" style="color:#74ffb9;font-size:10px">🛠</span>' : '';
   let html='';
-  html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">Installed Ollama models</div>';
+  // Installed models
+  html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">📦 Installed</div>';
   if(installed.length){
     html += installed.filter(m=>m.provider==='ollama'||!m.provider).map(m=>{
       const recMeta = rec.find(r=>r.name===m.name);
@@ -1789,38 +1790,43 @@ function renderModelMenu(data=state.models){
       return `<button class="model-card" data-provider="ollama" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}${tc}</div><div class="m-meta">${escapeHtml([m.parameters,m.family,m.quantization].filter(Boolean).join(' · ')||'local model')}</div></button>`;
     }).join('');
   } else {
-    html += '<div class="model-card"><div class="m-name">Ollama offline / no local models</div><div class="m-meta">Open Settings -> Start Ollama / Pull model</div></div>';
+    html += '<div class="model-card"><div class="m-name">No local models</div><div class="m-meta">Start Ollama or pull a model</div></div>';
   }
-  html += '<div style="font-size:10px;color:#9eb6c1;margin:10px 0 8px">Recommended pulls</div>';
-  html += rec.filter(m=>m.provider==='ollama').slice(0,8).map(m=>`<button class="model-card" data-provider="ollama" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)} ${m.installed?'✓':'↓'}${toolBadge(m)}</div><div class="m-meta">${escapeHtml(m.role||'')} · ${escapeHtml(m.notes||'')}</div></button>`).join('');
-  html += '<div style="font-size:10px;color:#9eb6c1;margin:10px 0 8px">Cloud / HF models (routes to provider, not Ollama)</div>';
-  // Group by provider for readability
-  const byProv={};
-  cloud.forEach(m=>{ (byProv[m.provider]=byProv[m.provider]||[]).push(m); });
-  for(const pid of Object.keys(byProv).sort()){
-    html += `<div style="font-size:9px;color:#7aa;color:var(--text-dim);margin:6px 0 4px;text-transform:uppercase;letter-spacing:.5px">${escapeHtml(pid)}</div>`;
-    html += byProv[pid].map(m=>`<button class="model-card" data-provider="${escapeHtml(m.provider)}" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}${toolBadge(m)}</div><div class="m-meta">${escapeHtml(m.role||'')} · ${escapeHtml(m.notes||'')}</div></button>`).join('');
-  }
+  // Suggested models (not installed yet) - HIDDEN: user wants only installed models
+  // const notInstalled = rec.filter(m=>m.provider==='ollama' && !m.installed);
+  // if(notInstalled.length){
+  //   html += '<div style="font-size:10px;color:#9eb6c1;margin:10px 0 8px">💡 Suggested for your machine</div>';
+  //   html += notInstalled.slice(0,6).map(m=>`<button class="model-card" data-provider="ollama" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)} ↓${toolBadge(m)}</div><div class="m-meta">${escapeHtml(m.role||'')} · ${escapeHtml(m.notes||'')}</div></button>`).join('');
+  // }
+  // Quick cloud favorites (top 5 only)
+  const topCloud = [
+    {name:'gpt-4.5-preview',provider:'openai',role:'best reasoning'},
+    {name:'claude-sonnet-4-6',provider:'anthropic',role:'balanced'},
+    {name:'gemini-2.5-pro',provider:'gemini',role:'multimodal'},
+    {name:'kimi-k2.7',provider:'kimi',role:'long context'},
+    {name:'deepseek-chat',provider:'deepseek',role:'cheap & fast'}
+  ];
+  html += '<div style="font-size:10px;color:#9eb6c1;margin:10px 0 8px">☁️ Cloud quick picks</div>';
+  html += topCloud.map(m=>`<button class="model-card" data-provider="${escapeHtml(m.provider)}" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}</div><div class="m-meta">${escapeHtml(m.role)} · requires API key</div></button>`).join('');
   menu.innerHTML=html;
   $$('.model-card[data-model]', menu).forEach(btn=>btn.onclick=()=>{ state.provider=btn.dataset.provider||'ollama'; state.selectedModel=btn.dataset.model||''; persist(); updateModeButtons(); setText('#t-model', state.selectedModel.slice(0,22)); setText('#t-route', state.provider); menu.classList.remove('open'); const parent=document.getElementById('model-dropdown'); if(parent) parent.classList.remove('open'); toast('Model: '+state.provider+' / '+state.selectedModel); });
 }
 window.renderModelMenu = renderModelMenu;
 
 function populateProviderModelSelects(data=state.models){
-  // Use the full curated cloud list (all_cloud) so every provider dropdown shows
-  // the latest and older model options, not only the tool-capable subset.
-  const byProvider={};
-  (data.all_cloud||data.cloud||[]).forEach(m=>{ (byProvider[m.provider]=byProvider[m.provider]||[]).push(m.name); });
-  // Also merge any HF endpoint models discovered live.
-  (data.installed||[]).forEach(m=>{ if(m.provider && m.provider!=='ollama') (byProvider[m.provider]=byProvider[m.provider]||[]).push(m.name); });
-  byProvider.ollama=(data.installed||[]).filter(m=>m.provider==='ollama'||!m.provider).map(m=>m.name);
-  for(const pid of ['openai','anthropic','gemini','kimi','deepseek','qwen','huggingface']){
+  // Only show the best/latest model for each top provider. No noise.
+  const bestModels = {
+    openai: ['gpt-4.5-preview','gpt-4o','o4-mini','gpt-4.1-mini'],
+    anthropic: ['claude-sonnet-4-6','claude-opus-4-6'],
+    gemini: ['gemini-2.5-pro','gemini-2.5-flash'],
+    kimi: ['kimi-k2.7','kimi-k2.6'],
+    deepseek: ['deepseek-chat','deepseek-reasoner'],
+    huggingface: ['meta-llama/Llama-3.1-8B-Instruct','Qwen/Qwen2.5-7B-Instruct']
+  };
+  for(const pid of ['openai','anthropic','gemini','kimi','deepseek','huggingface']){
     const sel=$('#model-'+pid); if(!sel) continue;
-    const seen=new Set();
-    const opts=(byProvider[pid]||[]).filter(x=>{ if(seen.has(x)) return false; seen.add(x); return true; });
-    sel.innerHTML = opts.length
-      ? '<option value="">Default / auto</option>' + opts.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('')
-      : '<option value="">Default / auto</option>';
+    const opts=bestModels[pid]||[];
+    sel.innerHTML = '<option value="">Default / auto</option>' + opts.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
   }
   populateAgentModelSelects(data);
 }

@@ -319,6 +319,11 @@ BOOT_SELF_AWARENESS_ENABLED = os.getenv("SHIMS_BOOT_SELF_AWARENESS", "true").str
 
 RECOMMENDED_MODELS = [
     # --- Tool-capable models (safe for agent loop) ---
+    {"name": "llama3.3:70b", "provider": "ollama", "role": "large Meta reasoning", "size": "heavier", "tool_capable": True, "notes": "70B parameter Llama 3.3. Best for complex reasoning on high-RAM machines."},
+    {"name": "qwen3:32b", "provider": "ollama", "role": "strong multilingual reasoning", "size": "heavier", "tool_capable": True, "notes": "Qwen 3 32B. Excellent tool-calling and multilingual support."},
+    {"name": "deepseek-coder-v2:16b", "provider": "ollama", "role": "coding specialist", "size": "medium", "tool_capable": True, "notes": "DeepSeek Coder V2. Strong code generation and reasoning."},
+    {"name": "gemma3:27b", "provider": "ollama", "role": "Google reasoning", "size": "heavier", "tool_capable": True, "notes": "Gemma 3 27B. Good balance of quality and efficiency."},
+    {"name": "command-r-plus:104b", "provider": "ollama", "role": "Cohere long-context", "size": "heavier", "tool_capable": True, "notes": "Command-R Plus 104B. Excellent long-context retrieval and RAG."},
     {"name": "qwen2.5-coder:14b", "provider": "ollama", "role": "coding/self-evolution", "size": "heavier", "tool_capable": True, "notes": "Best local coder. Use for code forge, safe patch generation, and agentic tool use."},
     {"name": "qwen2.5:14b", "provider": "ollama", "role": "smarter SHIMS brain", "size": "heavier", "tool_capable": True, "notes": "Strong multilingual reasoning with native tool calling."},
     {"name": "qwen2.5:7b", "provider": "ollama", "role": "smarter live chat", "size": "medium", "tool_capable": True, "notes": "Recommended local default — fast enough and tool-capable."},
@@ -326,11 +331,15 @@ RECOMMENDED_MODELS = [
     {"name": "mistral-nemo", "provider": "ollama", "role": "quality local reasoning", "size": "heavier", "tool_capable": True, "notes": "Strong Mistral tool-calling variant."},
     {"name": "llama3.1", "provider": "ollama", "role": "Meta tool-capable", "size": "medium", "tool_capable": True, "notes": "Llama 3.1 has native tool support."},
     # --- Anthropic / Claude ---
-    {"name": "claude-sonnet-4-6", "provider": "anthropic", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Balanced cloud tool-calling model."},
     {"name": "claude-opus-4-6", "provider": "anthropic", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Most capable Claude for hard tasks."},
+    {"name": "claude-sonnet-4-6", "provider": "anthropic", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Balanced cloud tool-calling model."},
     {"name": "claude-3-7-sonnet-20250219", "provider": "anthropic", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Earlier Sonnet generation."},
     {"name": "claude-3-5-haiku-20241022", "provider": "anthropic", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires ANTHROPIC_API_KEY. Fast, cost-effective Claude."},
     # --- OpenAI / ChatGPT ---
+    {"name": "gpt-5.5", "provider": "openai", "role": "cloud frontier reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. OpenAI's first fully retrained base since GPT-4.5 (April 2026). 1M context, best for agentic tool sequencing and computer-use automation."},
+    {"name": "gpt-5.5-instant", "provider": "openai", "role": "fast cloud frontier", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Low-latency GPT-5.5 variant for quick tasks."},
+    {"name": "gpt-5.5-thinking", "provider": "openai", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Reasoning-optimized GPT-5.5 for complex multi-step problems."},
+    {"name": "gpt-5.5-pro", "provider": "openai", "role": "cloud highest accuracy", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Higher-accuracy GPT-5.5 variant for hardest professional, legal, and research tasks."},
     {"name": "gpt-4o", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Strong general-purpose model."},
     {"name": "gpt-4o-mini", "provider": "openai", "role": "fast cloud fallback", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Fast and cheap cloud tool support."},
     {"name": "gpt-4.5-preview", "provider": "openai", "role": "cloud advanced", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Larger GPT-4.5 series preview."},
@@ -349,7 +358,9 @@ RECOMMENDED_MODELS = [
     {"name": "gpt-4", "provider": "openai", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Original GPT-4 base model."},
     {"name": "gpt-3.5-turbo", "provider": "openai", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires OPENAI_API_KEY. Fast, cheap GPT-3.5 generation."},
     # --- Gemini / Google ---
-    {"name": "gemini-2.5-pro", "provider": "gemini", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Most capable Gemini."},
+    {"name": "gemini-3.5-flash", "provider": "gemini", "role": "fast cloud frontier", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Gemini 3.5 Flash (GA May 2026). Beats Gemini 3.1 Pro on coding/agentic benchmarks. 1M context, 4x faster output, natively multimodal."},
+    {"name": "gemini-3.5-pro", "provider": "gemini", "role": "cloud deep frontier", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Gemini 3.5 Pro (rolling out June 2026). Highest-capability Gemini for hardest reasoning tasks."},
+    {"name": "gemini-2.5-pro", "provider": "gemini", "role": "cloud deep reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Most capable Gemini 2.5 series."},
     {"name": "gemini-2.5-flash", "provider": "gemini", "role": "fast cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Fast tool-calling model."},
     {"name": "gemini-2.0-flash", "provider": "gemini", "role": "fast cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Gemini 2.0 Flash generation."},
     {"name": "gemini-2.0-flash-lite-preview-02-05", "provider": "gemini", "role": "fastest cloud", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Lightweight Gemini 2.0 Flash preview."},
@@ -359,6 +370,7 @@ RECOMMENDED_MODELS = [
     {"name": "gemini-1.5-flash-8b-latest", "provider": "gemini", "role": "fast cloud", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Smaller, cheaper 1.5 Flash 8B."},
     {"name": "gemini-1.0-pro-latest", "provider": "gemini", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires GEMINI_API_KEY. Original Gemini 1.0 Pro generation."},
     # --- Kimi / Moonshot ---
+    {"name": "kimi-k2.7", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. k2.7 series (temperature must be 1.0)."},
     {"name": "kimi-k2.6", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. k2.6 series (temperature must be 1.0)."},
     {"name": "kimi-k2-0711-preview", "provider": "kimi", "role": "cloud reasoning", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. k2 preview (temperature must be 1.0)."},
     {"name": "moonshot-v1-8k", "provider": "kimi", "role": "cloud chat", "size": "cloud", "tool_capable": True, "notes": "Requires KIMI_API_KEY. Classic Moonshot 8k context."},
@@ -393,7 +405,7 @@ PROVIDER_DEFAULTS: dict[str, str] = {
     "openai": os.getenv("OPENAI_MODEL", "gpt-4o"),
     "anthropic": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
     "gemini": os.getenv("GEMINI_MODEL", "gemini-2.5-pro"),
-    "kimi": os.getenv("KIMI_MODEL", "moonshot-v1-8k"),
+    "kimi": os.getenv("KIMI_MODEL", "kimi-k2.7"),
     "deepseek": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     "qwen": os.getenv("QWEN_MODEL", "qwen-max"),
     "huggingface": DEFAULT_HUGGINGFACE_MODEL,
@@ -629,7 +641,7 @@ class ChatRequest(BaseModel):
     source: str | None = "typed"
     max_tokens: int | None = None
     realtime: bool | None = None
-    agent_mode: bool = False
+    agent_mode: bool = True
     governed: bool = False  # Enable Neural Governor pipeline
     images: list[str] = []  # base64 data URIs or URLs for vision input
     voice_correction_id: str | None = None  # pending LLM STT correction id from /voice/transcribe or /voice/correct
@@ -1313,6 +1325,12 @@ def _proposal_validation_for_path(relative_path: str) -> list[list[str]]:
 
 
 def _detect_chat_action_request(text: str, session_id: str | None) -> dict[str, Any] | None:
+    """Detect EXPLICIT action requests that need no LLM planning.
+
+    This function ONLY catches specific, unambiguous user commands.
+    It does NOT try to guess intent from conversational messages —
+    the agent loop handles that through normal LLM planning + tool use.
+    """
     low = _normalize_text(text or "")
     proposal_id = _extract_proposal_id(text or "")
     if proposal_id and re.search(r"\b(apply|approve|install|merge)\b", low):
@@ -1331,22 +1349,6 @@ def _detect_chat_action_request(text: str, session_id: str | None) -> dict[str, 
             payload={"proposal_id": proposal_id},
             session_id=session_id,
             risk="sandbox_validation",
-        )
-    if re.search(r"\b(capability check|test .*power|prove .*change|self.?evolution.*apply|backend.*frontend.*feature)\b", low):
-        return _create_pending_action(
-            action_type="evolution_capability_check",
-            title="Run SHIMS backend/frontend/feature capability check",
-            summary="Create, sandbox-validate, approve, and apply harmless probe files across backend, frontend, and generated feature surfaces",
-            payload={"revision": "chat-" + datetime.now().strftime("%Y%m%d-%H%M%S"), "targets": ["backend", "frontend", "feature"]},
-            session_id=session_id,
-        )
-    if re.search(r"\b(?:self[-\s]?check|check|inspect|analyze|review|test)\b[^.]{0,60}\b(?:your(?:self|\s+own)?\s+)?(?:code|source|files?|tests?|app|system|repo|repository|\.(?:py|js|html|json|md|txt|csv|sh|bat|ps1))\b", low):
-        return _create_pending_action(
-            action_type="evolution_self_check",
-            title="Run SHIMS self-check",
-            summary="Inspect SHIMS code and produce a validated patch proposal when improvements are found",
-            payload={"scope": "tests", "goal": text or ""},
-            session_id=session_id,
         )
     # Direct desktop-bridge shortcuts (screenshot, ping, system info) so natural chat can reach the paired desktop.
     bridge_action: str | None = None
@@ -1904,6 +1906,50 @@ def _guard_duplicate(session_id: str, user_text: str, source: str | None) -> boo
 def _is_empty_greeting(text: str) -> bool:
     t = _normalize_text(_strip_wake(text))
     return t in {"", "hi", "hello", "hey", "haan", "han", "sun rahe ho", "suno", "are you there", "listen"}
+
+
+def _detect_simple_tool(text: str) -> tuple[str, dict[str, Any]] | None:
+    """Detect simple read-only tool requests that we can execute directly.
+
+    Returns (tool_name, args) for straightforward commands, or None.
+    This runs AFTER the LLM generates text, so it augments the response
+    with real tool output instead of just describing what it would do.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return None
+    # File listing
+    if any(p in t for p in ("list files", "show files", "what files", "directory", "ls ", "what's in", "what is in", "files in", "folders in")):
+        path = "."
+        for pattern in [r"(?:in|from|under)\s+([\w./\\~:-]+)", r"(?:directory|folder|path)\s+([\w./\\~:-]+)"]:
+            m = re.search(pattern, t)
+            if m:
+                path = m.group(1).strip()
+                break
+        return "fs.list", {"path": path}
+    # File reading
+    if any(p in t for p in ("read file", "show content", "cat file", "view file", "contents of", "content of")):
+        for pattern in [r'(?:file|document)\s+["\']?([\w./\\~:-]+)["\']?', r'(?:read|show|cat|view)\s+["\']?([\w./\\~:-]+)["\']?']:
+            m = re.search(pattern, t)
+            if m:
+                return "fs.read", {"path": m.group(1).strip()}
+    # Shell commands (read-only only — no writes/deletes)
+    if any(p in t for p in ("run command", "execute command", "shell command", "terminal command")):
+        for pattern in [r'(?:run|execute|shell)\s+["\']?(.+?)["\']?(?:\s|$)', r'(?:command|cmd)\s+["\']?(.+?)["\']?(?:\s|$)']:
+            m = re.search(pattern, t)
+            if m:
+                cmd = m.group(1).strip()
+                # Only allow safe read-only commands
+                dangerous = ("rm", "del", "delete", "format", "mkfs", "dd", ">", "|", "eval", "exec")
+                if not any(d in cmd.lower() for d in dangerous):
+                    return "shell.run", {"command": cmd}
+    # Web search
+    if any(p in t for p in ("search the web", "google", "look up online", "find on the internet")):
+        for pattern in [r'(?:search|google|look up)\s+(?:for\s+)?["\']?(.+?)["\']?(?:\s|$)', r'(?:for|about)\s+["\']?(.+?)["\']?(?:\s|$)']:
+            m = re.search(pattern, t)
+            if m:
+                return "web.search", {"query": m.group(1).strip()}
+    return None
 
 
 def _detect_tool_intent(text: str) -> tuple[str, str] | None:
@@ -3723,13 +3769,16 @@ _AGENTIC_PATTERNS = re.compile(
 
 
 def _agentic_intent(text: str) -> bool:
+    """Return True for all non-empty messages. Agent mode is the default.
+    Only skip pure greetings/empty so they still fast-path."""
     raw = (text or "").strip()
     if not raw:
         return False
     low = raw.lower()
-    if low == "/agent" or low.startswith(_AGENT_SLASH):
-        return True
-    return bool(_AGENTIC_PATTERNS.search(low))
+    # Only skip pure greetings — everything else goes through the agent loop
+    if low in ("hi", "hello", "hey", "yo", "sup", "hola", "namaste"):
+        return False
+    return True
 
 
 def _strip_agent_slash(text: str) -> str:
@@ -3903,16 +3952,17 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     # not be forced into the agent loop (which can emit tool explanations).
     _agent_low = (req.message or "").strip().lower()
     _direct_agent = _agent_low == "/agent" or _agent_low.startswith(_AGENT_SLASH)
-    # Omnipotent mode auto-approves gated actions; the agent loop should only
-    # activate for turns that actually look agentic. Keep greetings/duplicates on
-    # the fast path so they don't block on model load or wave planning.
-    if req.agent_mode and _agentic_intent(req.message):
+    # Omnipotent mode auto-approves gated actions. Agent mode is now the default
+    # for all turns so SHIMS always plans and uses tools. Greetings/duplicates
+    # still route to fast paths below.
+    if req.agent_mode:
         if _direct_agent or not plan.tool_kind:
             plan.tool_kind = None
             plan.tool_prompt = None
             plan.tool_metadata = None
-            if plan.route == "local:greeting" and _agentic_intent(req.message):
-                plan.route = "agent"
+            # Keep greeting fast-path — don't override it to agent
+            # if plan.route == "local:greeting":
+            #     plan.route = "agent"
     session_id = plan.session_id
     conversation_enabled = bool(req.conversation_mode)
     history = _sessions.setdefault(session_id, []) if conversation_enabled else []
@@ -3974,10 +4024,10 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     pending_request = _detect_chat_action_request(req.message, session_hint)
     if pending_request:
         action_type = pending_request.get("action_type")
-        # Safe creation/scaffold actions run immediately so SHIMS actually does the work
-        # instead of asking for approval and doing nothing.
-        if action_type in {"coder_app_scaffold", "evolution_capability_check"}:
-            yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected creation request: {pending_request.get('title')}. Executing now."})
+        # Safe read-only / scaffold actions run immediately so SHIMS actually does
+        # the work instead of asking for approval and doing nothing.
+        if action_type in {"coder_app_scaffold", "evolution_validate"}:
+            yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected safe action: {pending_request.get('title')}. Auto-executing now (read-only or scaffold)."})
             try:
                 result = await _execute_pending_action(pending_request, approved_by="auto-approved")
                 ok = result.get("ok", False)
@@ -3995,7 +4045,8 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             return
 
         # Riskier source-change actions still require explicit human approval.
-        yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected action request: {pending_request.get('title')}. Planning scope and requirements before asking for approval."})
+        # But first, generate a real plan instead of a generic template message.
+        yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected action request: {pending_request.get('title')}. Analyzing scope and risk before asking for approval."})
         trust = build_trust(route="approval:request", evidence=evidence_from_action(get_action(pending_request.get("action_id", ""))), action_id=pending_request.get("action_id", ""), ledger_hash=pending_request.get("ledger_hash", ""), requested_level="L3")
         yield _jsonl({
             "type": "meta",
@@ -4009,7 +4060,21 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             **_trust_fields(trust),
         })
         public = _public_pending_action(pending_request)
-        answer = f"I've thought this through. Here's what I plan to do:\n\n**{pending_request.get('title')}**\n{pending_request.get('summary')}\n\nThis will create files and modify the app workspace. Approve? Reply yes or no."
+        # Dynamic plan message instead of generic template
+        title = pending_request.get('title', 'Action')
+        summary = pending_request.get('summary', '')
+        action_type = pending_request.get('action_type', 'action')
+        # Build a contextual explanation based on action type
+        if action_type == 'evolution_apply':
+            plan_detail = f"This will apply a code patch to SHIMS's own source files. The patch has been validated — it will modify {summary}."
+        elif action_type == 'evolution_validate':
+            plan_detail = f"This will run sandbox tests on a proposed patch to verify it doesn't break anything. No files will be modified."
+        elif action_type == 'agent_tool':
+            tool = pending_request.get('payload', {}).get('tool', 'a tool')
+            plan_detail = f"This will run the tool '{tool}' on your desktop: {summary}"
+        else:
+            plan_detail = f"This will: {summary}"
+        answer = f"I analyzed your request and here's what I plan to do:\n\n**{title}**\n{plan_detail}\n\nRisk level: {public.get('risk', 'unknown')}. Approve? Reply yes or no."
         yield _jsonl({"type": "approval_request", "approval": public, **_trust_fields(trust)})
         yield _jsonl({"type": "token", "content": answer})
         yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:request", "approval": public, **_trust_fields(trust)})
@@ -4201,26 +4266,23 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     turn_history = history[-50:] if conversation_enabled else [{"role": "user", "content": req.message}]
     messages = [{"role": "system", "content": _system_prompt() + "\n\n" + brain_addendum}] + turn_history
 
+    # Determine agent provider before the gate so we can skip Ollama wave loop
+    user_provider = (req.provider or plan.provider or "ollama").strip().lower()
+    if user_provider in ("anthropic", "openai", "gemini", "deepseek", "kimi"):
+        agent_provider = user_provider
+    else:
+        agent_provider = "ollama"
+
     # ---- Agentic tool-use loop: run/edit/code/web/self-modify on real machine ----
-    # Only enter the heavy tool loop when the turn actually needs it. Omnipotent
-    # mode auto-approves gated actions elsewhere; it does not mean every "hi" or
-    # "what is 2+2" should pay the latency of wave planning + tool calls.
-    if req.agent_mode and _agentic_intent(req.message):
+    # Agent mode is the default. For Ollama, the wave-based agent loop is too slow
+    # (router+executor+synthesis can take 60-120s). Instead, skip waves and use the
+    # basic LLM + simple direct tool execution which is much faster.
+    if req.agent_mode and agent_provider not in {"ollama", "huggingface"}:
         deep = _needs_deep_model(req.message)
-        # Use user's selected cloud provider (anthropic/openai) for agent loop if available,
-        # otherwise fall back to Ollama tool-capable models.
-        user_provider = (req.provider or plan.provider or "ollama").strip().lower()
-        if user_provider in ("anthropic", "openai", "gemini", "deepseek", "kimi"):
-            # Cloud provider — use it directly for agent loop
-            agent_provider = user_provider
-            agent_model = req.model or plan.model or ""
-            # If the selected model is a local Ollama model, switch to the cloud default
-            if not agent_model or _looks_local_model(agent_model) or agent_model in (await _ollama_names()):
-                agent_model = PROVIDER_DEFAULTS.get(agent_provider, "")
-        else:
-            # Local Ollama — pick a tool-capable model
-            agent_provider = "ollama"
-            agent_model = await _agent_tool_model(deep=deep) or "qwen2.5-coder:14b"
+        agent_model = req.model or plan.model or ""
+        # If the selected model is a local Ollama model, switch to the cloud default
+        if not agent_model or _looks_local_model(agent_model) or agent_model in (await _ollama_names()):
+            agent_model = PROVIDER_DEFAULTS.get(agent_provider, "")
 
         if agent_model:
             agent_user = _strip_agent_slash(req.message)
@@ -4242,12 +4304,12 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             yield _jsonl({"type": "status", "content": f"Agent mode · {agent_provider}:{agent_model} ({tier})"})
             final_info: dict[str, Any] = {}
             try:
-                # Some OpenAI-compatible cloud providers (Kimi, DeepSeek, Qwen)
-                # do not handle the full 128-tool registry reliably. Fall back to
-                # a compact essential tool set so they actually emit valid calls.
+                # Local Ollama models and some cloud providers struggle with the
+                # full 128-tool registry. Use the compact essential tool set so
+                # they actually emit valid calls and respond in reasonable time.
                 agent_tool_names = (
                     agent_loop.ESSENTIAL_TOOLS
-                    if agent_provider in {"kimi", "deepseek", "qwen"}
+                    if agent_provider in {"kimi", "deepseek", "qwen", "ollama", "huggingface"}
                     else None
                 )
                 async for ev in agent_loop.run_agent_loop(
@@ -4267,17 +4329,23 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             if final_info.get("jobs"):
                 _kick_task_drain()
             ans = final_info.get("answer", "")
-            _store_assistant_turn(ans)
-            trust = build_trust(route="agent-loop", evidence=context_evidence,
-                                missing_evidence=[] if context_evidence else ["Agentic tool run; see tool result cards."],
-                                requested_level="L3")
-            _remember_session_turn(session_id, req.message, ans, route="agent-loop", agent=plan.agent, provider=agent_provider, model=agent_model, metadata={"brain_context": brain_ctx, "trust": trust, "tools_used": final_info.get("tools_used")})
-            log_event("turn.done", route="agent-loop", provider=agent_provider, model=agent_model, latency_ms=(time.perf_counter()-started)*1000, ok=True, message=req.message, metadata={"session_id": session_id, "tools_used": final_info.get("tools_used")})
-            yield _jsonl({"type": "done", "session_id": session_id, "model": agent_model, "provider": agent_provider, "route": "agent-loop", "tools_used": final_info.get("tools_used"), "jobs": final_info.get("jobs"), **_trust_fields(trust)})
-            return
+            # Only return if agent loop actually produced a meaningful answer.
+            # If it failed/timed out, fall through to basic LLM generation.
+            if ans and len(ans) > 5 and not ans.startswith("Agent error"):
+                _store_assistant_turn(ans)
+                trust = build_trust(route="agent-loop", evidence=context_evidence,
+                                    missing_evidence=[] if context_evidence else ["Agentic tool run; see tool result cards."],
+                                    requested_level="L3")
+                _remember_session_turn(session_id, req.message, ans, route="agent-loop", agent=plan.agent, provider=agent_provider, model=agent_model, metadata={"brain_context": brain_ctx, "trust": trust, "tools_used": final_info.get("tools_used")})
+                log_event("turn.done", route="agent-loop", provider=agent_provider, model=agent_model, latency_ms=(time.perf_counter()-started)*1000, ok=True, message=req.message, metadata={"session_id": session_id, "tools_used": final_info.get("tools_used")})
+                yield _jsonl({"type": "done", "session_id": session_id, "model": agent_model, "provider": agent_provider, "route": "agent-loop", "tools_used": final_info.get("tools_used"), "jobs": final_info.get("jobs"), **_trust_fields(trust)})
+                return
+            # Agent loop failed — emit a thought and fall through to basic generation
+            yield _jsonl({"type": "thought", "stage": "agent", "content": "Agent loop timed out. Falling back to direct LLM generation."})
 
     # ----- Auto-planning: if the request smells like a multi-step workflow, create and run a plan -----
-    if not req.agent_mode and _should_auto_plan(req.message):
+    # This runs as a fallback when the agent loop didn't produce a meaningful answer.
+    if _should_auto_plan(req.message):
         try:
             from shared.desktop_planner import plan_from_goal, get_plan
             from shared.plan_executor import run_plan_wave
@@ -4329,6 +4397,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                     realtime=realtime_request,
                     max_tokens=response_max_tokens,
                     on_delta=collect_delta,
+                    first_token_timeout=60.0,
                 )
                 collect_task = asyncio.create_task(collector)
                 while not collect_task.done():
@@ -4346,6 +4415,23 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                     answer = "I am SHIMS, not a text-only assistant. Ask for images, PDFs, PPTs, audio or video directly and I will run the verified backend tool."
                     yield _jsonl({"type": "token", "content": "\n" + answer})
                     route = "capability-corrected"
+                # ---- Simple tool execution: if user asked for something we can do directly, do it ----
+                simple_tool = _detect_simple_tool(req.message)
+                if simple_tool and not plan.tool_kind:
+                    tool_name, tool_args = simple_tool
+                    yield _jsonl({"type": "thought", "stage": "tool", "content": f"User asked for {tool_name}. Executing..."})
+                    yield _jsonl({"type": "status", "content": f"Running {tool_name}"})
+                    try:
+                        result = agent_tools.run_tool(tool_name, tool_args, allow_gated=False, session_id=session_id)
+                        if result.get("ok"):
+                            result_text = result.get("text", "") or result.get("stdout", "") or result.get("output", "") or json.dumps(result, default=str)[:2000]
+                            yield _jsonl({"type": "tool_result", "tool": tool_name, "result": result})
+                            yield _jsonl({"type": "token", "content": f"\n\n**Result:**\n```\n{result_text[:1200]}\n```"})
+                            route = f"ollama-local-stream+tool:{tool_name}"
+                        else:
+                            yield _jsonl({"type": "token", "content": f"\n\n(Tried to run {tool_name} but it failed: {result.get('error', 'unknown error')})"})
+                    except Exception as exc:
+                        yield _jsonl({"type": "token", "content": f"\n\n(Tried to run {tool_name} but hit an error: {exc})"})
                 _store_assistant_turn(answer)
                 trust = build_trust(
                     route=route,
@@ -4383,7 +4469,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                             realtime=True,
                             max_tokens=response_max_tokens,
                             on_delta=collect_fallback,
-                            first_token_timeout=18.0,
+                            first_token_timeout=60.0,
                         ))
                         while not collect_task.done():
                             while pending_fallback:

@@ -1,0 +1,16 @@
+[starter] SHIMS stack launcher
+  root:   C:\Users\direc\Documents\kimi\workspace\SHIMS
+  python: C:\Users\direc\Documents\kimi\workspace\SHIMS\.venv\Scripts\python.exe
+[starter] starting Desktop Bridge on port 9876
+  launcher: C:\Users\direc\Documents\kimi\workspace\SHIMS\logs\start_shims_shims_bridge.bat
+[starter] starting SHIMS Omni on port 8010
+  launcher: C:\Users\direc\Documents\kimi\workspace\SHIMS\logs\start_shims_shims_omni.bat
+[starter] waiting for services to come online ...
+
+==================================================
+ SHIMS is running
+==================================================
+  Omni:    http://localhost:8010
+  Council: http://localhost:8010/omni-duobot
+  Bridge:  ws://localhost:9876/bridge
+==================================================
