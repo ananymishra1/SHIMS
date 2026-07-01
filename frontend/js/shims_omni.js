@@ -2830,8 +2830,15 @@ function buildOnboarding(){
   const style = document.createElement('style');
   style.textContent = `
   #onboard-overlay{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;
-    background:rgba(2,6,22,.72);backdrop-filter:blur(10px);animation:obfade .3s ease}
+    background:rgba(2,6,22,.72);backdrop-filter:blur(10px);opacity:1}
+  /* No entrance animation on the overlay itself: a CSS animation's timeline can
+     stall while the window is backgrounded/minimized (e.g. Electron window not
+     yet focused during boot), which would freeze this full-screen blocker at
+     its opacity:0 start frame — invisible but still swallowing every click.
+     Card pops in instead, which is purely cosmetic and safe to lose a frame of. */
+  #onboard-card{animation:obcardin .3s ease}
   @keyframes obfade{from{opacity:0}to{opacity:1}}
+  @keyframes obcardin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   #onboard-card{width:min(560px,92vw);border:1px solid rgba(120,160,255,.22);border-radius:20px;
     background:linear-gradient(180deg,rgba(12,22,52,.96),rgba(6,12,32,.96));box-shadow:0 30px 90px rgba(0,0,0,.6);
     padding:34px 32px 26px;color:#dce6ff;font-family:inherit;position:relative;overflow:hidden}
@@ -2917,7 +2924,14 @@ function finishOnboarding(){
 function checkOnboarding(){
   if (localStorage.shimsOnboardingDone === 'true') return;
   // Defer slightly so the boot overlay clears first.
-  setTimeout(() => { try { buildOnboarding(); } catch(e){ localStorage.shimsOnboardingDone='true'; } }, 600);
+  setTimeout(() => {
+    try { buildOnboarding(); }
+    catch(e){
+      localStorage.shimsOnboardingDone='true';
+      // Don't leave a half-built overlay sitting on top of the app, blocking every click.
+      const ov = document.getElementById('onboard-overlay'); if(ov) ov.remove();
+    }
+  }, 600);
 }
 function dismissOnboarding(){ finishOnboarding(); }
 function startOnboarding(){ localStorage.removeItem('shimsOnboardingDone'); buildOnboarding(); }
