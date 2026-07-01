@@ -10,8 +10,8 @@
 <title>SHIMS</title>
   <!-- Flash-free theme: set data-theme before CSS paints. Aurora = default, Classic = space/neon. -->
   <script>(function(){try{var t=localStorage.getItem('shims_theme')||'aurora';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','aurora');}})();</script>
-  <link rel="stylesheet" href="/static/css/shims_omni.css?v=20260613-aurora">
-  <link rel="stylesheet" href="/static/css/shims_agent.css?v=20260613-aurora">
+  <link rel="stylesheet" href="/static/css/shims_omni.css?v=20260701-aurora">
+  <link rel="stylesheet" href="/static/css/shims_agent.css?v=20260701-aurora">
   <noscript><style>#boot{display:none!important}</style></noscript>
 </head>
 <body>
@@ -344,7 +344,11 @@
       <button class="provider-pill" data-provider="auto" data-model="" onclick="setProviderPill(this)">✨ Auto</button>
       <button class="provider-pill" data-provider="lmstudio" data-model="" onclick="setProviderPill(this)">⚡ LM Studio (GPU)<span class="pill-model" id="pill-model-lmstudio"></span></button>
       <button class="provider-pill" data-provider="ollama" data-model="" onclick="setProviderPill(this)">🦙 Ollama<span class="pill-model" id="pill-model-ollama"></span></button>
-      <button class="provider-pill" id="pill-more" data-provider="" data-model="" title="More providers — cloud (Claude, GPT, Gemini, Kimi, DeepSeek, Qwen) and HuggingFace" onclick="document.getElementById('btn-model').click()">☁️ More ▾</button>
+      <button class="provider-pill" data-provider="huggingface" data-model="" onclick="setProviderPill(this)">🤗 HuggingFace<span class="pill-model" id="pill-model-huggingface"></span></button>
+      <button class="provider-pill" data-provider="anthropic" data-model="claude-sonnet-4-6" onclick="setProviderPill(this)">🟠 Claude</button>
+      <button class="provider-pill" data-provider="openai" data-model="gpt-4o-mini" onclick="setProviderPill(this)">🟢 GPT</button>
+      <button class="provider-pill" data-provider="gemini" data-model="gemini-2.5-flash" onclick="setProviderPill(this)">🔵 Gemini</button>
+      <button class="provider-pill" id="pill-more" data-provider="" data-model="" title="More providers — Kimi, DeepSeek, Qwen" onclick="document.getElementById('btn-model').click()">☁️ More ▾</button>
     </div>
     <div class="privacy-bar" id="privacy-bar" title="Privacy mode controls whether sensitive data can leave this machine">
       <button class="privacy-btn" data-mode="strict" onclick="setPrivacyMode('strict')">🔒 Strict</button>
@@ -783,8 +787,8 @@
       });
     })();
   </script>
-  <script src="/static/js/shims_omni.js?v=20260619b-aurora" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_omni.js'"></script>
-  <script src="/static/js/shims_agent.js?v=20260619b-aurora" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_agent.js'"></script>
+  <script src="/static/js/shims_omni.js?v=20260701-aurora" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_omni.js'"></script>
+  <script src="/static/js/shims_agent.js?v=20260701-aurora" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_agent.js'"></script>
 <div class="nav-row" onclick="window.open('/school','_blank')" style="cursor:pointer"><span>🏢</span>Stanford International School</div>
 </body>
 </html>

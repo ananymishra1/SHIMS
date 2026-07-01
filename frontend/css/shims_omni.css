@@ -1214,7 +1214,6 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 #model-dropdown, #model-menu, #model-menu.open{filter:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transform:none!important;isolation:isolate!important;}
 #model-menu{background:#061021!important;border:1px solid rgba(124,240,255,.45)!important;box-shadow:0 25px 80px rgba(0,0,0,.82)!important;}
 #model-menu .model-card,#model-menu .m-name,#model-menu .m-meta{filter:none!important;text-shadow:none!important;-webkit-font-smoothing:antialiased!important;}
-</style>
 #model-menu,.dropdown-menu{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;filter:none!important;transform:none!important;text-shadow:none!important;z-index:9999!important;background:rgba(2,12,28,.98)!important;color:#e9fbff!important}
 #model-menu.open{display:block!important}
 #model-menu *{filter:none!important;transform:none!important;text-shadow:none!important;color:inherit}
@@ -1330,11 +1329,6 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 .coder-ai-file{ border:1px solid var(--line); border-radius:6px; background:rgba(0,0,0,.3); padding:8px; margin-bottom:6px; font-size:11px; }
 .coder-ai-file pre{ white-space:pre-wrap; word-break:break-word; margin-top:6px; padding:8px; background:rgba(0,0,0,.25); border-radius:4px; font-size:11px; color:var(--text); max-height:300px; overflow:auto; }
 
-/* SHIMS v14 crisp model selector override */
-#model-dropdown, #model-menu, #model-menu.open{filter:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transform:none!important;isolation:isolate!important;}
-#model-menu{background:#061021!important;border:1px solid rgba(124,240,255,.45)!important;box-shadow:0 25px 80px rgba(0,0,0,.82)!important;}
-#model-menu .model-card,#model-menu .m-name,#model-menu .m-meta{filter:none!important;text-shadow:none!important;-webkit-font-smoothing:antialiased!important;}
-
 .panel-body.hidden{ display:none; }
 .panel-chevron{ font-size:10px; color:var(--text-dim); transition:transform .2s; }
 #body-thinking .think-box{ margin-top:0; }
@@ -1434,4 +1428,3 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 /* Theme button quick feedback */
 .icon-btn.flash{animation:btnflash .4s ease}
 @keyframes btnflash{0%{transform:scale(1)}50%{transform:scale(.84)}100%{transform:scale(1)}}
-</style>
