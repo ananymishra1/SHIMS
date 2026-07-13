@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHIMS Chem API</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel-2: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #818cf8;
+      --ok: #4ade80;
+      --err: #f87171;
+      --radius: 10px;
+      --shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--panel-2);
+      background: linear-gradient(90deg, var(--panel), #172554);
+    }
+    header h1 { margin: 0; font-size: 1.6rem; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 0.9rem; }
+    .container { display: flex; gap: 20px; padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+    .sidebar { width: 260px; flex-shrink: 0; }
+    .tab-btn {
+      width: 100%;
+      text-align: left;
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      border: none;
+      border-radius: var(--radius);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      transition: 0.15s;
+      font-size: 0.95rem;
+    }
+    .tab-btn:hover { background: var(--panel-2); }
+    .tab-btn.active { background: linear-gradient(90deg, var(--accent), var(--accent-2)); color: #0f172a; font-weight: 600; }
+    .main { flex: 1; min-width: 0; }
+    .card {
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+    .card h2 { margin: 0 0 16px; font-size: 1.2rem; color: var(--accent); }
+    label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    input, textarea, select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--panel-2);
+      border-radius: var(--radius);
+      background: #0b1220;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+    button.primary {
+      margin-top: 18px;
+      padding: 12px 24px;
+      border: none;
+      border-radius: var(--radius);
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      color: #0f172a;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button.primary:hover { opacity: 0.92; }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      display: none;
+    }
+    .status.ok { background: rgba(74,222,128,0.12); color: var(--ok); border: 1px solid rgba(74,222,128,0.3); }
+    .status.err { background: rgba(248,113,113,0.12); color: var(--err); border: 1px solid rgba(248,113,113,0.3); }
+    pre {
+      background: #0b1220;
+      border: 1px solid var(--panel-2);
+      border-radius: var(--radius);
+      padding: 16px;
+      overflow: auto;
+      max-height: 520px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    .hidden { display: none !important; }
+    .endpoint { color: var(--muted); font-size: 0.8rem; margin-bottom: 12px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 900px) {
+      .container { flex-direction: column; padding: 16px; }
+      .sidebar { width: 100%; }
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧪 SHIMS Chem API</h1>
+    <p>Chemistry verification, hazards, reactions, retrosynthesis, and tool runner.</p>
+  </header>
+
+  <div class="container">
+    <nav class="sidebar">
+      <button class="tab-btn active" data-tab="smiles">Verify SMILES</button>
+      <button class="tab-btn" data-tab="hazards">Verify Hazards</button>
+      <button class="tab-btn" data-tab="reaction">Verify Reaction</button>
+      <button class="tab-btn" data-tab="ich">ICH Q3 Impurity</button>
+      <button class="tab-btn" data-tab="retro">Plan Retrosynthesis</button>
+      <button class="tab-btn" data-tab="tool">Run Tool</button>
+    </nav>
+
+    <main class="main">
+      <div class="card">
+        <div id="panels">
+          <div id="panel-smiles" class="panel">
+            <h2>Verify SMILES</h2>
+            <div class="endpoint">POST /verify/smiles</div>
+            <label for="smiles-in">SMILES string</label>
+            <input id="smiles-in" type="text" value="CCO" placeholder="e.g. CCO">
+            <button class="primary" onclick="callApi('/verify/smiles', {smiles: val('smiles-in')})">Verify</button>
+          </div>
+
+          <div id="panel-hazards" class="panel hidden">
+            <h2>Verify Hazards</h2>
+            <div class="endpoint">POST /verify/hazards</div>
+            <label for="hazards-in">SMILES string</label>
+            <input id="hazards-in" type="text" value="CCO" placeholder="e.g. CCO">
+            <button class="primary" onclick="callApi('/verify/hazards', {smiles: val('hazards-in')})">Check Hazards</button>
+          </div>
+
+          <div id="panel-reaction" class="panel hidden">
+            <h2>Verify Reaction</h2>
+            <div class="endpoint">POST /verify/reaction</div>
+            <label for="reaction-in">Reaction SMILES</label>
+            <input id="reaction-in" type="text" value="CCO>>CC=O" placeholder="reactant>>product">
+            <button class="primary" onclick="callApi('/verify/reaction', {rxn_smiles: val('reaction-in')})">Verify Reaction</button>
+          </div>
+
+          <div id="panel-ich" class="panel hidden">
+            <h2>ICH Q3 Impurity</h2>
+            <div class="endpoint">POST /verify/ich</div>
+            <div class="grid-2">
+              <div>
+                <label for="ich-pct">Impurity (%)</label>
+                <input id="ich-pct" type="number" step="0.01" value="0.15">
+              </div>
+              <div>
+                <label for="ich-limit">Limit (%)</label>
+                <input id="ich-limit" type="number" step="0.01" value="0.10">
+              </div>
+            </div>
+            <button class="primary" onclick="callApi('/verify/ich', {impurity_pct: +val('ich-pct'), kwargs: {limit_pct: +val('ich-limit')}})">Evaluate</button>
+          </div>
+
+          <div id="panel-retro" class="panel hidden">
+            <h2>Plan Retrosynthesis</h2>
+            <div class="endpoint">POST /plan/retro</div>
+            <label for="retro-target">Target SMILES</label>
+            <input id="retro-target" type="text" value="CC(=O)Oc1ccccc1C(=O)O" placeholder="target SMILES">
+            <label for="retro-routes">Max routes</label>
+            <input id="retro-routes" type="number" value="5" min="1" max="20">
+            <button class="primary" onclick="callApi('/plan/retro', {target_smiles: val('retro-target'), max_routes: +val('retro-routes')})">Plan</button>
+          </div>
+
+          <div id="panel-tool" class="panel hidden">
+            <h2>Run Tool</h2>
+            <div class="endpoint">POST /tool/run</div>
+            <label for="tool-name">Tool name</label>
+            <input id="tool-name" type="text" value="validate_smiles" placeholder="e.g. validate_smiles">
+            <label for="tool-kwargs">Arguments (JSON)</label>
+            <textarea id="tool-kwargs">{"smiles": "CCO"}</textarea>
+            <button class="primary" onclick="runTool()">Run Tool</button>
+          </div>
+        </div>
+
+        <div id="status" class="status"></div>
+      </div>
+
+      <div class="card">
+        <h2>Response</h2>
+        <pre id="output">// Submit a request to see the response here.</pre>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:8000';
+
+    function $(id) { return document.getElementById(id); }
+    function val(id) { return $(id).value; }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+        $(`panel-${btn.dataset.tab}`).classList.remove('hidden');
+        $('status').style.display = 'none';
+      });
+    });
+
+    async function callApi(path, body) {
+      const statusEl = $('status');
+      const outEl = $('output');
+      statusEl.style.display = 'none';
+      outEl.textContent = 'Loading...';
+      try {
+        const r = await fetch(API_BASE + path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await r.json();
+        outEl.textContent = JSON.stringify(data, null, 2);
+        statusEl.className = 'status ' + (r.ok ? 'ok' : 'err');
+        statusEl.textContent = (r.ok ? 'Success' : 'Error') + ` — HTTP ${r.status}`;
+        statusEl.style.display = 'block';
+      } catch (err) {
+        outEl.textContent = String(err);
+        statusEl.className = 'status err';
+        statusEl.textContent = 'Network error — is the Chem API server running on port 8000?';
+        statusEl.style.display = 'block';
+      }
+    }
+
+    async function runTool() {
+      let kwargs;
+      try {
+        kwargs = JSON.parse(val('tool-kwargs') || '{}');
+      } catch (e) {
+        $('output').textContent = 'Invalid JSON in tool arguments: ' + e.message;
+        $('status').className = 'status err';
+        $('status').textContent = 'Input error';
+        $('status').style.display = 'block';
+        return;
+      }
+      await callApi('/tool/run', {name: val('tool-name'), kwargs});
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHIMS Coder v2 — Enhanced Playground</title>
+<link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/editor/editor.main.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/loader.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/css/xterm.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+<style>
+:root{--bg:#0b1220;--bg2:#0f172a;--bg3:#1e293b;--line:#334155;--text:#e2e8f0;--text2:#94a3b8;--cyan:#22d3ee;--green:#4ade80;--yellow:#facc15;--red:#f87171;--blue:#60a5fa}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+.toolbar{height:44px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 12px;gap:8px;flex-shrink:0}
+.toolbar button,.toolbar select{background:var(--bg3);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer}
+.toolbar button:hover{background:var(--line)}
+.toolbar button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+.toolbar button.primary:hover{background:#3b82f6}
+.toolbar .spacer{flex:1}
+.toolbar label{font-size:11px;color:var(--text2)}
+.main{flex:1;display:flex;overflow:hidden}
+.sidebar{width:240px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-header{padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--cyan);display:flex;justify-content:space-between;align-items:center}
+.sidebar-header button{font-size:16px;background:none;border:none;color:var(--text);cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px}
+.sidebar-header button:hover{background:var(--bg3)}
+.file-tree{flex:1;overflow:auto;padding:4px;font-size:12px}
+.file-tree .item{padding:4px 8px;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.file-tree .item:hover{background:var(--bg3)}
+.file-tree .item.active{background:var(--blue);color:#000}
+.file-tree .item .icon{font-size:13px;width:16px;text-align:center}
+.file-tree .item .name{flex:1;overflow:hidden;text-overflow:ellipsis}
+.file-tree .item .actions{display:none;gap:4px}
+.file-tree .item:hover .actions{display:flex}
+.file-tree .item .actions button{background:none;border:none;color:var(--text2);cursor:pointer;font-size:11px;padding:0 2px}
+.file-tree .item .actions button:hover{color:var(--red)}
+.file-tree .folder{margin-left:0}
+.file-tree .folder .children{margin-left:14px;border-left:1px solid var(--line);padding-left:4px}
+.sidebar-footer{padding:8px;border-top:1px solid var(--line);font-size:11px;color:var(--text2)}
+.sidebar-footer button{width:100%;margin-top:4px}
+.center{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.editor-tabs{height:32px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 4px;gap:2px;overflow:auto;flex-shrink:0}
+.editor-tab{padding:6px 14px;font-size:12px;border-radius:6px 6px 0 0;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;border:1px solid transparent;border-bottom:none}
+.editor-tab:hover{background:var(--bg3)}
+.editor-tab.active{background:var(--bg);border-color:var(--line)}
+.editor-tab .close{font-size:14px;color:var(--text2);cursor:pointer;width:16px;height:16px;display:flex;align-items:center;justify-content:center;border-radius:3px}
+.editor-tab .close:hover{background:var(--red);color:#fff}
+#monaco-container{flex:1;overflow:hidden}
+.panels{height:180px;background:var(--bg2);border-top:1px solid var(--line);display:flex;flex-shrink:0}
+.panel-tabs{width:120px;border-right:1px solid var(--line);padding:4px;display:flex;flex-direction:column;gap:2px;flex-shrink:0}
+.panel-tab{padding:6px 10px;font-size:11px;border-radius:4px;cursor:pointer;color:var(--text2)}
+.panel-tab:hover{background:var(--bg3);color:var(--text)}
+.panel-tab.active{background:var(--bg3);color:var(--cyan);font-weight:600}
+.panel-content{flex:1;overflow:auto;padding:8px;font-size:12px;font-family:'Cascadia Mono','Fira Code',monospace}
+.panel-content pre{white-space:pre-wrap;word-break:break-all}
+#terminal-container{height:100%;padding:4px}
+.rightbar{width:300px;background:var(--bg2);border-left:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+.rightbar-header{padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px;font-weight:600}
+.rightbar-content{flex:1;overflow:auto;padding:8px;font-size:12px}
+.ai-chat{display:flex;flex-direction:column;gap:8px}
+.ai-message{padding:8px;border-radius:6px;background:var(--bg3);font-size:12px;line-height:1.5}
+.ai-message.user{background:var(--blue);color:#000}
+.ai-message.assistant{background:var(--bg3)}
+.ai-input{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
+.ai-input textarea{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px;color:var(--text);font-size:12px;resize:none;height:60px;font-family:inherit}
+.ai-input button{align-self:flex-end;background:var(--blue);border:none;color:#000;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer}
+.context-tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 6px;font-size:10px;margin:2px}
+.context-tag .remove{cursor:pointer;color:var(--red);margin-left:4px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000}
+.modal.show{display:flex}
+.modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:20px;min-width:320px;max-width:90vw;max-height:90vh;overflow:auto}
+.modal-box h3{margin-bottom:12px;font-size:14px}
+.modal-box input,.modal-box select,.modal-box textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;color:var(--text);font-size:12px;margin-bottom:10px;font-family:inherit}
+.modal-box textarea{min-height:80px;resize:vertical}
+.modal-box .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+.modal-box button{padding:6px 14px;border-radius:6px;border:1px solid var(--line);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12px}
+.modal-box button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+.template-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.template-card{padding:10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:12px;text-align:center}
+.template-card:hover{border-color:var(--blue);background:var(--bg3)}
+.template-card .icon{font-size:24px;margin-bottom:4px}
+.permission-dialog{position:fixed;bottom:20px;right:20px;background:var(--bg2);border:1px solid var(--yellow);border-radius:10px;padding:14px;max-width:320px;z-index:999;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.permission-dialog h4{color:var(--yellow);margin-bottom:8px;font-size:13px}
+.permission-dialog p{font-size:12px;color:var(--text2);margin-bottom:10px}
+.permission-dialog .buttons{display:flex;gap:8px}
+.permission-dialog button{flex:1;padding:8px;border-radius:6px;border:1px solid var(--line);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12px}
+.permission-dialog button.approve{background:var(--green);border-color:var(--green);color:#000;font-weight:600}
+.permission-dialog button.deny{background:var(--red);border-color:var(--red);color:#000;font-weight:600}
+.drop-zone{position:absolute;inset:0;background:rgba(11,18,32,.9);display:none;align-items:center;justify-content:center;z-index:500;flex-direction:column;gap:12px;border:3px dashed var(--blue)}
+.drop-zone.show{display:flex}
+.drop-zone .icon{font-size:48px}
+.drop-zone p{font-size:16px;color:var(--text2)}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button onclick="newProject()">+ New Project</button>
+  <button onclick="showTemplates()">Templates</button>
+  <button onclick="loadProject()">Load</button>
+  <select id="project-select" onchange="switchProject(this.value)"><option value="">Select project...</option></select>
+  <div class="spacer"></div>
+  <label>Entry:</label>
+  <select id="entry-select"><option>main.py</option></select>
+  <button class="primary" onclick="runProject()">▶ Run</button>
+  <button onclick="exportProject()">⬇ Export</button>
+  <button onclick="document.getElementById('import-input').click()">⬆ Import</button>
+  <input type="file" id="import-input" style="display:none" accept=".zip" onchange="importProject(this)">
+  <button onclick="toggleRightbar()">🤖 AI</button>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>📁 Files</span>
+      <div style="display:flex;gap:4px">
+        <button onclick="newFile()" title="New file">+</button>
+        <button onclick="newFolder()" title="New folder">📁</button>
+        <button onclick="uploadFiles()" title="Upload">⬆</button>
+      </div>
+    </div>
+    <div class="file-tree" id="file-tree"></div>
+    <div class="sidebar-footer">
+      <div id="project-info">No project</div>
+      <button onclick="gitPanel()">📊 Git</button>
+    </div>
+  </div>
+
+  <div class="center">
+    <div class="editor-tabs" id="editor-tabs"></div>
+    <div id="monaco-container"></div>
+    <div class="panels">
+      <div class="panel-tabs">
+        <div class="panel-tab active" onclick="switchPanel('console')">Console</div>
+        <div class="panel-tab" onclick="switchPanel('terminal')">Terminal</div>
+        <div class="panel-tab" onclick="switchPanel('git')">Git</div>
+      </div>
+      <div class="panel-content" id="panel-content">
+        <pre id="console-output" style="color:var(--text2)">Run output appears here...</pre>
+        <div id="terminal-container" style="display:none;height:100%"></div>
+        <div id="git-panel" style="display:none">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <button onclick="gitInit()" class="primary" style="font-size:11px">git init</button>
+            <button onclick="gitStatus()" style="font-size:11px">status</button>
+            <button onclick="gitLog()" style="font-size:11px">log</button>
+            <button onclick="gitDiff()" style="font-size:11px">diff</button>
+          </div>
+          <input id="git-commit-msg" placeholder="Commit message" style="width:70%;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;color:var(--text);font-size:11px">
+          <button onclick="gitCommit()" style="font-size:11px;padding:4px 10px">Commit</button>
+          <pre id="git-output" style="margin-top:8px;color:var(--text2)"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rightbar" id="rightbar">
+    <div class="rightbar-header">🤖 AI Assistant</div>
+    <div class="rightbar-content">
+      <div style="margin-bottom:8px">
+        <label style="font-size:10px;color:var(--text2)">Context files:</label>
+        <div id="ai-context-files"></div>
+      </div>
+      <div class="ai-chat" id="ai-chat"></div>
+    </div>
+    <div class="ai-input">
+      <textarea id="ai-prompt" placeholder="Ask anything... Use @filename to include files"></textarea>
+      <button onclick="askAI()">Send</button>
+    </div>
+  </div>
+</div>
+
+<div class="drop-zone" id="drop-zone">
+  <div class="icon">📁</div>
+  <p>Drop files or folders here</p>
+</div>
+
+<!-- New Project Modal -->
+<div class="modal" id="new-project-modal">
+  <div class="modal-box">
+    <h3>Create New Project</h3>
+    <input id="new-project-name" placeholder="Project name">
+    <div class="template-grid" id="template-grid"></div>
+    <div class="buttons">
+      <button onclick="closeModal('new-project-modal')">Cancel</button>
+      <button class="primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Git Modal -->
+<div class="modal" id="git-modal">
+  <div class="modal-box" style="min-width:500px">
+    <h3>🌿 Git</h3>
+    <div id="git-full-content"></div>
+    <div class="buttons">
+      <button onclick="closeModal('git-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+let currentProject = null;
+let openTabs = [];
+let activeTab = null;
+let editors = {};
+let monacoEditor = null;
+let terminal = null;
+let terminalId = null;
+let aiContextFiles = [];
+
+// ── Monaco Setup ────────────────────────────────────────────────────────────
+require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs' }});
+require(['vs/editor/editor.main'], () => {
+  monacoEditor = monaco.editor.create(document.getElementById('monaco-container'), {
+    value: '// Select a file to edit',
+    language: 'python',
+    theme: 'vs-dark',
+    fontSize: 13,
+    fontFamily: "'Cascadia Mono', 'Fira Code', monospace",
+    minimap: { enabled: true },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    tabSize: 4,
+    insertSpaces: true,
+    wordWrap: 'on',
+    lineNumbers: 'on',
+    glyphMargin: true,
+    folding: true,
+    renderWhitespace: 'selection',
+    bracketPairColorization: { enabled: true },
+  });
+});
+
+function getLangFromPath(path) {
+  const ext = path.split('.').pop().toLowerCase();
+  const map = {
+    py:'python', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
+    html:'html', css:'css', json:'json', md:'markdown', yaml:'yaml', yml:'yaml',
+    sh:'shell', bash:'shell', go:'go', rs:'rust', java:'java', c:'c', cpp:'cpp',
+    h:'cpp', cs:'csharp', php:'php', rb:'ruby', sql:'sql', xml:'xml',
+  };
+  return map[ext] || 'plaintext';
+}
+
+// ── Project Management ──────────────────────────────────────────────────────
+async function loadProjects() {
+  const r = await fetch('/coder/v2/projects');
+  const d = await r.json();
+  const sel = document.getElementById('project-select');
+  sel.innerHTML = '<option value="">Select project...</option>';
+  for (const p of d.projects) {
+    sel.innerHTML += `<option value="${p.id}">${p.name} (${p.id})</option>`;
+  }
+}
+
+async function switchProject(id) {
+  if (!id) return;
+  const r = await fetch('/coder/v2/project/' + id);
+  const d = await r.json();
+  if (!d.ok) return;
+  currentProject = d.project;
+  openTabs = [];
+  activeTab = null;
+  editors = {};
+  document.getElementById('editor-tabs').innerHTML = '';
+  if (monacoEditor) monacoEditor.setValue('// Select a file');
+  renderFileTree();
+  document.getElementById('project-info').textContent = `${d.project.name} · ${d.project.language}`;
+  // Update entry select
+  const entrySel = document.getElementById('entry-select');
+  entrySel.innerHTML = '';
+  const files = d.project.files || [];
+  for (const f of files.filter(x => !x.is_dir)) {
+    entrySel.innerHTML += `<option value="${f.path}">${f.path}</option>`;
+  }
+}
+
+async function newProject() {
+  const r = await fetch('/coder/v2/templates');
+  const d = await r.json();
+  const grid = document.getElementById('template-grid');
+  grid.innerHTML = '<div class="template-card" onclick="selectTemplate(null)"><div class="icon">🐍</div><div>Blank Python</div></div>';
+  for (const t of d.templates) {
+    grid.innerHTML += `<div class="template-card" onclick="selectTemplate('${t.id}')"><div class="icon">📦</div><div>${t.name}</div></div>`;
+  }
+  document.getElementById('new-project-modal').classList.add('show');
+}
+
+let selectedTemplate = null;
+function selectTemplate(id) { selectedTemplate = id; }
+
+async function createProject() {
+  const name = document.getElementById('new-project-name').value.trim();
+  if (!name) return;
+  const r = await fetch('/coder/v2/project', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, template: selectedTemplate})
+  });
+  const d = await r.json();
+  closeModal('new-project-modal');
+  await loadProjects();
+  document.getElementById('project-select').value = d.project_id;
+  await switchProject(d.project_id);
+}
+
+function showTemplates() { newProject(); }
+async function loadProject() {
+  const id = prompt('Enter project ID:');
+  if (id) { await loadProjects(); document.getElementById('project-select').value = id; await switchProject(id); }
+}
+
+// ── File Tree ───────────────────────────────────────────────────────────────
+function renderFileTree() {
+  const tree = document.getElementById('file-tree');
+  if (!currentProject) { tree.innerHTML = '<div style="padding:20px;color:var(--text2);text-align:center">No project loaded</div>'; return; }
+  tree.innerHTML = buildTreeHTML(currentProject.files || []);
+}
+
+function buildTreeHTML(files, prefix='') {
+  const dirs = files.filter(f => f.is_dir);
+  const items = files.filter(f => !f.is_dir);
+  let html = '';
+  for (const d of dirs) {
+    html += `<div class="item folder" onclick="toggleFolder(this)"><span class="icon">📁</span><span class="name">${d.name}</span></div>`;
+    html += `<div class="children" style="display:none">${buildTreeHTML(d.children || [], prefix + d.name + '/')}</div>`;
+  }
+  for (const f of items) {
+    const isActive = activeTab === f.path ? 'active' : '';
+    html += `<div class="item ${isActive}" onclick="openFile('${f.path}')" oncontextmenu="fileContextMenu(event,'${f.path}')">
+      <span class="icon">${getFileIcon(f.name)}</span>
+      <span class="name">${f.name}</span>
+      <span class="actions">
+        <button onclick="event.stopPropagation();deleteFile('${f.path}')">🗑</button>
+      </span>
+    </div>`;
+  }
+  return html;
+}
+
+function getFileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = {py:'🐍',js:'📜',ts:'📘',jsx:'⚛',tsx:'⚛',html:'🌐',css:'🎨',json:'📋',md:'📝',sh:'🐚',go:'🔵',rs:'🦀',java:'☕',c:'🔧',cpp:'🔧',php:'🐘',rb:'💎',sql:'🗄',yml:'⚙',yaml:'⚙'};
+  return map[ext] || '📄';
+}
+
+function toggleFolder(el) {
+  const children = el.nextElementSibling;
+  if (children) children.style.display = children.style.display === 'none' ? 'block' : 'none';
+}
+
+async function openFile(path) {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/file?path=' + encodeURIComponent(path));
+  const d = await r.json();
+  if (!d.ok) return;
+
+  if (!openTabs.includes(path)) {
+    openTabs.push(path);
+    addTab(path);
+  }
+  setActiveTab(path);
+  if (monacoEditor) {
+    monacoEditor.setValue(d.content);
+    monaco.editor.setModelLanguage(monacoEditor.getModel(), getLangFromPath(path));
+  }
+}
+
+function addTab(path) {
+  const tabs = document.getElementById('editor-tabs');
+  const tab = document.createElement('div');
+  tab.className = 'editor-tab';
+  tab.dataset.path = path;
+  tab.innerHTML = `<span>${path.split('/').pop()}</span><span class="close" onclick="event.stopPropagation();closeTab('${path}')">×</span>`;
+  tab.onclick = () => openFile(path);
+  tabs.appendChild(tab);
+}
+
+function setActiveTab(path) {
+  activeTab = path;
+  document.querySelectorAll('.editor-tab').forEach(t => t.classList.toggle('active', t.dataset.path === path));
+  document.querySelectorAll('.file-tree .item').forEach(t => t.classList.toggle('active', t.textContent.includes(path.split('/').pop())));
+}
+
+function closeTab(path) {
+  openTabs = openTabs.filter(p => p !== path);
+  const tab = document.querySelector(`.editor-tab[data-path="${path}"]`);
+  if (tab) tab.remove();
+  if (activeTab === path) {
+    activeTab = openTabs[openTabs.length - 1] || null;
+    if (activeTab) openFile(activeTab);
+    else if (monacoEditor) monacoEditor.setValue('// Select a file');
+  }
+}
+
+async function saveCurrentFile() {
+  if (!currentProject || !activeTab || !monacoEditor) return;
+  const content = monacoEditor.getValue();
+  await fetch('/coder/v2/project/' + currentProject.id + '/file', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path: activeTab, content})
+  });
+}
+
+// Auto-save on Ctrl+S
+window.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    saveCurrentFile();
+  }
+});
+
+// ── File Operations ─────────────────────────────────────────────────────────
+async function newFile() {
+  if (!currentProject) return;
+  const path = prompt('File path (e.g., src/utils.py):');
+  if (!path) return;
+  await fetch('/coder/v2/project/' + currentProject.id + '/file', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path, content: ''})
+  });
+  await switchProject(currentProject.id);
+  openFile(path);
+}
+
+async function newFolder() {
+  if (!currentProject) return;
+  const path = prompt('Folder path:');
+  if (!path) return;
+  await fetch('/coder/v2/project/' + currentProject.id + '/mkdir', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path})
+  });
+  await switchProject(currentProject.id);
+}
+
+async function deleteFile(path) {
+  if (!currentProject) return;
+  if (!confirm(`Delete ${path}?`)) return;
+  await fetch('/coder/v2/project/' + currentProject.id + '/file?path=' + encodeURIComponent(path), {method:'DELETE'});
+  await switchProject(currentProject.id);
+}
+
+function fileContextMenu(e, path) {
+  e.preventDefault();
+  const action = prompt(`File: ${path}\nActions: rename, delete, add-to-ai-context`);
+  if (action === 'delete') deleteFile(path);
+  if (action === 'add-to-ai-context') addToAIContext(path);
+}
+
+function uploadFiles() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = async e => {
+    const files = {};
+    for (const file of e.target.files) {
+      const buf = await file.arrayBuffer();
+      files[file.name] = Array.from(new Uint8Array(buf));
+    }
+    await fetch('/coder/v2/project/' + currentProject.id + '/upload-folder', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({files})
+    });
+    await switchProject(currentProject.id);
+  };
+  input.click();
+}
+
+// Drag & drop
+const dropZone = document.getElementById('drop-zone');
+window.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('show'); });
+dropZone.addEventListener('dragleave', e => { dropZone.classList.remove('show'); });
+dropZone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropZone.classList.remove('show');
+  if (!currentProject) return;
+  const files = {};
+  for (const item of e.dataTransfer.items) {
+    const entry = item.webkitGetAsEntry();
+    if (entry) await traverseEntry(entry, '', files);
+  }
+  await fetch('/coder/v2/project/' + currentProject.id + '/upload-folder', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({files})
+  });
+  await switchProject(currentProject.id);
+});
+
+async function traverseEntry(entry, path, files) {
+  if (entry.isFile) {
+    const file = await new Promise(resolve => entry.file(resolve));
+    const buf = await file.arrayBuffer();
+    files[path + file.name] = Array.from(new Uint8Array(buf));
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const entries = await new Promise(resolve => reader.readEntries(resolve));
+    for (const e of entries) await traverseEntry(e, path + entry.name + '/', files);
+  }
+}
+
+// ── Run ─────────────────────────────────────────────────────────────────────
+async function runProject() {
+  if (!currentProject) return;
+  await saveCurrentFile();
+  const entry = document.getElementById('entry-select').value;
+  switchPanel('console');
+  const out = document.getElementById('console-output');
+  out.textContent = 'Running...';
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/run', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({entry_file: entry})
+  });
+  const d = await r.json();
+  let text = `Command: ${d.command || 'N/A'}\nReturn code: ${d.returncode}\n`;
+  if (d.stdout) text += `\n--- STDOUT ---\n${d.stdout}`;
+  if (d.stderr) text += `\n--- STDERR ---\n${d.stderr}`;
+  if (d.error) text += `\n--- ERROR ---\n${d.error}`;
+  out.textContent = text;
+  out.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+}
+
+// ── Export / Import ─────────────────────────────────────────────────────────
+async function exportProject() {
+  if (!currentProject) return;
+  const a = document.createElement('a');
+  a.href = '/coder/v2/project/' + currentProject.id + '/export';
+  a.download = currentProject.name + '.zip';
+  a.click();
+}
+
+async function importProject(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const name = file.name.replace('.zip', '');
+  const r = await fetch('/coder/v2/import', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({zip_b64: b64, name})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    await loadProjects();
+    await switchProject(d.project_id);
+  }
+}
+
+// ── Panels ──────────────────────────────────────────────────────────────────
+function switchPanel(name) {
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.textContent.toLowerCase().includes(name)));
+  document.getElementById('console-output').style.display = name === 'console' ? 'block' : 'none';
+  document.getElementById('terminal-container').style.display = name === 'terminal' ? 'block' : 'none';
+  document.getElementById('git-panel').style.display = name === 'git' ? 'block' : 'none';
+  if (name === 'terminal' && !terminal) initTerminal();
+}
+
+function initTerminal() {
+  terminal = new Terminal({
+    theme: { background: '#0f172a', foreground: '#e2e8f0', cursor: '#22d3ee' },
+    fontSize: 12,
+    fontFamily: "'Cascadia Mono', monospace",
+    cursorBlink: true,
+  });
+  terminal.open(document.getElementById('terminal-container'));
+  terminal.write('Terminal ready. Starting session...\r\n');
+  startTerminalSession();
+}
+
+async function startTerminalSession() {
+  if (!currentProject) { terminal.write('No project loaded.\r\n'); return; }
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/terminal/start', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    terminalId = d.terminal_id;
+    terminal.write(`Session started: ${d.shell}\r\n$ `);
+    terminal.onData(data => {
+      fetch('/coder/v2/terminal/' + terminalId + '/write', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({data})
+      });
+    });
+    pollTerminal();
+  }
+}
+
+async function pollTerminal() {
+  if (!terminalId) return;
+  const r = await fetch('/coder/v2/terminal/' + terminalId + '/read', {method:'POST'});
+  const d = await r.json();
+  if (d.ok && d.output) terminal.write(d.output);
+  if (d.done) { terminal.write('\r\n[Session ended]\r\n'); terminalId = null; return; }
+  setTimeout(pollTerminal, 200);
+}
+
+// ── Git ─────────────────────────────────────────────────────────────────────
+async function gitPanel() { switchPanel('git'); }
+async function gitInit() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/init', {method:'POST'});
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+async function gitStatus() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/status');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+async function gitLog() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/log?n=20');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+async function gitDiff() {
+  if (!currentProject) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/diff');
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'OK';
+}
+async function gitCommit() {
+  if (!currentProject) return;
+  const msg = document.getElementById('git-commit-msg').value;
+  if (!msg) return;
+  const r = await fetch('/coder/v2/project/' + currentProject.id + '/git/commit', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: msg})
+  });
+  const d = await r.json();
+  document.getElementById('git-output').textContent = d.stdout || d.stderr || d.error || 'Committed';
+}
+
+// ── AI Assistant ────────────────────────────────────────────────────────────
+function toggleRightbar() {
+  const bar = document.getElementById('rightbar');
+  bar.style.display = bar.style.display === 'none' ? 'flex' : 'none';
+}
+
+function addToAIContext(path) {
+  if (!aiContextFiles.includes(path)) {
+    aiContextFiles.push(path);
+    renderAIContext();
+  }
+}
+
+function removeFromAIContext(path) {
+  aiContextFiles = aiContextFiles.filter(p => p !== path);
+  renderAIContext();
+}
+
+function renderAIContext() {
+  const el = document.getElementById('ai-context-files');
+  el.innerHTML = aiContextFiles.map(p => `<span class="context-tag">${p}<span class="remove" onclick="removeFromAIContext('${p}')">×</span></span>`).join('');
+}
+
+async function askAI() {
+  const prompt = document.getElementById('ai-prompt').value.trim();
+  if (!prompt || !currentProject) return;
+
+  // Parse @mentions
+  const mentions = [];
+  const cleanPrompt = prompt.replace(/@([a-zA-Z0-9_./-]+)/g, (m, name) => {
+    mentions.push(name);
+    return `[file: ${name}]`;
+  });
+
+  const chat = document.getElementById('ai-chat');
+  chat.innerHTML += `<div class="ai-message user">${escapeHtml(prompt)}</div>`;
+  chat.innerHTML += `<div class="ai-message assistant" id="ai-thinking">Thinking...</div>`;
+
+  // Get context
+  const ctxR = await fetch('/coder/v2/project/' + currentProject.id + '/ai-context', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mention_files: [...aiContextFiles, ...mentions]})
+  });
+  const ctxD = await ctxR.json();
+
+  // Build enriched prompt
+  let enriched = cleanPrompt;
+  if (ctxD.ok && ctxD.files.length > 0) {
+    enriched += '\n\n--- Project Context ---\n';
+    for (const f of ctxD.files) {
+      enriched += `\n### ${f.path}\n${f.content}\n`;
+    }
+  }
+
+  // Call AI
+  const r = await fetch('/api/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({message: enriched, session_id: 'coder_v2_' + currentProject.id, conversation_mode: true})
+  });
+  const d = await r.json();
+
+  document.getElementById('ai-thinking').remove();
+  const answer = d.answer || d.output || 'No response';
+  chat.innerHTML += `<div class="ai-message assistant">${escapeHtml(answer)}</div>`;
+
+  // If AI suggests file changes, offer apply button
+  if (answer.includes('```') && answer.includes('.py')) {
+    chat.innerHTML += `<div style="margin-top:4px"><button onclick="applyAIChanges(this)" style="font-size:11px;padding:4px 10px;background:var(--green);border:none;border-radius:4px;cursor:pointer">Apply suggested changes</button></div>`;
+  }
+
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function applyAIChanges(btn) {
+  btn.textContent = 'Not yet implemented - manual copy for safety';
+  btn.disabled = true;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ── Modal Helpers ───────────────────────────────────────────────────────────
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+// ── Init ────────────────────────────────────────────────────────────────────
+loadProjects();
+</script>
+</body>
+</html>

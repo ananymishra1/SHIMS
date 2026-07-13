@@ -1,0 +1,138 @@
+/* SHIMS Omni — Agentic UI styles (additive).
+   Inline tool/job/diff cards, jobs tray, command palette, capability panel,
+   @file mentions and the composer agent toolbar. Dark neon, matches Omni. */
+/* Agent card tokens now follow the active theme (Aurora/Classic) via the
+   shared design tokens defined in shims_omni.css, with safe fallbacks. */
+:root{
+  --ag-cyan:var(--accent,#4de3ff); --ag-violet:var(--accent-2,#a07bff);
+  --ag-green:var(--ok,#54e39b); --ag-red:var(--bad,#ff6b8b);
+  --ag-amber:var(--warn,#ffc861); --ag-ink:var(--bg,#0a0f1c);
+  --ag-panel:var(--surface,rgba(18,26,44,.72));
+  --ag-line:var(--line,rgba(120,170,255,.18));
+  --ag-text:var(--text,#dbe7ff); --ag-mut:var(--text-dim,#8aa0c8);
+}
+:root:not([data-theme="classic"]) .agent-tool-card,
+:root:not([data-theme="classic"]) .agent-job-card,
+:root:not([data-theme="classic"]) .agent-diff-card{
+  background:var(--surface);border-radius:12px;
+}
+
+/* ---------- tool cards ---------- */
+.agent-tool-card{
+  margin:8px 0; border:1px solid var(--ag-line); border-radius:12px;
+  background:linear-gradient(180deg, rgba(30,42,72,.5), rgba(14,20,38,.5));
+  overflow:hidden; backdrop-filter:blur(6px); box-shadow:0 2px 14px rgba(0,0,0,.25);
+}
+.agent-tool-card.running{ border-color:rgba(77,227,255,.45); animation:agpulse 1.6s infinite; }
+.agent-tool-card.ok{ border-color:rgba(84,227,155,.4); }
+.agent-tool-card.fail{ border-color:rgba(255,107,139,.5); }
+@keyframes agpulse{ 0%,100%{box-shadow:0 0 0 0 rgba(77,227,255,.18)} 50%{box-shadow:0 0 0 5px rgba(77,227,255,0)} }
+.atc-head{ display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; user-select:none; }
+.atc-icon{ font-size:14px; }
+.atc-name{ font-weight:700; color:var(--ag-cyan); font-family:ui-monospace,Consolas,monospace; font-size:12.5px; }
+.atc-arg{ flex:1; min-width:0; color:var(--ag-text); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.9; }
+.atc-toggle{ color:var(--ag-mut); font-size:11px; }
+.atc-chip{ font-size:10.5px; padding:2px 8px; border-radius:999px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.atc-chip.running{ background:rgba(77,227,255,.16); color:var(--ag-cyan); }
+.atc-chip.ok{ background:rgba(84,227,155,.16); color:var(--ag-green); }
+.atc-chip.fail{ background:rgba(255,107,139,.16); color:var(--ag-red); }
+.atc-out{ margin:0; padding:10px 12px; border-top:1px solid var(--ag-line); background:rgba(4,8,18,.6);
+  color:#cfe0ff; font-family:ui-monospace,Consolas,monospace; font-size:12px; line-height:1.45;
+  white-space:pre-wrap; word-break:break-word; max-height:340px; overflow:auto; }
+
+/* ---------- self-patch diff ---------- */
+.agent-diff-card{ margin:8px 0; border:1px solid rgba(160,123,255,.4); border-radius:12px; overflow:hidden;
+  background:rgba(20,16,40,.55); box-shadow:0 2px 14px rgba(0,0,0,.28); }
+.adc-head{ display:flex; align-items:center; gap:8px; padding:9px 12px; font-weight:700; color:var(--ag-violet); border-bottom:1px solid var(--ag-line); }
+.adc-head code{ color:var(--ag-text); font-size:12px; }
+.adc-diff{ margin:0; padding:10px 12px; background:rgba(4,8,18,.65); font-family:ui-monospace,Consolas,monospace;
+  font-size:12px; line-height:1.4; max-height:360px; overflow:auto; white-space:pre; }
+.adc-diff .dl{ display:block; }
+.adc-diff .dl.add{ color:var(--ag-green); background:rgba(84,227,155,.08); }
+.adc-diff .dl.del{ color:var(--ag-red); background:rgba(255,107,139,.08); }
+.adc-diff .dl.hunk{ color:var(--ag-amber); }
+.adc-actions{ display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--ag-line); }
+
+/* ---------- coder jobs ---------- */
+.agent-job-card{ margin:8px 0; border:1px solid rgba(160,123,255,.35); border-radius:12px; overflow:hidden;
+  background:linear-gradient(180deg, rgba(34,26,64,.5), rgba(14,20,38,.5)); box-shadow:0 2px 14px rgba(0,0,0,.28); }
+.agent-job-card.flash{ outline:2px solid var(--ag-cyan); }
+.ajc-head{ display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--ag-line); }
+.ajc-head b{ color:var(--ag-violet); }
+.ajc-goal{ flex:1; min-width:0; color:var(--ag-text); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ajc-log{ margin:0; padding:10px 12px; background:rgba(4,8,18,.66); color:#cfe0ff; font-family:ui-monospace,Consolas,monospace;
+  font-size:12px; line-height:1.5; max-height:240px; overflow:auto; white-space:pre-wrap; }
+.ajc-actions{ display:flex; gap:8px; padding:9px 12px; border-top:1px solid var(--ag-line); }
+
+/* ---------- jobs tray ---------- */
+#jobs-tray{ position:fixed; right:18px; bottom:18px; width:280px; z-index:6000; border:1px solid var(--ag-line);
+  border-radius:12px; background:var(--ag-panel); backdrop-filter:blur(10px); box-shadow:0 8px 30px rgba(0,0,0,.45); overflow:hidden; }
+#jobs-tray .jt-head{ padding:9px 12px; font-weight:700; color:var(--ag-cyan); cursor:pointer; display:flex; justify-content:space-between; font-size:12.5px; }
+#jobs-tray.collapsed .jt-body{ display:none; }
+#jobs-tray .jt-body{ max-height:240px; overflow:auto; }
+#jobs-tray .jt-row{ display:flex; align-items:center; gap:8px; padding:8px 12px; border-top:1px solid var(--ag-line); cursor:pointer; font-size:12px; color:var(--ag-text); }
+#jobs-tray .jt-row:hover{ background:rgba(77,227,255,.08); }
+#jobs-tray .jt-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#jobs-tray .jt-status{ color:var(--ag-mut); font-size:11px; }
+.jt-dot{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+.jt-dot.running{ background:var(--ag-cyan); animation:agpulse 1.4s infinite; }
+.jt-dot.ok{ background:var(--ag-green); } .jt-dot.fail{ background:var(--ag-red); }
+#jobs-tray:not(:has(.jt-row)){ display:none; }
+
+/* ---------- command palette ---------- */
+#cmd-palette{ position:fixed; inset:0; z-index:7000; background:rgba(4,8,18,.55); backdrop-filter:blur(4px); display:flex; align-items:flex-start; justify-content:center; }
+#cmd-palette.hidden{ display:none; }
+.cp-box{ margin-top:12vh; width:min(640px,92vw); background:var(--ag-panel); border:1px solid var(--ag-line); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.5); overflow:hidden; }
+#cp-input{ width:100%; box-sizing:border-box; padding:16px 18px; background:transparent; border:0; border-bottom:1px solid var(--ag-line); color:var(--ag-text); font-size:15px; outline:none; }
+#cp-list{ max-height:52vh; overflow:auto; }
+.cp-item{ display:flex; align-items:center; gap:10px; padding:10px 16px; cursor:pointer; border-bottom:1px solid rgba(120,170,255,.07); }
+.cp-item:hover{ background:rgba(77,227,255,.1); }
+.cp-kind{ font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; padding:2px 7px; border-radius:6px; font-weight:800; }
+.cp-kind.module{ background:rgba(77,227,255,.16); color:var(--ag-cyan); }
+.cp-kind.slash{ background:rgba(255,200,97,.16); color:var(--ag-amber); }
+.cp-kind.tool{ background:rgba(160,123,255,.16); color:var(--ag-violet); }
+.cp-label{ flex:1; color:var(--ag-text); font-size:13.5px; font-weight:600; }
+.cp-sub{ color:var(--ag-mut); font-size:11.5px; }
+
+/* ---------- capability panel ---------- */
+#cap-panel{ position:fixed; inset:0; z-index:7000; background:rgba(4,8,18,.6); backdrop-filter:blur(5px); display:flex; align-items:center; justify-content:center; }
+#cap-panel.hidden{ display:none; }
+.cap-box{ width:min(760px,94vw); max-height:84vh; overflow:auto; background:var(--ag-panel); border:1px solid var(--ag-line); border-radius:16px; padding:20px 22px; box-shadow:0 24px 70px rgba(0,0,0,.55); }
+.cap-title{ display:flex; align-items:center; justify-content:space-between; font-size:18px; font-weight:800; color:var(--ag-cyan); }
+.cap-intro{ color:var(--ag-text); font-size:13.5px; line-height:1.55; }
+.cap-roots{ font-size:12.5px; color:var(--ag-mut); margin:8px 0 14px; line-height:1.7; }
+.cap-roots code{ color:var(--ag-cyan); }
+.cap-addroot input{ background:rgba(4,8,18,.6); border:1px solid var(--ag-line); color:var(--ag-text); border-radius:8px; padding:6px 9px; width:230px; }
+.cap-tools{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.cap-tool{ border:1px solid var(--ag-line); border-radius:10px; padding:10px 12px; background:rgba(14,20,38,.5); font-size:12px; color:var(--ag-mut); }
+.cap-tool b{ color:var(--ag-text); font-family:ui-monospace,Consolas,monospace; }
+.cap-risk{ font-size:9.5px; padding:1px 7px; border-radius:999px; margin-left:6px; text-transform:uppercase; font-weight:800; }
+.cap-risk.safe{ background:rgba(84,227,155,.16); color:var(--ag-green); }
+.cap-risk.gated,.cap-risk.by-path{ background:rgba(255,200,97,.16); color:var(--ag-amber); }
+@media(max-width:680px){ .cap-tools{ grid-template-columns:1fr; } }
+
+/* ---------- @file mentions ---------- */
+#mention-box{ position:fixed; z-index:7500; background:var(--ag-panel); border:1px solid var(--ag-line); border-radius:10px; overflow:auto; max-height:230px; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+#mention-box.hidden{ display:none; }
+.mb-item{ padding:7px 12px; font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--ag-text); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mb-item:hover{ background:rgba(77,227,255,.12); }
+
+/* ---------- composer agent toolbar — compact inline strip ---------- */
+#agent-toolbar{ display:flex; align-items:center; gap:6px; padding:0; flex-wrap:nowrap; flex-shrink:0; }
+#agent-toolbar button, #agent-toolbar label{ font-size:10px; color:var(--ag-mut); background:rgba(18,26,44,.6); border:1px solid var(--ag-line);
+  border-radius:999px; padding:3px 8px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; transition:.15s; white-space:nowrap; }
+#agent-toolbar button:hover{ color:var(--ag-cyan); border-color:rgba(77,227,255,.4); box-shadow:0 0 12px rgba(77,227,255,.15); }
+#agent-toolbar #atb-stop:hover{ color:var(--ag-red); border-color:rgba(255,107,139,.45); }
+#agent-toolbar label{ cursor:pointer; }
+#agent-toolbar #atb-agent input{ accent-color:var(--ag-cyan); }
+/* Hide verbose labels on smaller screens — keep only icons/checkboxes */
+@media(max-width:900px){ #agent-toolbar #atb-caps, #agent-toolbar #atb-palette{ display:none; } }
+@media(max-width:600px){ #agent-toolbar{ display:none; } }
+
+/* ---------- code interpreter artifacts ---------- */
+.atc-out-interp{ padding:10px 12px; border-top:1px solid var(--ag-line); background:rgba(4,8,18,.55); }
+.interp-figures{ display:flex; flex-wrap:wrap; gap:10px; }
+.interp-figure{ max-width:100%; max-height:320px; border-radius:8px; border:1px solid var(--ag-line); background:#0b1020; }
+.interp-artifacts{ margin-top:8px; font-size:12px; color:var(--ag-text); }
+.interp-artifacts ul{ margin:4px 0 0 16px; padding:0; }
+.interp-artifacts li{ margin:2px 0; }

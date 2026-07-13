@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shims
+      POSTGRES_PASSWORD: change_me
+      POSTGRES_DB: shims
+    ports:
+      - "5432:5432"
+    volumes:
+      - shims_pgdata:/var/lib/postgresql/data
+volumes:
+  shims_pgdata:

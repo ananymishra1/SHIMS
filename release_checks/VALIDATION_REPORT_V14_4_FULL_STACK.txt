@@ -1,0 +1,17 @@
+SHIMS v14.4 Full Stack Core Validation
+
+Scope:
+- SHIMS Omni realtime core is included and tested, not only Enterprise.
+- Enterprise v14.2 GMP Powerhouse remains included.
+- Android controller/build kit and Termux offline-lite runtime remain included.
+
+Validation results:
+- Python compile: PASSED
+- Full regression suite: 50 PASSED
+- SHIMS health/capability endpoint: PASSED
+- Greetings do not trigger internet search: PASSED
+- Tool-first image/PDF/PPT routes return real artifact URLs: PASSED
+- Voice config and voice profile endpoints: PASSED
+- Enterprise GMP powerhouse pages and API: PASSED
+- Frontend required controls present: PASSED
+- Runtime cleanup: .env, sqlite databases, __pycache__, .pyc, generated test media removed before packaging

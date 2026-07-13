@@ -1,0 +1,3535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Sheena — AI Wellness & NEET PG Companion</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+
+:root{
+  --bg:#fdf8f5;--bg-warm:#faf3ed;--panel:#ffffff;--line:#f0e6dc;--text:#4a3f35;--text-dim:#9a8e82;
+  --rose:#e85d7a;--rose-light:#fce8ec;--rose-soft:#fff5f7;--lavender:#a78bfa;--lavender-light:#ede9fe;--lavender-soft:#f5f3ff;
+  --sage:#6db89a;--sage-light:#d4f5e4;--sage-soft:#f0fdf6;--amber:#f0a030;--amber-light:#fef3c7;--amber-soft:#fffbeb;
+  --sky:#5faee3;--sky-light:#dbeafe;--sky-soft:#eff6ff;--coral:#f87171;--coral-light:#fee2e2;--mint:#34d399;--mint-light:#d1fae5;
+  --peach:#fb923c;--peach-light:#ffedd5;--water:#38bdf8;--water-light:#e0f2fe;--water-soft:#f0f9ff;
+  --shadow:0 2px 16px rgba(74,63,53,.06);--shadow-lg:0 8px 40px rgba(74,63,53,.12);--shadow-glow:0 0 30px rgba(232,93,122,.15);
+  --radius:20px;--radius-sm:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Quicksand',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;line-height:1.6;font-size:14px}
+.app{max-width:980px;margin:0 auto;padding:12px;padding-bottom:90px}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideInRight{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+@keyframes pulse-soft{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes breathe-anim{0%,100%{transform:scale(1);opacity:.8}50%{transform:scale(1.25);opacity:1}}
+@keyframes gradient-shift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+
+.animate-fade-up{animation:fadeUp .6s ease both}
+.animate-fade-in{animation:fadeIn .4s ease both}
+.animate-slide-in{animation:slideInRight .5s ease both}
+.animate-float{animation:float 3s ease-in-out infinite}
+.delay-1{animation-delay:.1s}.delay-2{animation-delay:.2s}.delay-3{animation-delay:.3s}.delay-4{animation-delay:.4s}
+
+/* ===== HEADER ===== */
+.header{text-align:center;padding:18px 12px 8px;position:relative}
+.header::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:100px;height:3px;background:linear-gradient(90deg,var(--rose),var(--lavender),var(--sky));border-radius:4px}
+.header .avatar{width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--rose),var(--lavender),var(--sky));background-size:200% 200%;animation:gradient-shift 4s ease infinite;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:var(--shadow-glow);position:relative}
+.header .avatar::after{content:'';position:absolute;inset:-3px;border-radius:50%;border:2px solid transparent;border-top-color:var(--rose);border-right-color:var(--lavender);animation:spin 3s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.header h1{font-family:'Playfair Display',serif;font-size:24px;font-weight:700;letter-spacing:-1px;background:linear-gradient(135deg,var(--rose),var(--lavender),var(--sky));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-size:200% 200%;animation:gradient-shift 4s ease infinite}
+.header p{color:var(--text-dim);font-size:11px;margin-top:4px;font-weight:500}
+
+/* ===== TOAST NOTIFICATIONS ===== */
+#toast-container{position:fixed;top:16px;right:16px;z-index:3000;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:320px}
+.toast{background:var(--panel);border:2px solid var(--line);border-radius:var(--radius-sm);padding:14px 18px;box-shadow:var(--shadow-lg);font-size:13px;font-weight:600;animation:slideInRight .3s ease;pointer-events:auto;position:relative;overflow:hidden}
+.toast::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%;background:var(--rose)}
+.toast.success::before{background:var(--sage)}.toast.info::before{background:var(--sky)}.toast.warn::before{background:var(--amber)}
+.toast-close{position:absolute;top:6px;right:10px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px}
+
+/* ===== CRISIS BANNER ===== */
+.crisis-banner{background:linear-gradient(90deg,#dc2626,#ef4444);color:#fff;padding:16px 20px;border-radius:var(--radius);margin:12px 0;display:none;align-items:center;gap:14px;box-shadow:var(--shadow-lg);animation:fadeUp .4s ease}
+.crisis-banner.show{display:flex}
+.crisis-banner b{font-size:14px;display:block;margin-bottom:2px}
+.crisis-banner a{color:#fecaca;text-decoration:underline;font-weight:700}
+
+/* ===== TABS ===== */
+.tabs{display:flex;gap:6px;margin:10px 0;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1;min-width:60px;padding:8px 6px;border-radius:12px;border:2px solid var(--line);background:var(--panel);color:var(--text-dim);font-size:11px;font-weight:700;cursor:pointer;transition:all .3s ease;text-align:center;white-space:nowrap;position:relative;overflow:hidden}
+.tab::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:transparent;transition:.3s}
+.tab:hover{border-color:var(--rose);color:var(--rose);transform:translateY(-1px);box-shadow:var(--shadow)}
+.tab:hover::before{background:linear-gradient(90deg,var(--rose),var(--lavender))}
+.tab.on{background:linear-gradient(135deg,var(--rose-soft),var(--lavender-soft));border-color:var(--rose);color:var(--rose);box-shadow:var(--shadow-glow);transform:translateY(-1px)}
+.tab.on::before{background:linear-gradient(90deg,var(--rose),var(--lavender))}
+.tab .emoji{font-size:22px;display:block;margin-bottom:2px;transition:.3s}
+.tab:hover .emoji{transform:scale(1.15)}
+
+/* ===== CARDS ===== */
+.card{background:var(--panel);border:2px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:10px;box-shadow:var(--shadow);transition:all .3s ease;position:relative;overflow:hidden;animation:fadeUp .5s ease both}
+.card:hover{box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+.card::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%;background:transparent;transition:.3s}
+.card:hover::before{background:linear-gradient(180deg,var(--rose),var(--lavender))}
+.card h2{font-size:14px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px;color:var(--text)}
+.card h2 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;box-shadow:0 0 6px currentColor}
+.card h3{font-size:12px;font-weight:700;margin:10px 0 6px;color:var(--text-dim)}
+
+/* ===== BUTTONS ===== */
+button.primary{padding:14px 28px;border-radius:var(--radius-sm);border:none;background:linear-gradient(135deg,var(--rose),var(--lavender));color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:all .3s ease;position:relative;overflow:hidden;box-shadow:0 4px 16px rgba(232,93,122,.25)}
+button.primary:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(232,93,122,.35)}
+button.primary:active{transform:translateY(0)}
+button.secondary{padding:12px 20px;border-radius:var(--radius-sm);border:2px solid var(--line);background:var(--panel);color:var(--text);font-size:12px;font-weight:600;cursor:pointer;transition:all .3s ease}
+button.secondary:hover{border-color:var(--lavender);color:var(--lavender);background:var(--lavender-soft);transform:translateY(-1px)}
+button.ghost{padding:10px 16px;border-radius:10px;border:none;background:transparent;color:var(--text-dim);font-size:12px;cursor:pointer;transition:.2s;font-weight:600}
+button.ghost:hover{color:var(--rose);background:var(--rose-soft)}
+button.danger{padding:12px 20px;border-radius:var(--radius-sm);border:2px solid #fecaca;background:#fef2f2;color:#dc2626;font-size:12px;font-weight:600;cursor:pointer;transition:.2s}
+button.danger:hover{background:#fecaca}
+button.icon-btn{width:44px;height:44px;border-radius:50%;border:2px solid var(--line);background:var(--panel);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.2s;font-size:18px}
+button.icon-btn:hover{border-color:var(--rose);background:var(--rose-soft);transform:scale(1.1)}
+
+/* ===== INPUTS ===== */
+input,textarea,select{width:100%;padding:14px 16px;border-radius:var(--radius-sm);border:2px solid var(--line);background:#faf6f2;color:var(--text);font-size:14px;outline:none;resize:vertical;font-family:inherit;transition:.2s}
+input:focus,textarea:focus,select:focus{border-color:var(--lavender);box-shadow:0 0 0 4px var(--lavender-light)}
+input::placeholder,textarea::placeholder{color:#c4b8ad}
+
+/* ===== FILE UPLOAD ===== */
+.file-drop{border:2px dashed var(--line);border-radius:var(--radius);padding:28px;text-align:center;transition:.3s;cursor:pointer;background:var(--bg-warm)}
+.file-drop:hover{border-color:var(--lavender);background:var(--lavender-soft)}
+.file-drop.dragover{border-color:var(--rose);background:var(--rose-soft)}
+.file-drop .icon{font-size:36px;margin-bottom:8px}
+.file-preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.file-preview-item{padding:8px 14px;border-radius:10px;background:var(--sky-soft);border:2px solid var(--sky-light);font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px}
+
+/* ===== PROGRESS ===== */
+.progress-track{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin:8px 0}
+.progress-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--rose),var(--lavender));transition:width .8s cubic-bezier(.4,0,.2,1);position:relative}
+.progress-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);animation:shimmer 2s infinite;background-size:200% 100%}
+
+/* ===== MOOD ORBIT WHEEL ===== */
+.mood-orbit{position:relative;width:260px;height:260px;margin:16px auto}
+.mood-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:88px;height:88px;border-radius:50%;background:var(--panel);border:3px solid var(--line);display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:700;color:var(--text-dim);z-index:2;box-shadow:var(--shadow);transition:all .4s ease;padding:8px}
+.mood-center.has-mood{border-color:var(--rose);color:var(--rose);box-shadow:var(--shadow-glow);font-size:13px}
+.mood-orbit-item{position:absolute;top:50%;left:50%;width:58px;height:58px;margin:-29px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.18);transition:all .35s cubic-bezier(.34,1.56,.64,1);border:3px solid rgba(255,255,255,.6)}
+.mood-orbit-item:hover{transform:rotate(var(--orbit-angle)) translateY(-92px) rotate(calc(-1*var(--orbit-angle))) scale(1.18);z-index:3}
+.mood-orbit-item.on{transform:rotate(var(--orbit-angle)) translateY(-92px) rotate(calc(-1*var(--orbit-angle))) scale(1.25);z-index:3;border-color:#fff;box-shadow:0 0 24px var(--orbit-color)}
+.mood-orbit-item{transform:rotate(var(--orbit-angle)) translateY(-90px) rotate(calc(-1*var(--orbit-angle)))}
+/* orbit item colors */
+.mood-orbit-item[data-mood="amazing"]{background:linear-gradient(135deg,#34d399,#10b981)}
+.mood-orbit-item[data-mood="good"]{background:linear-gradient(135deg,#6db89a,#4ade80)}
+.mood-orbit-item[data-mood="okay"]{background:linear-gradient(135deg,#f0a030,#fbbf24)}
+.mood-orbit-item[data-mood="low"]{background:linear-gradient(135deg,#e85d7a,#fb7185)}
+.mood-orbit-item[data-mood="terrible"]{background:linear-gradient(135deg,#dc2626,#ef4444)}
+
+.mood-summary{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:14px;background:var(--panel);border:2px solid var(--line);margin-bottom:10px;cursor:pointer;transition:all .3s}
+.mood-summary:hover{border-color:var(--lavender);background:var(--lavender-soft)}
+.mood-summary-emoji{font-size:32px}
+.mood-summary-text{flex:1}
+.mood-summary-text b{display:block;font-size:14px;color:var(--text)}
+.mood-summary-text span{font-size:12px;color:var(--text-dim)}
+.mood-summary .edit{font-size:12px;color:var(--lavender);font-weight:700}
+
+/* Legacy grid kept for fallback */
+.mood-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:10px 0}
+.mood-btn{padding:10px 2px;border-radius:12px;border:2px solid var(--line);background:var(--panel);color:var(--text-dim);font-size:11px;font-weight:700;cursor:pointer;transition:all .3s ease;text-align:center;position:relative}
+.mood-btn .emoji{font-size:24px;display:block;margin-bottom:3px;transition:.3s}
+.mood-btn:hover{border-color:var(--rose);background:var(--rose-soft);transform:translateY(-2px);box-shadow:var(--shadow)}
+.mood-btn:hover .emoji{transform:scale(1.15)}
+.mood-btn.on{border-color:var(--rose);background:linear-gradient(135deg,var(--rose-soft),var(--lavender-soft));color:var(--rose);box-shadow:var(--shadow-glow);transform:translateY(-2px)}
+.mood-btn.on .emoji{transform:scale(1.15)}
+
+/* ===== CHAT ===== */
+.chat-box{height:420px;overflow-y:auto;border:2px solid var(--line);border-radius:var(--radius);padding:16px;background:linear-gradient(180deg,#faf8f6,#fdf8f5);margin-bottom:14px;scrollbar-width:thin}
+.msg{margin:12px 0;padding:14px 18px;border-radius:18px;max-width:82%;font-size:14px;line-height:1.7;animation:msgIn .4s cubic-bezier(.4,0,.2,1);position:relative}
+@keyframes msgIn{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+.msg.user{margin-left:auto;background:linear-gradient(135deg,var(--lavender-soft),var(--sky-soft));border:2px solid var(--lavender-light);color:var(--text);border-bottom-right-radius:4px}
+.msg.coach{margin-right:auto;background:linear-gradient(135deg,var(--rose-soft),var(--amber-soft));border:2px solid var(--rose-light);color:var(--text);border-bottom-left-radius:4px}
+.msg.coach b{color:var(--rose);display:block;margin-bottom:6px;font-size:12px;text-transform:uppercase;letter-spacing:1px}
+.msg.announce{margin:10px auto;text-align:center;background:linear-gradient(135deg,var(--amber-soft),var(--peach-soft));border:2px solid var(--amber-light);color:var(--text-dim);font-size:12px;max-width:90%;font-weight:600}
+.msg.system{margin:10px auto;text-align:center;background:var(--sky-soft);border:2px solid var(--sky-light);color:var(--sky);font-size:12px;max-width:90%;font-weight:600}
+.chat-input{display:flex;gap:10px;align-items:flex-end;padding:4px}
+.chat-input input{flex:1;border-radius:24px;padding:14px 20px}
+.chat-input button{border-radius:24px;height:48px;padding:0 24px}
+.chat-toolbar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+
+/* ===== WATER TRACKER ===== */
+.water-cups{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:10px 0}
+.water-cup{width:40px;height:50px;border-radius:10px;border:2px solid var(--line);background:var(--panel);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .3s ease;font-size:16px;position:relative;overflow:hidden}
+.water-cup::before{content:'';position:absolute;bottom:0;left:0;right:0;height:0%;background:linear-gradient(180deg,var(--water),var(--sky));transition:height .4s ease;border-radius:0 0 8px 8px}
+.water-cup.filled::before{height:100%;border-radius:8px}
+.water-cup.filled{border-color:var(--water);box-shadow:0 0 12px rgba(56,189,248,.3)}
+.water-cup:hover{transform:translateY(-2px)}
+.water-cup span{position:relative;z-index:1;transition:.3s}
+.water-cup.filled span{color:#fff}
+.water-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.water-stat{text-align:center;padding:14px;border-radius:var(--radius-sm);background:var(--water-soft);border:2px solid var(--water-light)}
+.water-stat .num{font-size:24px;font-weight:800;color:var(--water)}
+.water-stat .label{font-size:11px;color:var(--text-dim);font-weight:600}
+
+/* ===== FOOD LOGGER ===== */
+.food-entry{padding:16px;border-radius:var(--radius-sm);background:var(--bg-warm);border:2px solid var(--line);margin-bottom:10px;transition:.2s}
+.food-entry:hover{border-color:var(--amber-light)}
+.food-entry-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.food-entry-title{font-weight:700;font-size:14px}
+.food-entry-cals{font-size:12px;padding:4px 10px;border-radius:12px;background:var(--amber-soft);color:var(--amber);font-weight:700;white-space:nowrap}
+.food-entry-meta{font-size:12px;color:var(--text-dim);margin-bottom:6px}
+.food-entry-mood{font-size:11px;padding:3px 10px;border-radius:10px;background:var(--rose-soft);color:var(--rose);display:inline-block;font-weight:600;margin-right:6px}
+.food-entry-productivity{font-size:11px;padding:3px 10px;border-radius:10px;background:var(--sage-soft);color:var(--sage);display:inline-block;font-weight:600}
+
+/* ===== ANALYTICS ===== */
+.analytics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.analytics-card{padding:10px 6px;border-radius:12px;background:var(--bg-warm);border:2px solid var(--line);text-align:center}
+.analytics-card .value{font-size:18px;font-weight:800;background:linear-gradient(135deg,var(--rose),var(--lavender));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.analytics-card .label{font-size:9px;color:var(--text-dim);margin-top:2px;font-weight:600}
+.analytics-insight{padding:16px;border-radius:var(--radius-sm);background:linear-gradient(135deg,var(--lavender-soft),var(--sky-soft));border:2px solid var(--lavender-light);font-size:13px;line-height:1.7;margin-top:12px}
+.analytics-insight b{color:var(--lavender);display:block;margin-bottom:6px;font-size:12px;text-transform:uppercase;letter-spacing:1px}
+
+/* ===== ACCORDION ===== */
+.accordion-header{padding:10px 14px;border-radius:12px;border:2px solid var(--line);background:var(--panel);font-size:13px;font-weight:700;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:all .2s;margin-bottom:6px}
+.accordion-header:hover{border-color:var(--lavender);background:var(--lavender-soft)}
+.accordion-header.active{border-color:var(--lavender);background:linear-gradient(135deg,var(--lavender-soft),var(--sky-soft))}
+.acc-icon{font-size:10px;transition:transform .3s ease;color:var(--text-dim)}
+.accordion-header.active .acc-icon{transform:rotate(180deg)}
+.accordion-body{max-height:0;overflow:hidden;transition:max-height .3s ease,opacity .3s ease,padding .3s ease;opacity:0;padding:0 4px}
+.accordion-body.open{max-height:1200px;opacity:1;padding:0 4px 12px;margin-bottom:8px}
+
+/* ===== BREATHING ===== */
+.breath-container{text-align:center;padding:24px 0}
+.breath-circle{width:200px;height:200px;border-radius:50%;margin:24px auto;background:linear-gradient(135deg,var(--rose),var(--lavender),var(--sky));background-size:200% 200%;animation:gradient-shift 4s ease infinite;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;box-shadow:0 0 60px rgba(232,93,122,.3);transition:transform .1s}
+.breath-label{font-size:14px;color:var(--text-dim);margin-top:16px;font-weight:600}
+
+/* ===== WORKOUT ===== */
+.exercise-row{display:flex;gap:6px;align-items:center;margin:6px 0;padding:8px;background:var(--bg-warm);border-radius:10px;border:2px solid var(--line);transition:.2s}
+.exercise-row:hover{border-color:var(--lavender-light)}
+.exercise-row input{flex:1;padding:8px 10px;font-size:12px}
+.exercise-row input[type="number"]{flex:0 0 60px;text-align:center}
+.exercise-row button{background:transparent;border:none;color:var(--coral);font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;transition:.2s}
+.exercise-row button:hover{background:var(--coral-light)}
+.plan-day{padding:18px;border-radius:var(--radius-sm);border:2px solid var(--line);background:var(--bg-warm);margin-bottom:10px;transition:.2s}
+.plan-day:hover{border-color:var(--lavender-light);transform:translateY(-1px)}
+.plan-day h4{color:var(--amber);font-size:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-weight:700}
+.plan-day ul{margin-left:20px;font-size:13px;color:var(--text-dim)}
+.plan-day ul li{margin:5px 0}
+
+/* ===== JOURNAL ===== */
+.journal-entry{padding:18px;border-radius:var(--radius-sm);border:2px solid var(--line);background:var(--bg-warm);margin-bottom:12px;transition:.2s;position:relative}
+.journal-entry:hover{border-color:var(--lavender-light);transform:translateY(-1px)}
+.journal-entry .date{font-size:11px;color:var(--lavender);margin-bottom:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.journal-entry .mood-tag{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;background:var(--rose-soft);color:var(--rose);margin-bottom:8px;font-weight:700}
+.journal-entry p{font-size:14px;color:var(--text);line-height:1.7}
+
+/* ===== STATS ===== */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat-card{padding:10px 6px;border-radius:14px;border:2px solid var(--line);background:linear-gradient(135deg,var(--bg-warm),var(--panel));text-align:center;transition:.3s;position:relative;overflow:hidden}
+.stat-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.stat-card::after{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--rose),var(--lavender));opacity:0;transition:.3s}
+.stat-card:hover::after{opacity:1}
+.stat-card .num{font-size:20px;font-weight:800;background:linear-gradient(135deg,var(--rose),var(--lavender));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat-card .label{font-size:10px;color:var(--text-dim);margin-top:3px;font-weight:600}
+
+/* ===== NEET PLANNER ===== */
+.neet-phase{padding:20px;border-radius:var(--radius);border:2px solid var(--line);background:var(--panel);margin-bottom:16px;animation:fadeUp .5s ease both}
+.neet-phase-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.neet-phase-title{font-size:16px;font-weight:700;color:var(--text)}
+.neet-phase-dates{font-size:12px;color:var(--text-dim);font-weight:600;background:var(--bg-warm);padding:6px 14px;border-radius:20px}
+.neet-subject{padding:14px;border-radius:var(--radius-sm);background:var(--bg-warm);margin-bottom:10px;border:2px solid transparent;transition:.2s;cursor:pointer}
+.neet-subject:hover{border-color:var(--lavender-light);transform:translateX(4px)}
+.neet-subject-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.neet-subject-name{font-size:14px;font-weight:700}
+.neet-subject-test{font-size:11px;padding:4px 10px;border-radius:12px;background:var(--amber-light);color:var(--amber);font-weight:700}
+.neet-subtopics{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.neet-subtopic{padding:10px 14px;border-radius:10px;background:var(--panel);border:2px solid var(--line);font-size:12px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:.2s;font-weight:600}
+.neet-subtopic:hover{border-color:var(--sage);background:var(--sage-soft)}
+.neet-subtopic.done{border-color:var(--sage);background:var(--sage-soft);color:var(--sage);text-decoration:line-through}
+.neet-subtopic input[type="checkbox"]{width:18px;height:18px;accent-color:var(--sage);cursor:pointer}
+.neet-progress{margin-top:8px}
+.neet-progress-text{font-size:11px;color:var(--text-dim);text-align:right;margin-top:4px;font-weight:600}
+.neet-edit-btn{background:transparent;border:none;font-size:14px;cursor:pointer;padding:2px 4px;border-radius:6px;opacity:.5;transition:.2s}
+.neet-edit-btn:hover{opacity:1;background:var(--rose-soft)}
+.neet-add-btn{padding:6px 12px;border-radius:10px;border:2px dashed var(--line);background:transparent;color:var(--text-dim);font-size:11px;font-weight:700;cursor:pointer;transition:.2s;width:100%;text-align:left}
+.neet-add-btn:hover{border-color:var(--lavender);color:var(--lavender);background:var(--lavender-soft)}
+.neet-phase-title[contenteditable="true"],.neet-phase-dates[contenteditable="true"],.neet-subject-name span[contenteditable="true"],.neet-subtopic span[contenteditable="true"]{outline:none;border-bottom:1px dashed transparent;transition:.2s}
+.neet-phase-title[contenteditable="true"]:focus,.neet-phase-dates[contenteditable="true"]:focus,.neet-subject-name span[contenteditable="true"]:focus,.neet-subtopic span[contenteditable="true"]:focus{border-bottom-color:var(--lavender);background:var(--lavender-soft);border-radius:4px}
+/* Edit mode: hide edit controls by default */
+.neet-edit-control{display:none !important}
+.neet-edit-mode .neet-edit-control{display:inline-flex !important}
+.neet-edit-mode .neet-add-btn{display:block !important}
+/* Make contenteditable appear normal when not in edit mode */
+.neet-phase-title,.neet-phase-dates,.neet-subject-name span,.neet-subtopic span{cursor:default;-webkit-user-select:none;user-select:none}
+.neet-edit-mode .neet-phase-title,.neet-edit-mode .neet-phase-dates,.neet-edit-mode .neet-subject-name span,.neet-edit-mode .neet-subtopic span{cursor:text;-webkit-user-select:text;user-select:text}
+
+/* ===== SCHEDULE IMAGES ===== */
+.schedule-img{width:100%;border-radius:var(--radius);border:2px solid var(--line);box-shadow:var(--shadow);transition:.3s;cursor:zoom-in}
+.schedule-img:hover{transform:scale(1.01);box-shadow:var(--shadow-lg)}
+
+/* ===== STUDY TIMER ===== */
+.timer-display{font-size:32px;font-weight:800;text-align:center;background:linear-gradient(135deg,var(--rose),var(--lavender));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:8px 0;font-family:'Playfair Display',serif}
+.timer-controls{display:flex;gap:10px;justify-content:center;margin:14px 0;flex-wrap:wrap}
+
+/* ===== SETTINGS MODAL ===== */
+.modal-overlay{position:fixed;inset:0;background:rgba(74,63,53,.4);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;z-index:1000;padding:20px;animation:fadeIn .2s ease}
+.modal-overlay.show{display:flex}
+.modal{background:var(--panel);border-radius:var(--radius);width:100%;max-width:560px;max-height:92vh;overflow-y:auto;box-shadow:var(--shadow-lg);border:2px solid var(--line);animation:fadeUp .3s ease}
+.modal-header{padding:20px 24px;border-bottom:2px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(90deg,var(--rose-soft),var(--lavender-soft))}
+.modal-header h2{font-size:18px;font-weight:700;font-family:'Playfair Display',serif}
+.modal-body{padding:24px}
+.modal-body .section{margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.modal-body .section:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.modal-body .section h3{font-size:12px;font-weight:700;color:var(--text-dim);margin-bottom:12px;text-transform:uppercase;letter-spacing:2px}
+.modal-footer{padding:16px 24px;border-top:2px solid var(--line);display:flex;gap:10px;justify-content:flex-end;background:var(--bg-warm)}
+.field{margin-bottom:10px}
+.field label{font-size:12px;font-weight:600;color:var(--text-dim);display:block;margin-bottom:4px}
+.field small{font-size:11px;color:var(--text-dim)}
+.field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;color:var(--text)}
+.field small{display:block;font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.5}
+.field .row{display:flex;gap:10px}
+.field .row input{flex:1}
+.pill{display:inline-block;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;background:var(--sage-soft);color:var(--sage);margin-right:6px}
+.pill.warn{background:var(--amber-soft);color:var(--amber)}
+.pill.bad{background:var(--coral-light);color:var(--coral)}
+
+/* ===== MOOD HISTORY CHART ===== */
+.mood-history{display:flex;gap:8px;align-items:flex-end;height:140px;padding:14px 0}
+.mood-bar{flex:1;border-radius:10px 10px 4px 4px;min-height:8px;transition:.6s cubic-bezier(.4,0,.2,1);position:relative;cursor:pointer}
+.mood-bar .tooltip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;font-size:10px;padding:6px 10px;border-radius:8px;white-space:nowrap;opacity:0;pointer-events:none;transition:.2s;margin-bottom:6px;font-weight:600}
+.mood-bar:hover .tooltip{opacity:1}
+.mood-bar:hover{filter:brightness(1.1)}
+
+/* ===== VOICE INDICATOR ===== */
+.voice-indicator{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--sage-soft);color:var(--sage);font-size:11px;font-weight:700;margin-left:auto}
+.voice-indicator.speaking{background:var(--rose-soft);color:var(--rose);animation:pulse-soft 1s infinite}
+
+/* ===== FLOATING SETTINGS ===== */
+.fab-settings{position:fixed;top:16px;right:16px;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--rose),var(--lavender));color:#fff;border:none;font-size:16px;cursor:pointer;box-shadow:var(--shadow-lg);z-index:100;display:flex;align-items:center;justify-content:center;transition:all .3s ease}
+.fab-settings:hover{transform:scale(1.1);box-shadow:0 8px 32px rgba(232,93,122,.4)}
+
+/* ===== NOTIFICATION BANNER ===== */
+.notif-banner{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(90deg,var(--rose),var(--lavender));color:#fff;padding:14px 20px;z-index:2000;display:none;align-items:center;gap:14px;animation:fadeUp .3s ease}
+.notif-banner.show{display:flex}
+.notif-banner b{font-size:14px}
+.notif-banner button{background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto}
+.notif-banner button:hover{background:rgba(255,255,255,.3)}
+
+/* ===== HERO SECTION ===== */
+.hero-card{background:linear-gradient(135deg,var(--rose-soft),var(--lavender-soft),var(--sky-soft));border:2px solid var(--line);border-radius:var(--radius);padding:16px;text-align:center;margin-bottom:12px;position:relative;overflow:hidden;animation:fadeUp .6s ease both}
+.hero-card::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(255,255,255,.4) 0%,transparent 70%);animation:shimmer 6s infinite}
+.hero-card h2{font-family:'Playfair Display',serif;font-size:16px;margin-bottom:6px;position:relative}
+.hero-card p{position:relative;color:var(--text-dim);font-size:12px}
+
+/* ===== HIDDEN ===== */
+.hidden{display:none}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-track{background:var(--bg-warm);border-radius:4px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-dim)}
+
+.conv-overlay{position:fixed;inset:0;background:rgba(10,10,10,.55);backdrop-filter:blur(6px);z-index:200;display:none;align-items:flex-end;justify-content:center;padding:0}
+.conv-overlay.show{display:flex}
+.conv-panel{width:100%;max-width:720px;height:92vh;background:var(--bg-warm);border-radius:24px 24px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:hidden;animation:slideUp .35s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.conv-header{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,var(--rose-soft),var(--lavender-soft))}
+.conv-header h3{margin:0;font-size:18px;font-weight:700;color:var(--text);flex:1}
+.conv-close{width:36px;height:36px;border-radius:50%;border:0;background:var(--bg);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)}
+.conv-close:hover{background:var(--rose-soft);color:var(--rose)}
+.conv-lang{padding:2px 8px;border-radius:20px;border:1px solid var(--line);background:var(--bg);font-size:12px;font-weight:600;cursor:pointer;color:var(--text-dim)}
+.conv-lang.active{background:var(--rose);color:#fff;border-color:var(--rose)}
+.conv-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
+.conv-msg{max-width:85%;padding:12px 16px;border-radius:18px;font-size:14px;line-height:1.6;word-break:break-word;animation:fadeUp .3s ease}
+.conv-msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--rose),var(--rose-dark));color:#fff;border-bottom-right-radius:4px}
+.conv-msg.assistant{align-self:flex-start;background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+.conv-msg.announce{align-self:center;background:var(--amber-soft);border:1px solid var(--amber-light);color:var(--amber-dark);font-size:12px;padding:8px 14px;border-radius:20px}
+.conv-input-area{padding:12px 16px 20px;border-top:1px solid var(--line);background:var(--bg);display:flex;gap:8px;align-items:center}
+.conv-input{flex:1;padding:12px 16px;border:2px solid var(--line);border-radius:24px;background:var(--bg);font-size:14px;outline:0;transition:var(--transition);font-family:inherit}
+.conv-input:focus{border-color:var(--rose);box-shadow:0 0 0 3px var(--rose-light)}
+.conv-mic,.conv-send{width:44px;height:44px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;transition:var(--transition)}
+.conv-mic{background:var(--bg);border:2px solid var(--line);color:var(--text-dim)}
+.conv-mic:hover{border-color:var(--rose);color:var(--rose)}
+.conv-mic.recording{background:var(--rose);color:#fff;border-color:var(--rose);animation:pulse 1.2s infinite}
+.conv-send{background:linear-gradient(135deg,var(--rose),var(--rose-dark));color:#fff;box-shadow:0 4px 12px rgba(225,29,72,.3)}
+.conv-send:hover{transform:translateY(-2px)}
+.conv-stop{width:44px;height:44px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;transition:var(--transition);background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;box-shadow:0 4px 12px rgba(220,38,38,.3);animation:pulse 1.2s infinite}
+.conv-stop:hover{transform:translateY(-2px)}
+.conv-fab{position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,var(--rose),var(--rose-dark));color:#fff;border:0;font-size:28px;cursor:pointer;box-shadow:0 6px 20px rgba(225,29,72,.35);z-index:150;display:flex;align-items:center;justify-content:center;transition:var(--transition);animation:bounceIn .6s ease}
+.conv-fab:hover{transform:scale(1.08) translateY(-2px)}
+.conv-fab.hidden{display:none}
+.conv-typing{align-self:flex-start;background:var(--bg);border:1px solid var(--line);padding:10px 16px;border-radius:18px;border-bottom-left-radius:4px;font-size:13px;color:var(--text-dim);display:flex;align-items:center;gap:6px}
+.conv-typing span{display:inline-block;width:6px;height:6px;background:var(--text-dim);border-radius:50%;animation:typingBounce 1.4s infinite ease-in-out both}
+.conv-typing span:nth-child(1){animation-delay:-.32s}
+.conv-typing span:nth-child(2){animation-delay:-.16s}
+@keyframes typingBounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
+@keyframes bounceIn{0%{transform:scale(0)}60%{transform:scale(1.1)}100%{transform:scale(1)}}
+
+/* Live Voice Mode */
+.conv-status{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;background:linear-gradient(90deg,var(--rose-soft),var(--lavender-soft));border-top:1px solid var(--line);font-size:13px;font-weight:600;color:var(--text)}
+.conv-status-dot{width:10px;height:10px;border-radius:50%;background:var(--sage);transition:all .3s ease}
+.conv-status.listening .conv-status-dot{background:var(--rose);animation:pulse 1.2s infinite}
+.conv-status.thinking .conv-status-dot{background:var(--amber);animation:pulse 1.2s infinite}
+.conv-status.speaking .conv-status-dot{background:var(--sky);animation:pulse 1.2s infinite}
+.conv-live-toggle{padding:10px 16px 6px;border-top:1px solid var(--line);background:var(--bg);text-align:center}
+.conv-live-btn{width:100%;padding:14px 20px;border-radius:var(--radius);border:2px solid var(--rose);background:linear-gradient(135deg,var(--rose),var(--rose-dark));color:#fff;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;transition:var(--transition);box-shadow:0 4px 14px rgba(225,29,72,.25)}
+.conv-live-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(225,29,72,.35)}
+.conv-live-btn:active{transform:translateY(0)}
+.conv-live-btn.stop{background:linear-gradient(135deg,#dc2626,#ef4444);border-color:#dc2626;box-shadow:0 4px 14px rgba(220,38,38,.25)}
+.conv-live-btn.stop:hover{box-shadow:0 6px 20px rgba(220,38,38,.35)}
+.conv-live-toggle small{display:block;margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.5}
+
+/* ===== ACCORDION (collapsible sections) ===== */
+.accordion-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-warm);border:2px solid var(--line);border-radius:14px;cursor:pointer;transition:.2s;font-size:13px;font-weight:700;margin-bottom:6px}
+.accordion-header:hover{border-color:var(--lavender);background:var(--lavender-soft)}
+.accordion-header.active{border-color:var(--rose);background:var(--rose-soft)}
+.accordion-header .acc-icon{transition:.3s;font-size:16px}
+.accordion-header.active .acc-icon{transform:rotate(180deg)}
+.accordion-body{display:none;padding:0 0 10px}
+.accordion-body.open{display:block;animation:fadeUp .3s ease}
+
+/* ===== COMPACT INPUTS ===== */
+input,textarea,select{padding:10px 12px;font-size:13px;border-radius:12px}
+button.primary{padding:10px 20px;font-size:12px}
+button.secondary{padding:8px 14px;font-size:11px}
+button.ghost{padding:6px 10px;font-size:11px}
+
+/* ===== COMPACT CHAT ===== */
+.msg.user,.msg.coach,.msg.announce{padding:10px 14px;font-size:13px}
+.chat-box{height:300px}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:640px){
+  .app{padding:10px;padding-bottom:80px}
+  .header h1{font-size:20px}
+  .chat-box{height:260px}
+  .stats-grid{grid-template-columns:repeat(4,1fr)}
+  .stat-card .num{font-size:16px}
+  .stat-card .label{font-size:9px}
+  .neet-subtopics{grid-template-columns:1fr}
+  .timer-display{font-size:28px}
+  .water-cups{gap:4px}
+  .water-cup{width:36px;height:44px;font-size:14px}
+  .analytics-grid{grid-template-columns:repeat(3,1fr)}
+  .card{padding:12px}
+  .hero-card{padding:12px}
+  .hero-card h2{font-size:14px}
+  .mood-btn{padding:8px 2px}
+  .mood-btn .emoji{font-size:20px}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div id="toast-container"></div>
+
+<!-- ===== NOTIFICATION BANNER ===== -->
+<div id="notif-banner" class="notif-banner">
+  <span style="font-size:22px">💧</span>
+  <div><b>Time to hydrate!</b><br><span style="font-size:12px;opacity:.9">Drink a glass of water to keep your brain sharp.</span></div>
+  <button onclick="logWaterFromNotif()">✓ Logged</button>
+  <button onclick="dismissNotif()">Dismiss</button>
+</div>
+
+<!-- ===== CRISIS BANNER ===== -->
+<div id="crisis-banner" class="crisis-banner">
+  <span style="font-size:24px">🆘</span>
+  <div>
+    <b>You matter. Help is available right now.</b><br>
+    <span style="font-size:12px;opacity:.9">If you're in crisis: <a href="tel:988">Call 988</a> (Suicide &amp; Crisis) · <a href="sms:741741?body=HOME">Text HOME to 741741</a> · <a href="tel:911">Call 911</a> for emergencies</span>
+  </div>
+  <button class="ghost" style="color:#fff;margin-left:auto;font-size:18px" onclick="dismissCrisis()">✕</button>
+</div>
+
+<div class="app">
+
+<!-- ===== HEADER ===== -->
+<div class="header animate-fade-up">
+  <div class="avatar">🌸</div>
+  <h1>Sheena</h1>
+  <p>Your AI wellness companion &amp; NEET PG study partner</p>
+</div>
+
+<!-- ===== TABS ===== -->
+<div class="tabs animate-fade-up delay-1">
+  <div class="tab on" data-tab="dashboard" onclick="showTab('dashboard')"><span class="emoji">🏠</span>Home</div>
+  <div class="tab" data-tab="neet" onclick="showTab('neet')"><span class="emoji">📚</span>NEET PG</div>
+  <div class="tab" data-tab="health" onclick="showTab('health')"><span class="emoji">🍎</span>Health</div>
+  <div class="tab" data-tab="counselor" onclick="showTab('counselor')"><span class="emoji">💬</span>Counselor</div>
+  <div class="tab" data-tab="mood" onclick="showTab('mood')"><span class="emoji">🧠</span>Mood</div>
+  <div class="tab" data-tab="workout" onclick="showTab('workout')"><span class="emoji">💪</span>Workout</div>
+  <div class="tab" data-tab="journal" onclick="showTab('journal')"><span class="emoji">📓</span>Journal</div>
+  <div class="tab" data-tab="breathe" onclick="showTab('breathe')"><span class="emoji">🌬️</span>Breathe</div>
+</div>
+
+<!-- ===== DASHBOARD ===== -->
+<div id="dashboard" class="tab-pane">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">✨</span>
+    <h2 style="margin:0;font-size:16px" id="greeting-text">Welcome back, Sheena</h2>
+  </div>
+
+  <div class="card animate-fade-up delay-1" style="padding:10px">
+    <div class="stats-grid">
+      <div class="stat-card"><div class="num" id="dash-streak">0</div><div class="label">Streak 🔥</div></div>
+      <div class="stat-card"><div class="num" id="dash-mood">—</div><div class="label">Mood</div></div>
+      <div class="stat-card"><div class="num" id="dash-water">0</div><div class="label">Water 💧</div></div>
+      <div class="stat-card"><div class="num" id="dash-calories">0</div><div class="label">Cals 🍎</div></div>
+      <div class="stat-card"><div class="num" id="dash-sleep">—</div><div class="label">Sleep 😴</div></div>
+      <div class="stat-card"><div class="num" id="dash-neet">0%</div><div class="label">NEET 📚</div></div>
+    </div>
+  </div>
+
+  <div class="accordion-header active" data-acc="acc-tip" onclick="toggleAccordion('acc-tip')">💡 Daily Tip <span class="acc-icon">▼</span></div>
+  <div class="accordion-body open" id="acc-tip">
+    <p style="font-size:12px;color:var(--text);line-height:1.7;font-weight:500" id="daily-tip">Loading your personalized tip...</p>
+    <button class="secondary" style="margin-top:8px;font-size:11px;padding:6px 12px" onclick="generateDailyTip()">✨ New</button>
+  </div>
+
+  <div class="card animate-fade-up delay-2" style="padding:10px">
+    <h2 style="font-size:12px;margin-bottom:8px"><span class="dot" style="background:var(--lavender)"></span>Quick Actions</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="showTab('mood')">🧠 Mood</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="showTab('counselor')">💬 Talk</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="showTab('health')">🍎 Food</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="showTab('breathe')">🌬️ Breathe</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="showTab('neet')">📚 Study</button>
+    </div>
+  </div>
+
+  <div class="card animate-fade-up delay-4">
+    <h2><span class="dot" style="background:var(--sky)"></span>Your Mood This Week</h2>
+    <div class="mood-history" id="mood-chart"></div>
+  </div>
+</div>
+
+<!-- ===== NEET PG PLANNER ===== -->
+<div id="neet" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">📚</span>
+    <h2 style="margin:0;font-size:16px">NEET PG 2026</h2>
+  </div>
+
+  <div class="card" style="padding:10px">
+    <div class="progress-track" style="margin:4px 0"><div class="progress-fill" id="neet-overall-progress" style="width:0%"></div></div>
+    <div class="neet-progress-text" id="neet-overall-text" style="font-size:12px">0% Complete</div>
+  </div>
+
+  <div class="accordion-header active" data-acc="acc-timer" onclick="toggleAccordion('acc-timer')">⏱️ Study Timer <span class="acc-icon">▼</span></div>
+  <div class="accordion-body open" id="acc-timer">
+    <div class="timer-display" id="study-timer">25:00</div>
+    <div class="timer-controls">
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="setTimer(25)">🍅 25m</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="setTimer(45)">📖 45m</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="setTimer(5)">☕ 5m</button>
+      <button class="primary" style="font-size:12px;padding:8px 16px" id="timer-btn" onclick="toggleTimer()">▶ Start</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <button class="secondary" id="neet-edit-toggle" style="font-size:11px;padding:6px 12px" onclick="toggleNeetEditMode()">✏️ Edit Topics</button>
+    <span style="font-size:11px;color:var(--text-dim)">Tap edit to modify topics</span>
+  </div>
+
+  <div class="accordion-header active" data-acc="acc-phases" onclick="toggleAccordion('acc-phases')">📋 Topic Tracker <span class="acc-icon">▼</span></div>
+  <div class="accordion-body open" id="acc-phases">
+    <div id="neet-phases" style="max-height:380px;overflow-y:auto;padding-right:4px"></div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-neet-ai" onclick="toggleAccordion('acc-neet-ai')">🤖 AI Study Assistant <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-neet-ai">
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="neetAIAsk('Create a quick revision checklist for Surgery for tomorrow')">📝 Surgery</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="neetAIAsk('Explain the difference between Crohn\'s and Ulcerative Colitis in simple terms')">🩺 Explain</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="neetAIAsk('Give me a 15-minute motivation boost for NEET prep')">🔥 Motivate</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="neetAIAsk('What are the most high-yield topics in Pharmacology?')">🎯 High-Yield</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px;background:linear-gradient(135deg,var(--lavender-soft),var(--sky-soft));border-color:var(--lavender)" id="neet-ai-refine-btn" onclick="askAIForTopics()">🤖 AI Suggest Topics</button>
+    </div>
+    <div id="neet-ai-response" class="hidden" style="padding:12px;border-radius:12px;background:var(--lavender-soft);border:2px solid var(--lavender-light);font-size:12px;line-height:1.6"></div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-doc" onclick="toggleAccordion('acc-doc')">📄 Doc Analyzer <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-doc">
+    <div class="file-drop" id="neet-file-drop" onclick="document.getElementById('neet-file-input').click()" style="padding:14px">
+      <div class="icon" style="font-size:24px">📄</div>
+      <div style="font-size:12px;font-weight:700">Tap to upload photo or document</div>
+    </div>
+    <input type="file" id="neet-file-input" class="hidden" accept="image/*,.pdf,.txt" onchange="handleNeetFileUpload(event)">
+    <div class="file-preview" id="neet-file-preview"></div>
+    <div id="neet-doc-analysis" class="hidden" style="margin-top:10px;padding:12px;border-radius:12px;background:var(--lavender-soft);border:2px solid var(--lavender-light);font-size:12px;line-height:1.6"></div>
+  </div>
+</div>
+
+<!-- ===== HEALTH TAB ===== -->
+<div id="health" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">🍎</span>
+    <h2 style="margin:0;font-size:16px">Health &amp; Wellness</h2>
+  </div>
+
+  <div class="accordion-header active" data-acc="acc-water" onclick="toggleAccordion('acc-water')">💧 Water Tracker <span class="acc-icon">▼</span></div>
+  <div class="accordion-body open" id="acc-water">
+    <div class="water-cups" id="water-cups"></div>
+    <div class="water-stats">
+      <div class="water-stat"><div class="num" id="water-today">0</div><div class="label">Today</div></div>
+      <div class="water-stat"><div class="num" id="water-goal">8</div><div class="label">Goal</div></div>
+      <div class="water-stat"><div class="num" id="water-streak">0</div><div class="label">Streak</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="setWaterGoal()">🎯 Goal</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="toggleWaterReminders()" id="water-reminder-btn">🔔 Off</button>
+    </div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-sleep" onclick="toggleAccordion('acc-sleep')">😴 Sleep Tracker <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-sleep">
+    <div class="field"><label>Bedtime</label><input type="time" id="sleep-bedtime" value="23:00"></div>
+    <div class="field"><label>Wake time</label><input type="time" id="sleep-waketime" value="07:00"></div>
+    <div class="field"><label>Quality</label><select id="sleep-tracker-quality"><option value="">Select...</option><option value="excellent">😴 Excellent</option><option value="good">🙂 Good</option><option value="fair">😐 Fair</option><option value="poor">😫 Poor</option></select></div>
+    <button class="primary" style="padding:10px 18px;font-size:12px" onclick="logSleep()">😴 Log Sleep</button>
+    <div id="sleep-last-entry" style="margin-top:8px;font-size:11px;color:var(--text-dim)"></div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-food" onclick="toggleAccordion('acc-food')">🍽️ Food Logger <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-food">
+    <div class="field"><label>What did you eat?</label><textarea id="food-description" placeholder="e.g. 2 chapatis, dal, rice..." rows="2"></textarea></div>
+    <div class="file-drop" id="food-file-drop" onclick="document.getElementById('food-file-input').click()" style="padding:14px"><div class="icon" style="font-size:24px">📸</div><div style="font-size:12px;font-weight:700">Tap to upload food photo</div></div>
+    <input type="file" id="food-file-input" class="hidden" accept="image/*" onchange="handleFoodPhotoUpload(event)">
+    <div class="file-preview" id="food-file-preview"></div>
+    <div class="field" style="margin-top:8px"><label>Post-meal mood</label><select id="food-mood"><option value="">Select...</option><option value="energized">⚡ Energized</option><option value="satisfied">😊 Satisfied</option><option value="bloated">😣 Bloated</option><option value="sluggish">😴 Sluggish</option><option value="nauseous">🤢 Nauseous</option></select></div>
+    <div class="field"><label>Focus (1-10)</label><input type="range" id="food-productivity" min="1" max="10" value="5" style="accent-color:var(--sage)" oninput="document.getElementById('prod-label').textContent=this.value"><small id="prod-label">5</small></div>
+    <button class="primary" style="padding:10px 18px;font-size:12px" onclick="logFood()">🍎 Log &amp; Analyze</button>
+    <div id="food-ai-result" class="hidden" style="margin-top:10px;padding:12px;border-radius:12px;background:var(--sage-soft);border:2px solid var(--sage-light);font-size:12px;line-height:1.6"></div>
+    <div id="food-list" style="margin-top:10px"><p style="color:var(--text-dim);font-size:11px">No meals logged yet. 🥗</p></div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-analytics" onclick="toggleAccordion('acc-analytics')">📊 Health Analytics <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-analytics">
+    <div class="analytics-grid">
+      <div class="analytics-card"><div class="value" id="analytics-avg-mood">—</div><div class="label">Mood</div></div>
+      <div class="analytics-card"><div class="value" id="analytics-avg-cals">—</div><div class="label">Cals</div></div>
+      <div class="analytics-card"><div class="value" id="analytics-avg-water">—</div><div class="label">Water</div></div>
+      <div class="analytics-card"><div class="value" id="analytics-avg-sleep">—</div><div class="label">Sleep</div></div>
+      <div class="analytics-card"><div class="value" id="analytics-avg-focus">—</div><div class="label">Focus</div></div>
+      <div class="analytics-card"><div class="value" id="analytics-sleep-quality">—</div><div class="label">Quality</div></div>
+    </div>
+    <button class="secondary" style="margin-top:8px;width:100%;font-size:11px;padding:8px" onclick="generateHealthInsights()">🤖 AI Health Report</button>
+    <div id="health-report" class="hidden" style="margin-top:10px;padding:12px;border-radius:12px;background:var(--lavender-soft);border:2px solid var(--lavender-light);font-size:12px;line-height:1.6"></div>
+  </div>
+</div>
+
+<!-- ===== COUNSELOR ===== -->
+<div id="counselor" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span style="font-size:22px">💬</span>
+    <h2 style="margin:0;font-size:16px">Sheena Counselor</h2>
+    <span class="pill" style="font-size:10px;margin-left:auto" id="ai-status">AI: Not Connected</span>
+  </div>
+  <p style="font-size:11px;color:var(--text-dim);margin-bottom:8px;background:var(--rose-soft);padding:5px 10px;border-radius:8px;border:1px solid var(--rose-light)">💗 AI companion — not a therapist. Crisis: <a href="tel:988" style="color:var(--rose);font-weight:700">988</a></p>
+
+  <div class="chat-box" id="counselor-chat" style="height:280px;margin-bottom:8px">
+    <div class="msg coach"><b>Sheena 💗</b>Hi there! I'm here to listen. How are you feeling?</div>
+  </div>
+  <div class="chat-toolbar" style="margin-bottom:6px">
+    <button class="ghost" style="font-size:11px;padding:5px 8px" onclick="counselorPreset('I\'ve been feeling anxious lately.')">😰 Anxious</button>
+    <button class="ghost" style="font-size:11px;padding:5px 8px" onclick="counselorPreset('I lost motivation to study.')">😴 Tired</button>
+    <button class="ghost" style="font-size:11px;padding:5px 8px" onclick="counselorPreset('NEET prep is overwhelming me.')">📚 Stress</button>
+    <button class="ghost" style="font-size:11px;padding:5px 8px" onclick="counselorPreset('Give me a pep talk.')">🔥 Pep Talk</button>
+    <button class="ghost" style="font-size:11px;padding:5px 8px" onclick="toggleVoice()" id="voice-toggle-btn">🔊 Off</button>
+    <button class="ghost" style="font-size:11px;padding:5px 8px;margin-left:auto" onclick="clearChat()">🗑️</button>
+  </div>
+  <div class="chat-input" style="padding:2px">
+    <input id="counselor-input" placeholder="Share your thoughts... 💗" style="padding:10px 14px;font-size:13px" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendCounselor()}">
+    <button class="primary" style="padding:0 16px;height:40px;font-size:12px" onclick="sendCounselor()">Send</button>
+  </div>
+</div>
+
+<!-- ===== MOOD ===== -->
+<div id="mood" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">🧠</span>
+    <h2 style="margin:0;font-size:16px">How are you feeling?</h2>
+  </div>
+
+  <!-- Mood Selector -->
+  <div id="mood-selector-card" class="card animate-fade-up" style="padding:14px">
+    <h2 style="font-size:14px;margin-bottom:4px"><span class="dot" style="background:var(--rose)"></span>How are you feeling right now?</h2>
+    <p style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Tap a bubble that matches your mood</p>
+    <div class="mood-orbit" id="mood-orbit">
+      <div class="mood-center" id="mood-center-display">Tap a mood</div>
+      <div class="mood-orbit-item" data-mood="amazing" style="--orbit-angle:270deg;--orbit-color:#34d399" onclick="selectMoodOrbit(this)">🤩</div>
+      <div class="mood-orbit-item" data-mood="good" style="--orbit-angle:342deg;--orbit-color:#6db89a" onclick="selectMoodOrbit(this)">😊</div>
+      <div class="mood-orbit-item" data-mood="okay" style="--orbit-angle:54deg;--orbit-color:#f0a030" onclick="selectMoodOrbit(this)">😐</div>
+      <div class="mood-orbit-item" data-mood="low" style="--orbit-angle:126deg;--orbit-color:#e85d7a" onclick="selectMoodOrbit(this)">😔</div>
+      <div class="mood-orbit-item" data-mood="terrible" style="--orbit-angle:198deg;--orbit-color:#dc2626" onclick="selectMoodOrbit(this)">😫</div>
+    </div>
+    <textarea id="mood-note" placeholder="What's on your mind? (optional) 💭" rows="2" style="font-size:13px"></textarea>
+    <button class="primary" style="margin-top:10px;padding:12px 24px;font-size:13px" onclick="saveMood()">💗 Save Mood Check-In</button>
+  </div>
+
+  <!-- Mood Summary (hidden until saved, then shows latest mood) -->
+  <div id="mood-summary-card" class="mood-summary hidden" onclick="reopenMoodSelector()">
+    <div class="mood-summary-emoji" id="mood-summary-emoji">😐</div>
+    <div class="mood-summary-text">
+      <b id="mood-summary-label">Okay</b>
+      <span id="mood-summary-time">Just now</span>
+    </div>
+    <span class="edit">Edit ✏️</span>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-checkup" onclick="toggleAccordion('acc-checkup')">💪 Emotional Check-Up <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-checkup">
+    <div class="field"><label>Sleep last night?</label><select id="sleep-quality"><option value="">Select...</option><option value="great">😴 Great</option><option value="okay">😐 Okay</option><option value="poor">😫 Poor</option></select></div>
+    <div class="field"><label>Eating habits?</label><select id="eat-quality"><option value="">Select...</option><option value="great">🥗 Healthy</option><option value="okay">🍕 Okay</option><option value="poor">🍟 Poor</option></select></div>
+    <div class="field"><label>Stress source?</label><input id="stress-source" placeholder="What's stressing you?"></div>
+    <div class="field"><label>Looking forward to?</label><input id="looking-forward" placeholder="Something hopeful..."></div>
+    <button class="primary" style="padding:10px 18px;font-size:12px" onclick="saveCheckup()">💪 Save Check-Up</button>
+  </div>
+
+  <div class="accordion-header active" data-acc="acc-mood-history" onclick="toggleAccordion('acc-mood-history')">📈 Mood History <span class="acc-icon">▼</span></div>
+  <div class="accordion-body open" id="acc-mood-history">
+    <div id="mood-list"><p style="color:var(--text-dim);font-size:12px">No entries yet. Start checking in!</p></div>
+  </div>
+</div>
+
+<!-- ===== WORKOUT ===== -->
+<div id="workout" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">💪</span>
+    <h2 style="margin:0;font-size:16px">Move Your Body</h2>
+  </div>
+
+  <div class="accordion-header active" data-acc="acc-workout-today" onclick="toggleAccordion('acc-workout-today')">📝 Today's Workout <span class="acc-icon">▼</span></div>
+  <div class="accordion-body open" id="acc-workout-today">
+    <div id="active-workout-info"><p style="color:var(--text-dim);font-size:11px;margin-bottom:8px">Build your workout or generate an AI plan.</p></div>
+    <div id="exercise-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="addExercise()">+ Add</button>
+      <button class="primary" style="font-size:12px;padding:8px 16px" onclick="finishWorkout()">✓ Finish</button>
+    </div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-workout-ai" onclick="toggleAccordion('acc-workout-ai')">⚡ AI Workout Generator <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-workout-ai">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <input id="workout-goal" placeholder="e.g. 15-min energizer..." style="flex:1;font-size:12px;padding:10px">
+      <button class="primary" style="font-size:12px;padding:8px 14px" onclick="generateWorkoutPlan()">⚡</button>
+    </div>
+    <div id="ai-plan-result" class="hidden" style="padding:12px;border-radius:12px;background:var(--lavender-soft);border:2px solid var(--lavender-light);font-size:12px;line-height:1.6"></div>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-workout-saved" onclick="toggleAccordion('acc-workout-saved')">📚 Saved Plans <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-workout-saved"><div class="workout-plan" id="saved-plans"></div></div>
+</div>
+
+<!-- ===== JOURNAL ===== -->
+<div id="journal" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">📓</span>
+    <h2 style="margin:0;font-size:16px">Private Journal</h2>
+  </div>
+
+  <div class="card" style="padding:10px">
+    <textarea id="journal-text" placeholder="Write freely... this is your safe space 🌸" rows="3" style="font-size:13px"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="primary" style="font-size:12px;padding:8px 16px" onclick="saveJournal()">💗 Save</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" onclick="getJournalPrompt()">✨ Prompt</button>
+    </div>
+    <div id="journal-prompt" class="hidden" style="margin-top:10px;padding:10px;border-radius:12px;background:var(--amber-soft);border:2px solid var(--amber-light);font-size:12px;font-weight:600;line-height:1.5"></div>
+  </div>
+
+  <div id="journal-list"><p style="color:var(--text-dim);font-size:12px;padding:10px">No entries yet. Start writing! 📖</p></div>
+</div>
+
+<!-- ===== BREATHE ===== -->
+<div id="breathe" class="tab-pane hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:22px">🌬️</span>
+    <h2 style="margin:0;font-size:16px">Breathe &amp; Reset</h2>
+  </div>
+
+  <div class="card" style="padding:10px;text-align:center">
+    <div style="display:flex;gap:6px;justify-content:center;margin-bottom:10px;flex-wrap:wrap">
+      <button class="secondary" style="font-size:11px;padding:6px 10px" id="btn-calm" onclick="setBreathMode('calm')">😌 Calm</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" id="btn-box" onclick="setBreathMode('box')">📦 Box</button>
+      <button class="secondary" style="font-size:11px;padding:6px 10px" id="btn-energy" onclick="setBreathMode('energy')">⚡ Energy</button>
+    </div>
+    <div class="breath-container" style="padding:10px 0">
+      <div class="breath-circle" id="breath-circle" style="width:140px;height:140px;font-size:14px">Breathe</div>
+      <div class="breath-label" id="breath-label" style="margin-top:10px;font-size:12px">Select a mode and press Start</div>
+    </div>
+    <button class="primary" style="font-size:12px;padding:8px 20px" id="breath-toggle" onclick="toggleBreathing()">▶ Start</button>
+  </div>
+
+  <div class="accordion-header" data-acc="acc-ground" onclick="toggleAccordion('acc-ground')">🧘 5-4-3-2-1 Grounding <span class="acc-icon">▼</span></div>
+  <div class="accordion-body" id="acc-ground">
+    <div style="display:grid;gap:6px">
+      <div style="padding:10px;border-radius:10px;background:var(--rose-soft);border:2px solid var(--rose-light);font-size:12px;font-weight:600"><b style="color:var(--rose)">5</b> things you <b>see</b> 👀</div>
+      <div style="padding:10px;border-radius:10px;background:var(--lavender-soft);border:2px solid var(--lavender-light);font-size:12px;font-weight:600"><b style="color:var(--lavender)">4</b> things you <b>touch</b> ✋</div>
+      <div style="padding:10px;border-radius:10px;background:var(--sage-soft);border:2px solid var(--sage-light);font-size:12px;font-weight:600"><b style="color:var(--sage)">3</b> things you <b>hear</b> 👂</div>
+      <div style="padding:10px;border-radius:10px;background:var(--amber-soft);border:2px solid var(--amber-light);font-size:12px;font-weight:600"><b style="color:var(--amber)">2</b> things you <b>smell</b> 👃</div>
+      <div style="padding:10px;border-radius:10px;background:var(--sky-soft);border:2px solid var(--sky-light);font-size:12px;font-weight:600"><b style="color:var(--sky)">1</b> thing you <b>taste</b> 👅</div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<!-- ===== SETTINGS FAB ===== -->
+<button class="fab-settings" onclick="openSettings()" title="Settings">⚙️</button>
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div id="settings-modal" class="modal-overlay" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>⚙️ Settings</h2>
+      <button class="ghost" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="section">
+        <h3>🤖 AI Provider</h3>
+        <div class="field">
+          <label>Provider</label>
+          <select id="setting-provider" onchange="onProviderChange()">
+            <option value="gemini">Google Gemini (Recommended — free tier)</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="openai">OpenAI</option>
+          </select>
+          <small>Get a free Gemini key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--rose);font-weight:700">Google AI Studio ↗</a></small>
+        </div>
+        <div class="field">
+          <label>API Key</label>
+          <div class="row">
+            <input type="password" id="setting-apikey" placeholder="Paste your API key here">
+            <button class="secondary" onclick="toggleApiKeyVisibility()">👁</button>
+          </div>
+          <small>Your key stays on this device only. Never shared.</small>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <select id="setting-model" onchange="onModelChange()"><option value="">Default</option></select>
+          <input type="text" id="setting-model-custom" placeholder="Enter any model name, e.g. gemini-2.5-flash-preview-05-20" style="display:none;margin-top:8px">
+          <small id="model-hint">Leave as default for best compatibility. Or choose Custom to enter any model name.</small>
+        </div>
+        <button class="primary" onclick="testConnection()">🧪 Test Connection</button>
+        <span id="test-result" style="margin-left:10px;font-size:12px;font-weight:700"></span>
+      </div>
+
+      <div class="section">
+        <h3>🔊 Voice &amp; Language</h3>
+        <div class="field">
+          <label><input type="checkbox" id="setting-voice" checked> Enable AI voice responses</label>
+          <small>The counselor will speak responses aloud using your device's text-to-speech.</small>
+        </div>
+        <div class="field">
+          <label>Voice Speed</label>
+          <input type="range" id="setting-voice-rate" min="0.5" max="1.5" step="0.1" value="1.0" style="accent-color:var(--rose)">
+          <small id="voice-rate-label">1.0x</small>
+        </div>
+        <div class="field">
+          <label>Conversation Language</label>
+          <select id="setting-lang" style="padding:10px 14px;border-radius:var(--radius-sm);border:2px solid var(--line);background:var(--bg);font-family:inherit;font-size:14px">
+            <option value="en">English 🇬🇧</option>
+            <option value="hi">Hindi 🇮🇳</option>
+            <option value="hi-en">Hinglish (Roman Hindi) 🇮🇳💬</option>
+          </select>
+          <small>Sheena will reply in the language you choose. You can switch anytime.</small>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>🔔 Reminders &amp; Notifications</h3>
+        <div class="field">
+          <label><input type="checkbox" id="setting-water-reminder"> Water reminders every hour</label>
+          <small>Gentle nudges to stay hydrated during long study sessions.</small>
+        </div>
+        <div class="field">
+          <label><input type="checkbox" id="setting-study-reminder"> Study break reminders (every 45 min)</label>
+          <small>Protect your eyes and mind with regular breaks.</small>
+        </div>
+        <div class="field">
+          <label><input type="checkbox" id="setting-mood-reminder"> Daily mood check-in reminder</label>
+          <small>A gentle evening reminder to log your mood.</small>
+        </div>
+        <button class="secondary" onclick="requestNotificationPermission()">🔔 Enable Browser Notifications</button>
+        <small style="display:block;margin-top:6px">Browser notifications work even when the app is in the background.</small>
+      </div>
+
+      <div class="section">
+        <h3>🔈 Alexa Export</h3>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">Export your NEET study schedule and daily reminders as an Alexa-compatible routine file. You can import this into the Alexa app.</p>
+        <button class="secondary" onclick="exportToAlexa()">🔈 Export to Alexa</button>
+        <button class="secondary" onclick="exportAlexaCalendar()">📅 Export as Calendar (.ics)</button>
+      </div>
+
+      <div class="section">
+        <h3>🔒 Privacy &amp; Data</h3>
+        <div class="field">
+          <label><input type="checkbox" id="setting-offline" checked> Keep journal &amp; mood data offline only</label>
+          <small>When enabled, your personal entries never leave this device. AI chat is sent to your chosen provider.</small>
+        </div>
+        <div class="field" style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="secondary" onclick="exportData()">📥 Export All Data</button>
+          <button class="danger" onclick="clearAllData()">🗑️ Clear All Data</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>ℹ️ About</h3>
+        <p style="font-size:12px;color:var(--text-dim);line-height:1.8">
+          <b style="color:var(--text)">Sheena AI Wellness &amp; NEET PG Companion</b><br>
+          Version 2.0 · Built with 💗 for Sheena<br><br>
+          Sheena is an AI-powered companion for wellness and NEET PG preparation.
+          She is <b>not a licensed therapist or medical professional</b>.<br><br>
+          <b>Crisis Resources:</b><br>
+          • <b>988</b> Suicide &amp; Crisis Lifeline<br>
+          • <b>741741</b> Crisis Text Line (text HOME)<br>
+          • <b>911</b> for emergencies<br><br>
+          Your journal, mood, food, and health data stays on this device.
+        </p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="secondary" onclick="closeSettings()">Cancel</button>
+      <button class="primary" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<script>
+
+// ===== STORAGE =====
+const DB = {
+  get(k, def) { try { return JSON.parse(localStorage.getItem('sheena_ai_' + k) || 'null') ?? def } catch (e) { return def } },
+  set(k, v) { localStorage.setItem('sheena_ai_' + k, JSON.stringify(v)) }
+};
+
+// ===== SETTINGS =====
+const DEFAULT_SETTINGS = {
+  provider: 'gemini',
+  apiKey: '',
+  model: '',
+  customModel: '',
+  voiceEnabled: true,
+  voiceRate: 1.0,
+  conversationLang: 'en',
+  offlineMode: true,
+  waterReminder: false,
+  studyReminder: false,
+  moodReminder: false
+};
+
+let settings = { ...DEFAULT_SETTINGS };
+let currentMood = '';
+let exercises = [];
+let chatHistory = [];
+let voiceOn = false;
+let breathingActive = false;
+let breathingMode = 'calm';
+let breathingTimer = null;
+let studyTimerInterval = null;
+let studyTimerSeconds = 25 * 60;
+let studyTimerRunning = false;
+
+// Live voice conversation mode state
+let liveVoiceMode = false;
+let voiceState = 'idle'; // idle | listening | thinking | speaking
+let ttsEndCallback = null; // set by speakText to notify when TTS finishes
+let currentAbortController = null; // for stopping AI generation mid-stream
+let waterReminderTimer = null;
+let studyBreakTimer = null;
+
+// ===== NEET PG SCHEDULE DATA =====
+const NEET_SCHEDULE = [
+  { phase: "Baseline Assessment", dates: "23-26 May", color: "#a78bfa", topics: [
+    { name: "GT-4 Baseline Test", subtopics: ["Full syllabus mock test", "Identify weak areas", "Time management practice"], testDate: "26 May", color: "#a78bfa" }
+  ]},
+  { phase: "Block 1: Surgery & Ortho-Radio", dates: "27 May - 3 June", color: "#e85d7a", topics: [
+    { name: "Surgery", subtopics: ["General Surgery", "Trauma & Emergency", "GI Surgery", "Hepatobiliary & Pancreas", "Thyroid & Parathyroid", "Breast Surgery", "Urology", "Neurosurgery", "Vascular Surgery", "Plastic Surgery", "Pediatric Surgery", "Oncology"], testDate: "30 June", color: "#e85d7a" },
+    { name: "Orthopedics", subtopics: ["Fractures & Dislocations", "Joint Disorders (OA, RA, Gout)", "Bone Tumors", "Pediatric Ortho", "Spine Disorders", "Sports Injuries", "Amputations & Prosthetics", "Orthopedic Infections"], testDate: "4 June", color: "#5faee3" },
+    { name: "Radiology", subtopics: ["X-Ray Interpretation", "CT Scan Basics", "MRI Basics", "Ultrasound", "Nuclear Medicine", "Radiation Safety", "Contrast Studies", "Interventional Radiology"], testDate: "4 June", color: "#6db89a" }
+  ]},
+  { phase: "Block 2: Microbiology & Anatomy", dates: "5-10 June", color: "#f0a030", topics: [
+    { name: "Microbiology", subtopics: ["General Bacteriology", "Systemic Bacteriology", "Virology", "Mycology", "Parasitology", "Immunology", "Sterilization & Disinfection", "Hospital Acquired Infections", "Vaccines", "Lab Diagnosis"], testDate: "7 June", color: "#f0a030" },
+    { name: "Anatomy", subtopics: ["Upper Limb", "Lower Limb", "Thorax", "Abdomen", "Pelvis & Perineum", "Head & Neck", "Neuroanatomy", "Embryology", "Histology", "Genetics", "Surface Anatomy", "Radiological Anatomy"], testDate: "11 June", color: "#c084fc" }
+  ]},
+  { phase: "Core BTR GT-5", dates: "9-12 June", color: "#94a3b8", topics: [
+    { name: "Grand Test GT-5", subtopics: ["Surgery review", "Ortho review", "Radio review", "Micro review", "Anatomy review", "Mixed questions"], testDate: "12 June", color: "#94a3b8" }
+  ]},
+  { phase: "Block 3: Integrated Systems 1", dates: "13-16 June", color: "#5faee3", topics: [
+    { name: "CVS (Cardiovascular)", subtopics: ["Hypertension", "Heart Failure", "Arrhythmias", "IHD / MI", "Valvular Heart Disease", "Congenital Heart Disease", "Cardiomyopathies", "Pericardial Diseases"], testDate: "16 June", color: "#5faee3" },
+    { name: "Renal System", subtopics: ["Nephrotic Syndrome", "Nephritic Syndrome", "AKI", "CKD", "Dialysis", "Renal Tubular Disorders", "UTI", "Nephrolithiasis"], testDate: "16 June", color: "#5faee3" },
+    { name: "Hematology", subtopics: ["Anemias", "Bleeding Disorders", "Coagulation Cascade", "Leukemias", "Lymphomas", "Myeloproliferative Disorders", "Transfusion Medicine"], testDate: "16 June", color: "#5faee3" },
+    { name: "GI System", subtopics: ["GERD & Peptic Ulcer", "IBD (Crohn's & UC)", "Liver Cirrhosis", "Hepatitis", "Pancreatitis", "Gallstones", "Malabsorption", "GI Bleeding"], testDate: "16 June", color: "#5faee3" }
+  ]},
+  { phase: "Block 4: Integrated Systems 2", dates: "17-20 June", color: "#6db89a", topics: [
+    { name: "Neurology", subtopics: ["Stroke", "Seizures & Epilepsy", "Meningitis", "Dementia", "Movement Disorders", "Neuropathies", "Myasthenia Gravis", "Multiple Sclerosis", "Headache"], testDate: "23 June", color: "#6db89a" },
+    { name: "Endocrinology", subtopics: ["Diabetes Mellitus", "Thyroid Disorders", "Adrenal Disorders", "Pituitary Disorders", "Calcium & Bone", "Reproductive Endocrinology"], testDate: "23 June", color: "#6db89a" },
+    { name: "Rheumatology", subtopics: ["Rheumatoid Arthritis", "SLE", "Scleroderma", "Vasculitis", "Seronegative Arthritis", "Osteoarthritis", "Gout", "Osteoporosis"], testDate: "23 June", color: "#6db89a" },
+    { name: "Respiratory", subtopics: ["Asthma", "COPD", "Pneumonia", "Tuberculosis", "ILD", "Pleural Diseases", "Lung Cancer", "Respiratory Failure"], testDate: "23 June", color: "#6db89a" }
+  ]},
+  { phase: "Quick Review: Path-Pharm-Physio-Immuno", dates: "21-22 June", color: "#fb923c", topics: [
+    { name: "General Pathology", subtopics: ["Cell Injury", "Inflammation", "Healing", "Neoplasia", "Immunopathology", "Genetic Disorders"], testDate: "23 June", color: "#fb923c" },
+    { name: "Pharmacology", subtopics: ["Autonomic Nervous System", "CNS Drugs", "CVS Drugs", "Antibiotics", "Anticancer Drugs", "Endocrine Drugs", "GI Drugs", "Respiratory Drugs"], testDate: "23 June", color: "#fb923c" },
+    { name: "Physiology", subtopics: ["Cell Physiology", "Nerve & Muscle", "CNS Physiology", "CVS Physiology", "Respiratory Physiology", "Renal Physiology", "GI Physiology", "Endocrine Physiology", "Reproductive Physiology"], testDate: "23 June", color: "#fb923c" },
+    { name: "Immunology", subtopics: ["Innate Immunity", "Adaptive Immunity", "Hypersensitivity", "Autoimmunity", "Immunodeficiency", "Transplant Immunology", "Tumor Immunology"], testDate: "23 June", color: "#fb923c" }
+  ]},
+  { phase: "Core BTR GT-6", dates: "21-24 June", color: "#94a3b8", topics: [
+    { name: "Grand Test GT-6", subtopics: ["Integrated Systems 1 review", "Integrated Systems 2 review", "Path-Pharm-Physio-Immuno review", "Mixed questions"], testDate: "24 June", color: "#94a3b8" }
+  ]},
+  { phase: "Block 5: OBG & Pediatrics", dates: "25 June - 30 June", color: "#e85d7a", topics: [
+    { name: "Obstetrics & Gynecology", subtopics: ["Antenatal Care", "Labor & Delivery", "Puerperium", "High Risk Pregnancy", "Medical Disorders in Pregnancy", "Fetal Medicine", "Gynecologic Oncology", "Menstrual Disorders", "Infertility", "Contraception", "Menopause", "Pelvic Infections"], testDate: "28 July", color: "#e85d7a" },
+    { name: "Pediatrics", subtopics: ["Neonatology", "Growth & Development", "Nutrition", "Immunization", "Infectious Diseases", "Respiratory Disorders", "GI Disorders", "Hematology & Oncology", "Nephrology", "Neurology", "Cardiology", "Genetics & Metabolic", "Behavioral Pediatrics"], testDate: "31 July", color: "#f0a030" }
+  ]},
+  { phase: "Block 6: PSM, Derma, Anesthesia", dates: "2-9 July", color: "#5faee3", topics: [
+    { name: "PSM (Community Medicine)", subtopics: ["Epidemiology", "Biostatistics", "Screening", "Communicable Diseases", "Non-Communicable Diseases", "Maternal & Child Health", "Family Planning", "Nutrition", "Environmental Health", "Occupational Health", "Health Programs"], testDate: "5 July", color: "#5faee3" },
+    { name: "Dermatology", subtopics: ["Bacterial Infections", "Viral Infections", "Fungal Infections", "Parasitic Infections", "Eczema & Dermatitis", "Psoriasis", "Acne & Rosacea", "Autoimmune Blistering", "Skin Cancers", "Leprosy", "STIs", "Nail & Hair Disorders"], testDate: "10 July", color: "#6db89a" },
+    { name: "Anesthesia", subtopics: ["Pre-operative Evaluation", "General Anesthesia", "Regional Anesthesia", "Spinal & Epidural", "Local Anesthesia", "Airway Management", "Fluid Therapy", "Pain Management", "ICU & Critical Care"], testDate: "10 July", color: "#c084fc" }
+  ]},
+  { phase: "Core BTR GT-7", dates: "8-11 July", color: "#94a3b8", topics: [
+    { name: "Grand Test GT-7", subtopics: ["PSM review", "Derma review", "Anesthesia review", "OBG review", "Peds review", "Mixed questions"], testDate: "11 July", color: "#94a3b8" }
+  ]},
+  { phase: "Block 7: Biochemistry, FMT, Psychiatry", dates: "12-19 July", color: "#f0a030", topics: [
+    { name: "Biochemistry", subtopics: ["Cell Biology", "Enzymes", "Carbohydrate Metabolism", "Lipid Metabolism", "Protein Metabolism", "Nucleotide Metabolism", "Vitamins & Minerals", "Molecular Biology", "Genetics", "Clinical Biochemistry"], testDate: "15 July", color: "#f0a030" },
+    { name: "FMT (Forensic Medicine)", subtopics: ["Legal Procedures", "Identification", "Autopsy", "Death & its Causes", "Thermal Injuries", "Mechanical Injuries", "Toxicology", "Sexual Offenses", "Medical Ethics & Law"], testDate: "19 July", color: "#fb923c" },
+    { name: "Psychiatry", subtopics: ["Schizophrenia", "Bipolar Disorder", "Depression", "Anxiety Disorders", "OCD", "PTSD", "Personality Disorders", "Substance Use", "Child Psychiatry", "Geriatric Psychiatry", "Sleep Disorders", "Eating Disorders"], testDate: "19 July", color: "#a78bfa" }
+  ]},
+  { phase: "Block 8: ENT & Ophthalmology", dates: "20-24 July", color: "#6db89a", topics: [
+    { name: "ENT", subtopics: ["Ear Anatomy & Physiology", "Hearing Loss", "Vertigo", "Otitis Media & Externa", "Nasal Polyps & Sinusitis", "Epistaxis", "Tonsillitis", "Laryngeal Disorders", "Head & Neck Cancers", "Tracheostomy"], testDate: "25 July", color: "#6db89a" },
+    { name: "Ophthalmology", subtopics: ["Anatomy of Eye", "Refractive Errors", "Cataract", "Glaucoma", "Retinal Disorders", "Uveitis", "Corneal Diseases", "Strabismus", "Neuro-ophthalmology", "Ocular Trauma", "Childhood Blindness"], testDate: "25 July", color: "#5faee3" }
+  ]},
+  { phase: "Final Core BTR GT", dates: "23-26 July", color: "#94a3b8", topics: [
+    { name: "Grand Test GT-Final", subtopics: ["All subjects revision", "High-yield topics", "Previous year questions", "Time management"], testDate: "26 July", color: "#94a3b8" }
+  ]},
+  { phase: "Revision Cycle #2", dates: "27 July - 22 August", color: "#e85d7a", topics: [
+    { name: "Comprehensive Revision 1", subtopics: ["Weak area focus", "Rapid revision notes", "MCQ practice", "Mock tests"], testDate: "22 August", color: "#e85d7a" }
+  ]},
+  { phase: "Revision Cycle #3 + Mega-NEET BTR", dates: "23 August - 30 August", color: "#f0a030", topics: [
+    { name: "Final Mega Revision", subtopics: ["Mega test series", "Last minute high-yield", "Image-based questions", "Rapid fire revision"], testDate: "30 August", color: "#f0a030" }
+  ]}
+];
+
+function getNeetSchedule() {
+  return DB.get('neet_schedule', NEET_SCHEDULE);
+}
+function saveNeetSchedule(schedule) {
+  DB.set('neet_schedule', schedule);
+}
+
+// ===== INIT =====
+function init() {
+  loadSettings();
+  // Initialize editable NEET schedule from default if not stored
+  if (!DB.get('neet_schedule')) {
+    DB.set('neet_schedule', JSON.parse(JSON.stringify(NEET_SCHEDULE)));
+  }
+  updateGreeting();
+  renderDashboard();
+  renderMoodList();
+  renderJournal();
+  renderWorkoutPlans();
+  renderExercises();
+  renderNeetPlanner();
+  renderWaterTracker();
+  renderFoodList();
+  renderSleepTracker();
+  updateAnalyticsDisplay();
+  updateModelOptions();
+  setupVoiceRateSlider();
+  chatHistory = DB.get('chat_history', []);
+  if (chatHistory.length > 0) restoreChatHistory();
+  updateConvLangButtons();
+  generateDailyTip();
+  loadNeetProgress();
+  setBreathMode('calm');
+  setupReminderTimers();
+  setupFileDrops();
+}
+
+function loadSettings() {
+  settings = { ...DEFAULT_SETTINGS, ...DB.get('settings', {}) };
+  document.getElementById('setting-provider').value = settings.provider;
+  document.getElementById('setting-apikey').value = settings.apiKey;
+  document.getElementById('setting-model').value = settings.model;
+  document.getElementById('setting-voice').checked = settings.voiceEnabled;
+  document.getElementById('setting-voice-rate').value = settings.voiceRate;
+  document.getElementById('setting-lang').value = settings.conversationLang || 'en';
+  document.getElementById('setting-offline').checked = settings.offlineMode;
+  document.getElementById('setting-water-reminder').checked = settings.waterReminder;
+  document.getElementById('setting-study-reminder').checked = settings.studyReminder;
+  document.getElementById('setting-mood-reminder').checked = settings.moodReminder;
+  onModelChange();
+  updateAiStatus();
+}
+
+function saveSettings() {
+  settings.provider = document.getElementById('setting-provider').value;
+  settings.apiKey = document.getElementById('setting-apikey').value.trim();
+  settings.model = document.getElementById('setting-model').value;
+  settings.customModel = document.getElementById('setting-model-custom').value.trim();
+  settings.voiceEnabled = document.getElementById('setting-voice').checked;
+  settings.voiceRate = parseFloat(document.getElementById('setting-voice-rate').value);
+  settings.conversationLang = document.getElementById('setting-lang').value;
+  settings.offlineMode = document.getElementById('setting-offline').checked;
+  settings.waterReminder = document.getElementById('setting-water-reminder').checked;
+  settings.studyReminder = document.getElementById('setting-study-reminder').checked;
+  settings.moodReminder = document.getElementById('setting-mood-reminder').checked;
+  DB.set('settings', settings);
+  closeSettings();
+  updateAiStatus();
+  setupReminderTimers();
+  showToast('Settings saved! 💗');
+}
+
+function updateAiStatus() {
+  const el = document.getElementById('ai-status');
+  if (!settings.apiKey) { el.textContent = 'AI: No API Key'; el.className = 'pill bad'; }
+  else { el.textContent = 'AI: ' + settings.provider.charAt(0).toUpperCase() + settings.provider.slice(1); el.className = 'pill'; }
+}
+
+function onProviderChange() { updateModelOptions(); }
+
+function updateModelOptions() {
+  const provider = document.getElementById('setting-provider').value;
+  const modelSelect = document.getElementById('setting-model');
+  const hint = document.getElementById('model-hint');
+  let options = '<option value="">Default</option>';
+  if (provider === 'gemini') {
+    options += '<option value="gemini-2.0-flash">Gemini 2.0 Flash (fast, free)</option>';
+    options += '<option value="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite (fastest)</option>';
+    options += '<option value="gemini-2.5-flash">Gemini 2.5 Flash (smarter)</option>';
+    options += '<option value="gemini-2.5-flash-preview-05-20">Gemini 2.5 Flash Preview (latest)</option>';
+    options += '<option value="gemini-2.5-pro">Gemini 2.5 Pro (best quality)</option>';
+    options += '<option value="gemini-2.5-pro-preview-05-20">Gemini 2.5 Pro Preview (latest)</option>';
+    options += '<option value="gemini-1.5-flash">Gemini 1.5 Flash</option>';
+    options += '<option value="gemini-1.5-pro">Gemini 1.5 Pro</option>';
+    options += '<option value="gemini-1.0-pro">Gemini 1.0 Pro</option>';
+    options += '<option value="gemini-1.0-ultra">Gemini 1.0 Ultra</option>';
+    options += '<option value="gemini-pro">Gemini Pro (legacy)</option>';
+    options += '<option value="gemini-ultra">Gemini Ultra (legacy)</option>';
+    options += '<option value="custom">✏️ Custom — enter any model name</option>';
+    hint.textContent = 'Gemini 2.0 Flash: 15 req/min free. Gemini 2.5 Pro: 2 req/min free. Pick Custom to use any model Google releases.';
+  } else if (provider === 'anthropic') {
+    options += '<option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>';
+    options += '<option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>';
+    options += '<option value="claude-3-opus-20240229">Claude 3 Opus</option>';
+    options += '<option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (v1)</option>';
+    options += '<option value="custom">✏️ Custom — enter any model name</option>';
+    hint.textContent = 'Claude requires a paid API key. Pick Custom for future models.';
+  } else if (provider === 'openai') {
+    options += '<option value="gpt-4o-mini">GPT-4o Mini</option>';
+    options += '<option value="gpt-4o">GPT-4o</option>';
+    options += '<option value="gpt-4o-2024-08-06">GPT-4o (2024-08-06)</option>';
+    options += '<option value="gpt-4-turbo">GPT-4 Turbo</option>';
+    options += '<option value="gpt-4">GPT-4</option>';
+    options += '<option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>';
+    options += '<option value="custom">✏️ Custom — enter any model name</option>';
+    hint.textContent = 'OpenAI requires a paid API key. Pick Custom for future models.';
+  }
+  modelSelect.innerHTML = options;
+  modelSelect.value = settings.model || '';
+  onModelChange();
+}
+
+function onModelChange() {
+  const select = document.getElementById('setting-model');
+  const customInput = document.getElementById('setting-model-custom');
+  if (select.value === 'custom') {
+    customInput.style.display = 'block';
+    customInput.value = settings.customModel || '';
+  } else {
+    customInput.style.display = 'none';
+  }
+}
+
+function toggleApiKeyVisibility() {
+  const el = document.getElementById('setting-apikey');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function setupVoiceRateSlider() {
+  const slider = document.getElementById('setting-voice-rate');
+  const label = document.getElementById('voice-rate-label');
+  slider.addEventListener('input', () => { label.textContent = slider.value + 'x'; });
+}
+
+function openSettings() { document.getElementById('settings-modal').classList.add('show'); }
+function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
+
+// ===== TOAST SYSTEM =====
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.innerHTML = `<span>${msg}</span><button class="toast-close" onclick="this.parentElement.remove()">✕</button>`;
+  container.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .5s'; setTimeout(() => t.remove(), 500); }, 4000);
+}
+
+// ===== NOTIFICATION SYSTEM =====
+function requestNotificationPermission() {
+  if (!('Notification' in window)) { showToast('Notifications not supported on this device', 'warn'); return; }
+  Notification.requestPermission().then(perm => {
+    if (perm === 'granted') showToast('Notifications enabled! 🔔', 'success');
+    else showToast('Notification permission denied', 'warn');
+  });
+}
+
+function sendNotification(title, body) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '🌸', badge: '🌸' });
+  }
+}
+
+function setupReminderTimers() {
+  if (waterReminderTimer) clearInterval(waterReminderTimer);
+  if (studyBreakTimer) clearInterval(studyBreakTimer);
+
+  if (settings.waterReminder) {
+    waterReminderTimer = setInterval(() => {
+      const lastWater = DB.get('last_water_reminder', 0);
+      if (Date.now() - lastWater > 60 * 60 * 1000) {
+        DB.set('last_water_reminder', Date.now());
+        showNotifBanner('💧 Time to hydrate!', 'Drink a glass of water to keep your brain sharp.');
+        sendNotification('Sheena 💧', 'Time to drink water! Stay hydrated for better focus.');
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  if (settings.studyReminder) {
+    studyBreakTimer = setInterval(() => {
+      const lastBreak = DB.get('last_study_reminder', 0);
+      if (Date.now() - lastBreak > 45 * 60 * 1000) {
+        DB.set('last_study_reminder', Date.now());
+        showNotifBanner('☕ Study Break!', 'You\'ve been studying for 45 minutes. Look away from the screen, stretch, and breathe.');
+        sendNotification('Sheena ☕', 'Take a study break! Rest your eyes and stretch.');
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  if (settings.moodReminder) {
+    const now = new Date();
+    const evening = new Date(); evening.setHours(20, 0, 0, 0);
+    const msUntil = evening - now;
+    if (msUntil > 0) {
+      setTimeout(() => {
+        showNotifBanner('🧠 Evening Check-In', 'How was your day? Take a moment to log your mood.');
+        sendNotification('Sheena 🧠', 'Evening check-in time! How are you feeling?');
+      }, msUntil);
+    }
+  }
+}
+
+function showNotifBanner(title, body) {
+  const banner = document.getElementById('notif-banner');
+  banner.querySelector('b').textContent = title;
+  banner.querySelector('span').textContent = body;
+  banner.classList.add('show');
+}
+
+function dismissNotif() {
+  document.getElementById('notif-banner').classList.remove('show');
+}
+
+function logWaterFromNotif() {
+  logWater();
+  dismissNotif();
+}
+
+// ===== TABS =====
+function showTab(id) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === id));
+  if (id === 'dashboard') renderDashboard();
+  if (id === 'mood') renderMoodList();
+  if (id === 'journal') renderJournal();
+  if (id === 'workout') renderWorkoutPlans();
+  if (id === 'neet') renderNeetPlanner();
+  if (id === 'health') { renderWaterTracker(); renderFoodList(); updateAnalyticsDisplay(); }
+  window.scrollTo(0, 0);
+}
+
+function toggleAccordion(id) {
+  const body = document.getElementById(id);
+  const header = document.querySelector('.accordion-header[data-acc="' + id + '"]');
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  if (header) header.classList.toggle('active', !isOpen);
+}
+
+// ===== GREETING =====
+function updateGreeting() {
+  const h = new Date().getHours();
+  let text = '';
+  if (h < 12) text = 'Good morning, Sheena ☀️ Start your day with kindness toward yourself.';
+  else if (h < 17) text = 'Good afternoon, Sheena 🌤️ Take a moment to breathe and check in.';
+  else text = 'Good evening, Sheena 🌙 Reflect on your day with gentle compassion.';
+  document.getElementById('greeting-text').textContent = text;
+}
+
+// ===== DASHBOARD =====
+function renderDashboard() {
+  const moods = DB.get('moods', []);
+  const today = new Date().toDateString();
+  const todayEntry = moods.find(e => new Date(e.date).toDateString() === today);
+  document.getElementById('dash-streak').textContent = DB.get('streak', 0);
+  // workouts stat removed from compact dashboard
+  document.getElementById('dash-mood').textContent = todayEntry ? moodEmoji(todayEntry.mood) : '—';
+  document.getElementById('dash-water').textContent = getTodayWater();
+  document.getElementById('dash-calories').textContent = getTodayCalories();
+  document.getElementById('dash-neet').textContent = calculateNeetProgress() + '%';
+
+  const sleep = getLastNightSleep();
+  document.getElementById('dash-sleep').textContent = sleep ? `${sleep.hours}h` : '—';
+
+  renderMoodChart();
+}
+
+function moodEmoji(m) {
+  const map = { amazing: '🤩', good: '😊', okay: '😐', low: '😔', terrible: '😫' };
+  return map[m] || m;
+}
+
+function moodScore(m) {
+  const map = { amazing: 5, good: 4, okay: 3, low: 2, terrible: 1 };
+  return map[m] || 3;
+}
+
+function moodColor(m) {
+  const map = { amazing: '#34d399', good: '#6db89a', okay: '#f0a030', low: '#e85d7a', terrible: '#dc2626' };
+  return map[m] || '#9a8e82';
+}
+
+function renderMoodChart() {
+  const moods = DB.get('moods', []);
+  const box = document.getElementById('mood-chart');
+  if (!moods.length) { box.innerHTML = '<p style="color:var(--text-dim);font-size:12px;width:100%;text-align:center">Log your mood to see your weekly chart! 📊</p>'; return; }
+  const last14 = moods.slice(-14);
+  box.innerHTML = last14.map(e => {
+    const score = moodScore(e.mood);
+    const pct = (score / 5) * 100;
+    const date = new Date(e.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+    return `<div class="mood-bar" style="height:${pct}%;background:${moodColor(e.mood)}"><div class="tooltip">${date}: ${moodEmoji(e.mood)}</div></div>`;
+  }).join('');
+}
+
+// ===== DAILY TIP =====
+const STATIC_TIPS = [
+  "Take 5 minutes before bed to write down 3 things you're grateful for. This simple practice improves sleep quality and emotional resilience. ✨",
+  "Movement is medicine. Even a 10-minute walk can shift your mood by releasing endorphins and reducing cortisol. 💪",
+  "When anxiety rises, try the 5-4-3-2-1 grounding technique. Name 5 things you see, 4 you can touch, 3 you hear, 2 you smell, 1 you taste. 🌍",
+  "Your feelings are valid — all of them. There is no 'wrong' way to feel. Give yourself permission to experience emotions without judgment. 💗",
+  "Sleep is the foundation of mental health. Aim for 7-9 hours. A consistent bedtime routine signals your brain that it's safe to rest. 😴",
+  "Social connection is as important as exercise. A 10-minute call with someone you love can boost your wellbeing for hours. 📞",
+  "Progress, not perfection. Every small step counts. You don't need to overhaul your life today — just show up for yourself in one small way. 🌱",
+  "Hydration affects your mood more than you think. Even mild dehydration can increase feelings of anxiety and fatigue. 💧",
+  "Your inner critic is not the truth. When negative self-talk arises, ask yourself: 'Would I say this to a friend I love?' 🪞",
+  "Nature heals. Spending just 20 minutes outside in green space significantly lowers stress hormones and improves focus. 🌳",
+  "For NEET prep: Active recall is more effective than passive reading. Close the book and try to explain a topic from memory. 🧠",
+  "The Pomodoro technique (25 min study + 5 min break) can dramatically improve focus and prevent burnout during long study sessions. 🍅"
+];
+
+function generateDailyTip() {
+  const el = document.getElementById('daily-tip');
+  if (!settings.apiKey) {
+    el.textContent = STATIC_TIPS[Math.floor(Math.random() * STATIC_TIPS.length)];
+    return;
+  }
+  el.textContent = 'Generating a personalized wellness tip for you... ✨';
+  const prompt = "You are a warm, supportive wellness coach for a medical student preparing for NEET PG. Give ONE short, practical wellness or study tip (2-3 sentences max) that feels personal and encouraging. Focus on mental health, self-care, study strategies, or emotional wellbeing. Be gentle and uplifting.";
+  callAI(prompt, { temperature: 0.8 }).then(text => {
+    el.textContent = text || STATIC_TIPS[Math.floor(Math.random() * STATIC_TIPS.length)];
+  }).catch(() => {
+    el.textContent = STATIC_TIPS[Math.floor(Math.random() * STATIC_TIPS.length)];
+  });
+}
+
+// ===== WATER TRACKER =====
+function getTodayWater() {
+  const waterLog = DB.get('water_log', {});
+  const today = new Date().toDateString();
+  return waterLog[today] || 0;
+}
+
+function getWaterGoal() {
+  return DB.get('water_goal', 8);
+}
+
+function renderWaterTracker() {
+  const today = new Date().toDateString();
+  const waterLog = DB.get('water_log', {});
+  const count = waterLog[today] || 0;
+  const goal = getWaterGoal();
+  const box = document.getElementById('water-cups');
+
+  let html = '';
+  for (let i = 1; i <= goal; i++) {
+    html += `<div class="water-cup ${i <= count ? 'filled' : ''}" onclick="logWater(${i})"><span>${i <= count ? '💧' : '🥛'}</span></div>`;
+  }
+  box.innerHTML = html;
+
+  document.getElementById('water-today').textContent = count;
+  document.getElementById('water-goal').textContent = goal;
+
+  const streak = DB.get('water_streak', 0);
+  document.getElementById('water-streak').textContent = streak;
+
+  const btn = document.getElementById('water-reminder-btn');
+  if (btn) btn.textContent = settings.waterReminder ? '🔔 Reminders: On' : '🔔 Reminders: Off';
+}
+
+function logWater(targetCup) {
+  const today = new Date().toDateString();
+  const waterLog = DB.get('water_log', {});
+  const current = waterLog[today] || 0;
+  if (targetCup === current) waterLog[today] = targetCup - 1;
+  else waterLog[today] = targetCup;
+  DB.set('water_log', waterLog);
+
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+  const yesterdayCount = waterLog[yesterday] || 0;
+  const goal = getWaterGoal();
+  let streak = DB.get('water_streak', 0);
+  if (waterLog[today] >= goal) {
+    if (yesterdayCount >= goal) streak = streak || 0;
+    else streak = (streak || 0) + 1;
+    DB.set('water_streak', streak);
+  }
+
+  renderWaterTracker();
+  renderDashboard();
+  if (waterLog[today] >= goal) showToast('🎉 Daily water goal reached! Great job!', 'success');
+}
+
+function setWaterGoal() {
+  const g = prompt('Set your daily water goal (glasses):', getWaterGoal());
+  if (g && !isNaN(g)) { DB.set('water_goal', parseInt(g)); renderWaterTracker(); showToast('Water goal updated! 💧'); }
+}
+
+function toggleWaterReminders() {
+  settings.waterReminder = !settings.waterReminder;
+  DB.set('settings', settings);
+  setupReminderTimers();
+  renderWaterTracker();
+  showToast(settings.waterReminder ? 'Water reminders enabled! 💧' : 'Water reminders disabled');
+}
+
+// ===== FOOD LOGGER =====
+let currentFoodPhotoBase64 = null;
+
+function handleFoodPhotoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const preview = document.getElementById('food-file-preview');
+  preview.innerHTML = `<div class="file-preview-item">📸 ${escapeHtml(file.name)}</div>`;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    currentFoodPhotoBase64 = e.target.result.split(',')[1];
+  };
+  reader.readAsDataURL(file);
+}
+
+async function logFood() {
+  const desc = document.getElementById('food-description').value.trim();
+  const mood = document.getElementById('food-mood').value;
+  const productivity = document.getElementById('food-productivity').value;
+  if (!desc && !currentFoodPhotoBase64) { showToast('Describe your meal or upload a photo'); return; }
+
+  const resultBox = document.getElementById('food-ai-result');
+  resultBox.classList.remove('hidden');
+  resultBox.innerHTML = '<span style="color:var(--text-dim)">🤖 Analyzing your meal...</span>';
+
+  let calories = 0;
+  let analysis = '';
+
+  if (settings.apiKey) {
+    try {
+      if (currentFoodPhotoBase64 && settings.provider === 'gemini') {
+        const text = await callGeminiMultimodal(
+          currentFoodPhotoBase64,
+          "Estimate calories and macronutrients (protein, carbs, fat) for this meal. Also give a brief health assessment. Respond in this format:\nCalories: ~XXX kcal\nProtein: ~Xg\nCarbs: ~Xg\nFat: ~Xg\nAssessment: (1-2 sentences)"
+        );
+        analysis = text;
+      } else {
+        const prompt = `A person ate: "${desc || 'a meal shown in the photo'}". Estimate calories and macronutrients. Format:\nCalories: ~XXX kcal\nProtein: ~Xg\nCarbs: ~Xg\nFat: ~Xg\nAssessment: (1-2 sentences)`;
+        analysis = await callAI(prompt, { temperature: 0.3 });
+      }
+      const calMatch = analysis.match(/calories?:?\s*~?(\d+)/i);
+      if (calMatch) calories = parseInt(calMatch[1]);
+    } catch (err) {
+      analysis = 'Could not analyze. Please check your API key.';
+    }
+  } else {
+    analysis = 'Add your API key in Settings for AI calorie estimation.';
+    const lower = (desc || '').toLowerCase();
+    if (lower.includes('chapati') || lower.includes('roti')) calories += 80;
+    if (lower.includes('rice')) calories += 200;
+    if (lower.includes('dal')) calories += 150;
+    if (lower.includes('paneer')) calories += 250;
+    if (lower.includes('chicken')) calories += 300;
+    if (lower.includes('salad')) calories += 50;
+    if (lower.includes('egg')) calories += 70;
+    if (lower.includes('dosa')) calories += 180;
+    if (lower.includes('idli')) calories += 100;
+    if (lower.includes('sambar')) calories += 120;
+    if (calories === 0) calories = 400;
+    analysis = `Estimated: ~${calories} kcal (rough estimate). Add API key for precise AI analysis.`;
+  }
+
+  resultBox.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${escapeHtml(analysis)}</pre>`;
+
+  const meals = DB.get('meals', []);
+  meals.unshift({
+    date: Date.now(),
+    description: desc || 'Photo meal',
+    calories,
+    analysis,
+    moodAfter: mood,
+    productivity: parseInt(productivity),
+    hasPhoto: !!currentFoodPhotoBase64
+  });
+  DB.set('meals', meals);
+
+  document.getElementById('food-description').value = '';
+  document.getElementById('food-file-preview').innerHTML = '';
+  document.getElementById('food-mood').value = '';
+  document.getElementById('food-productivity').value = '5';
+  document.getElementById('prod-label').textContent = '5';
+  currentFoodPhotoBase64 = null;
+
+  renderFoodList();
+  renderDashboard();
+  showToast('Meal logged! 🍎');
+}
+
+function renderFoodList() {
+  const meals = DB.get('meals', []);
+  const today = new Date().toDateString();
+  const todayMeals = meals.filter(m => new Date(m.date).toDateString() === today);
+  const box = document.getElementById('food-list');
+  if (!todayMeals.length) { box.innerHTML = '<p style="color:var(--text-dim);font-size:13px">No meals logged yet. Start tracking your nutrition! 🥗</p>'; return; }
+
+  let totalCals = 0;
+  box.innerHTML = todayMeals.map(m => {
+    totalCals += m.calories || 0;
+    return `
+      <div class="food-entry">
+        <div class="food-entry-header">
+          <div class="food-entry-title">${escapeHtml(m.description)}</div>
+          <div class="food-entry-cals">${m.calories || '?'} kcal</div>
+        </div>
+        <div class="food-entry-meta">${new Date(m.date).toLocaleTimeString()}</div>
+        ${m.moodAfter ? `<span class="food-entry-mood">Mood: ${m.moodAfter}</span>` : ''}
+        ${m.productivity ? `<span class="food-entry-productivity">Focus: ${m.productivity}/10</span>` : ''}
+      </div>
+    `;
+  }).join('') + `<div style="text-align:right;font-size:14px;font-weight:700;color:var(--amber);margin-top:10px">Total Today: ${totalCals} kcal</div>`;
+}
+
+function getTodayCalories() {
+  const meals = DB.get('meals', []);
+  const today = new Date().toDateString();
+  return meals.filter(m => new Date(m.date).toDateString() === today).reduce((s, m) => s + (m.calories || 0), 0);
+}
+
+// ===== SLEEP TRACKER =====
+function logSleep() {
+  const bedtime = document.getElementById('sleep-bedtime').value;
+  const waketime = document.getElementById('sleep-waketime').value;
+  const quality = document.getElementById('sleep-tracker-quality').value;
+  const notes = document.getElementById('sleep-notes').value.trim();
+
+  if (!quality) { showToast('Please select a sleep quality', 'warn'); return; }
+
+  // Calculate duration
+  let duration = 0;
+  if (bedtime && waketime) {
+    const [bh, bm] = bedtime.split(':').map(Number);
+    const [wh, wm] = waketime.split(':').map(Number);
+    let bedMin = bh * 60 + bm;
+    let wakeMin = wh * 60 + wm;
+    if (wakeMin < bedMin) wakeMin += 24 * 60;
+    duration = (wakeMin - bedMin) / 60;
+  }
+
+  const entries = DB.get('sleep_log', []);
+  const today = new Date().toDateString();
+  // Remove existing entry for today
+  const filtered = entries.filter(e => new Date(e.date).toDateString() !== today);
+  filtered.push({ date: Date.now(), bedtime, waketime, quality, duration: Math.round(duration * 10) / 10, notes });
+  DB.set('sleep_log', filtered);
+
+  // Update last entry display
+  const lastEl = document.getElementById('sleep-last-entry');
+  lastEl.innerHTML = `<b>Last logged:</b> ${duration.toFixed(1)} hours, ${quality} quality ✓`;
+
+  renderDashboard();
+  updateAnalyticsDisplay();
+  showToast(`Sleep logged: ${duration.toFixed(1)} hours 😴`, 'success');
+}
+
+function getLastNightSleep() {
+  const entries = DB.get('sleep_log', []);
+  if (!entries.length) return null;
+  const last = entries[entries.length - 1];
+  return { hours: last.duration, quality: last.quality };
+}
+
+function renderSleepTracker() {
+  const entries = DB.get('sleep_log', []);
+  const lastEl = document.getElementById('sleep-last-entry');
+  if (!entries.length) {
+    lastEl.innerHTML = '<span style="color:var(--text-dim)">No sleep logged yet. Start tracking tonight! 🌙</span>';
+    return;
+  }
+  const last = entries[entries.length - 1];
+  const dateStr = new Date(last.date).toLocaleDateString();
+  lastEl.innerHTML = `<b>Last logged (${dateStr}):</b> ${last.duration.toFixed(1)} hours, ${last.quality} quality ✓`;
+}
+
+// ===== HEALTH ANALYTICS =====
+function updateAnalyticsDisplay() {
+  const moods = DB.get('moods', []);
+  const meals = DB.get('meals', []);
+  const waterLog = DB.get('water_log', {});
+  const sleepLog = DB.get('sleep_log', []);
+
+  const last7Moods = moods.slice(-7);
+  const avgMood = last7Moods.length ? (last7Moods.reduce((s, m) => s + moodScore(m.mood), 0) / last7Moods.length).toFixed(1) : '—';
+  document.getElementById('analytics-avg-mood').textContent = avgMood;
+
+  const last7Days = [...Array(7)].map((_, i) => new Date(Date.now() - i * 86400000).toDateString());
+  let totalCals = 0, calDays = 0;
+  for (const day of last7Days) {
+    const dayMeals = meals.filter(m => new Date(m.date).toDateString() === day);
+    if (dayMeals.length) { totalCals += dayMeals.reduce((s, m) => s + (m.calories || 0), 0); calDays++; }
+  }
+  document.getElementById('analytics-avg-cals').textContent = calDays ? Math.round(totalCals / calDays) : '—';
+
+  // Sleep analytics
+  let totalSleep = 0, sleepDays = 0, qualityCounts = {};
+  for (const day of last7Days) {
+    const daySleep = sleepLog.filter(s => new Date(s.date).toDateString() === day);
+    if (daySleep.length) {
+      totalSleep += daySleep[daySleep.length - 1].duration;
+      sleepDays++;
+      const q = daySleep[daySleep.length - 1].quality;
+      qualityCounts[q] = (qualityCounts[q] || 0) + 1;
+    }
+  }
+  document.getElementById('analytics-avg-sleep').textContent = sleepDays ? (totalSleep / sleepDays).toFixed(1) : '—';
+
+  // Most common sleep quality
+  let bestQuality = '—';
+  let bestCount = 0;
+  for (const [q, c] of Object.entries(qualityCounts)) {
+    if (c > bestCount) { bestCount = c; bestQuality = q; }
+  }
+  document.getElementById('analytics-sleep-quality').textContent = bestQuality !== '—' ? bestQuality.charAt(0).toUpperCase() + bestQuality.slice(1) : '—';
+
+  let totalWater = 0, waterDays = 0;
+  for (const day of last7Days) { if (waterLog[day]) { totalWater += waterLog[day]; waterDays++; } }
+  document.getElementById('analytics-avg-water').textContent = waterDays ? (totalWater / waterDays).toFixed(1) : '—';
+
+  const mealsWithProd = meals.filter(m => m.productivity).slice(-14);
+  const avgFocus = mealsWithProd.length ? (mealsWithProd.reduce((s, m) => s + m.productivity, 0) / mealsWithProd.length).toFixed(1) : '—';
+  document.getElementById('analytics-avg-focus').textContent = avgFocus;
+}
+
+async function generateHealthInsights() {
+  const el = document.getElementById('health-report');
+  el.classList.remove('hidden');
+  el.innerHTML = '<span style="color:var(--text-dim)">🤖 Analyzing your health patterns...</span>';
+
+  const moods = DB.get('moods', []);
+  const meals = DB.get('meals', []);
+  const waterLog = DB.get('water_log', {});
+  const workouts = DB.get('workouts', []);
+  const sleepLog = DB.get('sleep_log', []);
+
+  if (!settings.apiKey) {
+    el.innerHTML = '<span style="color:var(--text-dim)">Please add your API key in Settings (⚙️) to generate AI health insights.</span>';
+    return;
+  }
+
+  const recentMoods = moods.slice(-10);
+  const recentMeals = meals.slice(-10);
+  const recentWorkouts = workouts.slice(-5);
+  const recentSleep = sleepLog.slice(-7);
+
+  const prompt = `You are a holistic health coach analyzing data for a medical student preparing for NEET PG. Based on the following data, provide personalized, actionable insights (3-4 bullet points max). Be warm, supportive, and specific.
+
+MOOD HISTORY (last 10 entries):
+${recentMoods.map(m => `- ${new Date(m.date).toLocaleDateString()}: ${m.mood}${m.note ? ' — ' + m.note : ''}`).join('\n') || 'No data'}
+
+MEALS (last 10):
+${recentMeals.map(m => `- ${new Date(m.date).toLocaleDateString()}: ${m.description}, ${m.calories}kcal, mood after: ${m.moodAfter || 'N/A'}, focus: ${m.productivity || 'N/A'}/10`).join('\n') || 'No data'}
+
+SLEEP (last 7 nights):
+${recentSleep.map(s => `- ${new Date(s.date).toLocaleDateString()}: ${s.duration} hours, quality: ${s.quality}`).join('\n') || 'No data'}
+
+WORKOUTS (last 5): ${recentWorkouts.length} sessions
+
+WATER INTAKE: ${Object.values(waterLog).slice(-7).join(', ')} glasses over last 7 days
+
+Provide insights on:
+1. Mood patterns and triggers
+2. Sleep-quality correlation with mood and focus
+3. Food-mood-productivity correlations
+4. Hydration impact
+5. One actionable recommendation`;
+
+  try {
+    const report = await callAI(prompt, { temperature: 0.7 });
+    el.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${escapeHtml(report)}</pre>`;
+  } catch (err) {
+    el.innerHTML = '<span style="color:#dc2626">⚠️ ' + escapeHtml(err.message) + '</span>';
+  }
+}
+
+// ===== FILE UPLOAD & AI DOCUMENT ANALYSIS =====
+function setupFileDrops() {
+  const neetDrop = document.getElementById('neet-file-drop');
+  if (neetDrop) {
+    neetDrop.addEventListener('dragover', e => { e.preventDefault(); neetDrop.classList.add('dragover'); });
+    neetDrop.addEventListener('dragleave', () => neetDrop.classList.remove('dragover'));
+    neetDrop.addEventListener('drop', e => {
+      e.preventDefault(); neetDrop.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFileForAnalysis(e.dataTransfer.files[0], 'neet');
+    });
+  }
+  const foodDrop = document.getElementById('food-file-drop');
+  if (foodDrop) {
+    foodDrop.addEventListener('dragover', e => { e.preventDefault(); foodDrop.classList.add('dragover'); });
+    foodDrop.addEventListener('dragleave', () => foodDrop.classList.remove('dragover'));
+    foodDrop.addEventListener('drop', e => {
+      e.preventDefault(); foodDrop.classList.remove('dragover');
+      if (e.dataTransfer.files.length) { document.getElementById('food-file-input').files = e.dataTransfer.files; handleFoodPhotoUpload({ target: { files: e.dataTransfer.files } }); }
+    });
+  }
+}
+
+function handleNeetFileUpload(event) {
+  const file = event.target.files[0];
+  if (file) handleFileForAnalysis(file, 'neet');
+}
+
+async function handleFileForAnalysis(file, context) {
+  const previewId = context === 'neet' ? 'neet-file-preview' : 'food-file-preview';
+  const resultId = context === 'neet' ? 'neet-doc-analysis' : 'food-ai-result';
+  const preview = document.getElementById(previewId);
+  const resultBox = document.getElementById(resultId);
+
+  preview.innerHTML = `<div class="file-preview-item">📄 ${escapeHtml(file.name)} (${(file.size / 1024).toFixed(1)} KB)</div>`;
+  resultBox.classList.remove('hidden');
+  resultBox.innerHTML = '<span style="color:var(--text-dim)">🤖 Reading and analyzing...</span>';
+
+  if (!settings.apiKey) {
+    resultBox.innerHTML = '<span style="color:var(--text-dim)">Please add your API key in Settings to analyze documents.</span>';
+    return;
+  }
+
+  try {
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target.result.split(',')[1];
+        if (settings.provider === 'gemini') {
+          const text = await callGeminiMultimodal(base64,
+            context === 'neet'
+              ? "You are a NEET PG tutor. Read and analyze this image (notes, textbook page, or diagram). Summarize the key points, highlight important facts, and create 3-5 recall questions. Format clearly with headings."
+              : "Estimate calories and macronutrients for this meal. Format: Calories: ~XXX, Protein: ~Xg, Carbs: ~Xg, Fat: ~Xg. Brief health note."
+          );
+          resultBox.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${escapeHtml(text)}</pre>`;
+        } else {
+          resultBox.innerHTML = '<span style="color:var(--text-dim)">Image analysis requires Gemini provider. Please switch to Gemini in Settings for photo analysis.</span>';
+        }
+      };
+      reader.readAsDataURL(file);
+    } else if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      const text = await file.text();
+      const prompt = `Analyze this document for a NEET PG student. Summarize key points, create flashcard-style Q&As, and highlight high-yield facts:\n\n${text.slice(0, 4000)}`;
+      const analysis = await callAI(prompt, { temperature: 0.3 });
+      resultBox.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${escapeHtml(analysis)}</pre>`;
+    } else {
+      resultBox.innerHTML = '<span style="color:var(--text-dim)">File type not directly supported. Please upload an image (JPG/PNG) or text file (.txt).</span>';
+    }
+  } catch (err) {
+    resultBox.innerHTML = '<span style="color:#dc2626">⚠️ ' + escapeHtml(err.message) + '</span>';
+  }
+}
+
+// ===== ALEXA EXPORT =====
+function exportToAlexa() {
+  let text = '# Sheena NEET PG Alexa Routine Commands\n\n';
+  text += 'Copy these commands and say them to Alexa, or add them as routines in the Alexa app.\n\n';
+
+  const schedule = getNeetSchedule();
+  for (const phase of schedule) {
+    text += `## ${phase.phase} (${phase.dates})\n`;
+    for (const topic of phase.topics) {
+      if (topic.testDate) {
+        text += `- "Alexa, remind me on ${topic.testDate} at 9 AM about ${topic.name} test"\n`;
+      }
+      text += `- "Alexa, set a study timer for 25 minutes"\n`;
+    }
+    text += '\n';
+  }
+
+  text += '\n## Daily Wellness Reminders\n';
+  text += '- "Alexa, remind me every day at 8 AM to drink water"\n';
+  text += '- "Alexa, remind me every day at 8 PM to log my mood"\n';
+  text += '- "Alexa, remind me every 45 minutes to take a study break"\n';
+  text += '- "Alexa, set a Pomodoro timer for 25 minutes"\n';
+
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sheena-alexa-routines.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Alexa routine commands exported! 🔈', 'success');
+}
+
+function exportAlexaCalendar() {
+  let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Sheena Wellness//NEET PG 2026//EN\n';
+
+  const schedule = getNeetSchedule();
+  for (const phase of schedule) {
+    for (const topic of phase.topics) {
+      if (topic.testDate) {
+        const dateParts = topic.testDate.split(' ');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const month = monthNames.indexOf(dateParts[1]) + 1;
+        const day = parseInt(dateParts[0]);
+        const year = 2026;
+        const dateStr = `${year}${month.toString().padStart(2, '0')}${day.toString().padStart(2, '0')}`;
+
+        ics += 'BEGIN:VEVENT\n';
+        ics += `UID:sheena-neet-${topic.name.replace(/\s+/g, '-').toLowerCase()}@${dateStr}\n`;
+        ics += `DTSTART;VALUE=DATE:${dateStr}\n`;
+        ics += `DTEND;VALUE=DATE:${dateStr}\n`;
+        ics += `SUMMARY:NEET PG Test: ${topic.name}\n`;
+        ics += `DESCRIPTION:Sheena NEET PG study schedule reminder. Phase: ${phase.phase}. Stay confident!\n`;
+        ics += 'BEGIN:VALARM\nACTION:DISPLAY\nDESCRIPTION:NEET Test Reminder\nTRIGGER:-PT1H\nEND:VALARM\n';
+        ics += 'END:VEVENT\n';
+      }
+    }
+  }
+
+  ics += 'END:VCALENDAR';
+  const blob = new Blob([ics], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sheena-neet-calendar.ics';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Calendar exported! Import into Alexa or Google Calendar. 📅', 'success');
+}
+
+// ===== NEET PLANNER =====
+let neetEditMode = false;
+
+function toggleNeetEditMode() {
+  neetEditMode = !neetEditMode;
+  const btn = document.getElementById('neet-edit-toggle');
+  if (btn) {
+    btn.textContent = neetEditMode ? '✅ Done Editing' : '✏️ Edit Topics';
+    btn.style.background = neetEditMode ? 'linear-gradient(135deg,var(--sage-soft),var(--mint-light))' : '';
+    btn.style.borderColor = neetEditMode ? 'var(--sage)' : '';
+  }
+  renderNeetPlanner();
+}
+
+function renderNeetPlanner() {
+  const container = document.getElementById('neet-phases');
+  container.classList.toggle('neet-edit-mode', neetEditMode);
+  const schedule = getNeetSchedule();
+  const progress = DB.get('neet_progress', {});
+  const editAttr = neetEditMode ? 'contenteditable="true"' : '';
+  let html = '';
+  let totalSubtopics = 0;
+  let doneSubtopics = 0;
+
+  for (let pi = 0; pi < schedule.length; pi++) {
+    const phase = schedule[pi];
+    let phaseHtml = `<div class="neet-phase" style="animation-delay:${pi * 0.05}s">`;
+    phaseHtml += `<div class="neet-phase-header">`;
+    phaseHtml += `<div class="neet-phase-title" ${editAttr} onblur="editNeetPhase(${pi},this.innerText)">${escapeHtml(phase.phase)}</div>`;
+    phaseHtml += `<div style="display:flex;gap:6px;align-items:center">`;
+    phaseHtml += `<div class="neet-phase-dates" ${editAttr} onblur="editNeetPhaseDates(${pi},this.innerText)">${escapeHtml(phase.dates)}</div>`;
+    phaseHtml += `<button class="neet-edit-btn neet-edit-control" onclick="event.stopPropagation();deleteNeetPhase(${pi})" title="Remove phase">🗑️</button>`;
+    phaseHtml += `</div></div>`;
+
+    for (let ti = 0; ti < phase.topics.length; ti++) {
+      const topic = phase.topics[ti];
+      const topicKey = `p${pi}_t${ti}`;
+      const topicProgress = progress[topicKey] || {};
+      let topicDone = 0;
+      let topicTotal = topic.subtopics.length;
+
+      phaseHtml += `<div class="neet-subject">`;
+      phaseHtml += `<div class="neet-subject-header">`;
+      phaseHtml += `<div class="neet-subject-name" style="color:${topic.color}">`;
+      phaseHtml += `<span ${editAttr} onblur="editNeetTopic(${pi},${ti},this.innerText)">📖 ${escapeHtml(topic.name)}</span>`;
+      phaseHtml += `</div>`;
+      phaseHtml += `<div style="display:flex;gap:6px;align-items:center">`;
+      if (topic.testDate) phaseHtml += `<div class="neet-subject-test" ${editAttr} onblur="editNeetTopicTest(${pi},${ti},this.innerText)">📝 Test: ${escapeHtml(topic.testDate)}</div>`;
+      phaseHtml += `<button class="neet-edit-btn neet-edit-control" onclick="event.stopPropagation();deleteNeetTopic(${pi},${ti})" title="Remove topic">🗑️</button>`;
+      phaseHtml += `</div></div>`;
+      phaseHtml += `<div class="neet-subtopics">`;
+
+      for (let si = 0; si < topic.subtopics.length; si++) {
+        const st = topic.subtopics[si];
+        const stKey = `p${pi}_t${ti}_s${si}`;
+        const isDone = topicProgress[stKey] || false;
+        if (isDone) topicDone++;
+        totalSubtopics++;
+        if (isDone) doneSubtopics++;
+        phaseHtml += `<div class="neet-subtopic ${isDone ? 'done' : ''}" onclick="toggleNeetSubtopic(${pi},${ti},${si})">`;
+        phaseHtml += `<input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation();toggleNeetSubtopic(${pi},${ti},${si})">`;
+        phaseHtml += `<span ${editAttr} onblur="editNeetSubtopic(${pi},${ti},${si},this.innerText)" onclick="event.stopPropagation()">${escapeHtml(st)}</span>`;
+        phaseHtml += `<button class="neet-edit-btn neet-edit-control" onclick="event.stopPropagation();deleteNeetSubtopic(${pi},${ti},${si})" title="Remove">✕</button>`;
+        phaseHtml += `</div>`;
+      }
+
+      phaseHtml += `</div>`;
+      phaseHtml += `<div style="display:flex;gap:8px;align-items:center;margin-top:6px">`;
+      phaseHtml += `<button class="neet-add-btn neet-edit-control" onclick="addNeetSubtopic(${pi},${ti})">+ Add subtopic</button>`;
+      const pct = topicTotal ? Math.round((topicDone / topicTotal) * 100) : 0;
+      phaseHtml += `<div class="neet-progress" style="flex:1"><div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${topic.color}"></div></div><div class="neet-progress-text">${topicDone}/${topicTotal} (${pct}%)</div></div>`;
+      phaseHtml += `</div>`;
+      phaseHtml += `</div>`;
+    }
+    phaseHtml += `<button class="neet-add-btn neet-edit-control" onclick="addNeetTopic(${pi})" style="margin:8px 0">+ Add topic to this block</button>`;
+    phaseHtml += `</div>`;
+    html += phaseHtml;
+  }
+
+  html += `<button class="neet-add-btn neet-edit-control" onclick="addNeetPhase()" style="width:100%;padding:12px;margin-top:10px;font-size:13px">+ Add new study block</button>`;
+
+  container.innerHTML = html;
+  const overallPct = totalSubtopics ? Math.round((doneSubtopics / totalSubtopics) * 100) : 0;
+  document.getElementById('neet-overall-progress').style.width = overallPct + '%';
+  document.getElementById('neet-overall-text').textContent = `${doneSubtopics}/${totalSubtopics} topics mastered (${overallPct}%)`;
+}
+
+function toggleNeetSubtopic(pi, ti, si) {
+  const progress = DB.get('neet_progress', {});
+  const topicKey = `p${pi}_t${ti}`;
+  if (!progress[topicKey]) progress[topicKey] = {};
+  const stKey = `p${pi}_t${ti}_s${si}`;
+  progress[topicKey][stKey] = !progress[topicKey][stKey];
+  DB.set('neet_progress', progress);
+  renderNeetPlanner();
+}
+
+// ===== NEET EDITING =====
+function editNeetSubtopic(pi, ti, si, newText) {
+  const schedule = getNeetSchedule();
+  schedule[pi].topics[ti].subtopics[si] = newText.trim();
+  saveNeetSchedule(schedule);
+}
+function deleteNeetSubtopic(pi, ti, si) {
+  if (!confirm('Delete this subtopic?')) return;
+  const schedule = getNeetSchedule();
+  schedule[pi].topics[ti].subtopics.splice(si, 1);
+  saveNeetSchedule(schedule);
+  renderNeetPlanner();
+}
+function addNeetSubtopic(pi, ti) {
+  const newSub = prompt('New subtopic name:');
+  if (!newSub || !newSub.trim()) return;
+  const schedule = getNeetSchedule();
+  schedule[pi].topics[ti].subtopics.push(newSub.trim());
+  saveNeetSchedule(schedule);
+  renderNeetPlanner();
+}
+function editNeetTopic(pi, ti, newText) {
+  const schedule = getNeetSchedule();
+  schedule[pi].topics[ti].name = newText.replace(/^📖\s*/, '').trim();
+  saveNeetSchedule(schedule);
+}
+function editNeetTopicTest(pi, ti, newText) {
+  const schedule = getNeetSchedule();
+  schedule[pi].topics[ti].testDate = newText.replace(/^📝\s*Test:\s*/, '').trim();
+  saveNeetSchedule(schedule);
+}
+function deleteNeetTopic(pi, ti) {
+  if (!confirm('Delete this topic and all its subtopics?')) return;
+  const schedule = getNeetSchedule();
+  schedule[pi].topics.splice(ti, 1);
+  saveNeetSchedule(schedule);
+  renderNeetPlanner();
+}
+function addNeetTopic(pi) {
+  const name = prompt('Topic name (e.g. Pharmacology):');
+  if (!name || !name.trim()) return;
+  const schedule = getNeetSchedule();
+  schedule[pi].topics.push({ name: name.trim(), subtopics: ['Overview'], testDate: '', color: '#a78bfa' });
+  saveNeetSchedule(schedule);
+  renderNeetPlanner();
+}
+function editNeetPhase(pi, newText) {
+  const schedule = getNeetSchedule();
+  schedule[pi].phase = newText.trim();
+  saveNeetSchedule(schedule);
+}
+function editNeetPhaseDates(pi, newText) {
+  const schedule = getNeetSchedule();
+  schedule[pi].dates = newText.trim();
+  saveNeetSchedule(schedule);
+}
+function deleteNeetPhase(pi) {
+  if (!confirm('Delete this entire study block?')) return;
+  const schedule = getNeetSchedule();
+  schedule.splice(pi, 1);
+  saveNeetSchedule(schedule);
+  renderNeetPlanner();
+}
+function addNeetPhase() {
+  const phase = prompt('Block name (e.g. Block 7: Medicine):');
+  if (!phase || !phase.trim()) return;
+  const dates = prompt('Dates (e.g. 1-5 August):') || '';
+  const schedule = getNeetSchedule();
+  schedule.push({ phase: phase.trim(), dates: dates.trim(), color: '#a78bfa', topics: [] });
+  saveNeetSchedule(schedule);
+  renderNeetPlanner();
+}
+async function askAIForTopics() {
+  const topic = prompt('What subject do you want AI to suggest subtopics for?\n(e.g. Pharmacology, Surgery, etc.)');
+  if (!topic) return;
+  const btn = document.getElementById('neet-ai-refine-btn');
+  if (btn) btn.textContent = '🤖 Thinking...';
+  try {
+    const prompt = `You are an expert NEET PG medical educator. A student is preparing for NEET PG 2026 and needs a comprehensive list of subtopics for the subject: "${topic}".
+
+Provide ONLY a bulleted list of 10-15 high-yield subtopics that are most important for NEET PG. Each subtopic should be concise (2-5 words). Format as a simple bullet list. No extra commentary.`;
+    const reply = await callAI(prompt, { temperature: 0.5 });
+    const lines = reply.split('\n').map(l => l.replace(/^[-*•]\s*/, '').trim()).filter(l => l && l.length > 2);
+    if (lines.length === 0) { showToast('AI returned no topics. Try again.', 'warn'); return; }
+    const schedule = getNeetSchedule();
+    const pi = prompt(`Which block should I add "${topic}" to?\nEnter block number 1-${schedule.length}:`);
+    const idx = parseInt(pi) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= schedule.length) { showToast('Invalid block number', 'warn'); return; }
+    schedule[idx].topics.push({ name: topic, subtopics: lines, testDate: '', color: '#a78bfa' });
+    saveNeetSchedule(schedule);
+    renderNeetPlanner();
+    showToast(`Added ${topic} with ${lines.length} AI-suggested subtopics! 📚`, 'success');
+  } catch (err) {
+    showToast('AI topic suggestion failed: ' + err.message, 'warn');
+  } finally {
+    if (btn) btn.textContent = '🤖 AI Suggest Topics';
+  }
+}
+
+function calculateNeetProgress() {
+  const schedule = getNeetSchedule();
+  const progress = DB.get('neet_progress', {});
+  let total = 0, done = 0;
+  for (let pi = 0; pi < schedule.length; pi++) {
+    for (let ti = 0; ti < schedule[pi].topics.length; ti++) {
+      const topic = schedule[pi].topics[ti];
+      const topicKey = `p${pi}_t${ti}`;
+      const tp = progress[topicKey] || {};
+      for (let si = 0; si < topic.subtopics.length; si++) {
+        total++;
+        if (tp[`p${pi}_t${ti}_s${si}`]) done++;
+      }
+    }
+  }
+  return total ? Math.round((done / total) * 100) : 0;
+}
+
+function loadNeetProgress() { DB.get('neet_progress', {}); }
+
+async function neetAIAsk(promptText) {
+  const el = document.getElementById('neet-ai-response');
+  el.classList.remove('hidden');
+  el.innerHTML = '<span style="color:var(--text-dim)">🤖 Thinking...</span>';
+  if (!settings.apiKey) {
+    el.innerHTML = '<span style="color:var(--text-dim)">Please add your API key in Settings (⚙️) to use the AI study assistant. Get a free key at aistudio.google.com/app/apikey</span>';
+    return;
+  }
+  const fullPrompt = `You are an expert NEET PG tutor and medical educator. A student asks: "${promptText}"
+
+Provide a clear, structured, and encouraging response. Use bullet points where helpful. Keep it concise but comprehensive. If explaining a medical topic, use simple analogies. End with an encouraging note.`;
+  try {
+    const reply = await callAI(fullPrompt, { temperature: 0.7 });
+    el.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${escapeHtml(reply)}</pre>`;
+  } catch (err) {
+    el.innerHTML = '<span style="color:#dc2626">⚠️ ' + escapeHtml(err.message) + '</span>';
+  }
+}
+
+// ===== STUDY TIMER =====
+function setTimer(minutes) {
+  studyTimerSeconds = minutes * 60;
+  updateTimerDisplay();
+  if (studyTimerRunning) { clearInterval(studyTimerInterval); studyTimerRunning = false; document.getElementById('timer-btn').textContent = '▶ Start'; }
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(studyTimerSeconds / 60).toString().padStart(2, '0');
+  const s = (studyTimerSeconds % 60).toString().padStart(2, '0');
+  document.getElementById('study-timer').textContent = `${m}:${s}`;
+}
+
+function toggleTimer() {
+  const btn = document.getElementById('timer-btn');
+  if (studyTimerRunning) {
+    clearInterval(studyTimerInterval);
+    studyTimerRunning = false;
+    btn.textContent = '▶ Resume';
+  } else {
+    studyTimerRunning = true;
+    btn.textContent = '⏸ Pause';
+    studyTimerInterval = setInterval(() => {
+      studyTimerSeconds--;
+      updateTimerDisplay();
+      if (studyTimerSeconds <= 0) {
+        clearInterval(studyTimerInterval);
+        studyTimerRunning = false;
+        btn.textContent = '▶ Start';
+        showToast('⏰ Timer complete! Great work! 🎉', 'success');
+        if (settings.voiceEnabled) speakText('Timer complete! You did great! Take a well-deserved break.');
+      }
+    }, 1000);
+  }
+}
+
+// ===== MOOD =====
+function selectMoodOrbit(el) {
+  document.querySelectorAll('.mood-orbit-item').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  currentMood = el.dataset.mood;
+  const center = document.getElementById('mood-center-display');
+  const labels = { amazing: 'Amazing!', good: 'Good 😊', okay: 'Okay', low: 'Feeling low', terrible: 'Terrible 😫' };
+  center.textContent = labels[currentMood] || currentMood;
+  center.classList.add('has-mood');
+}
+
+function reopenMoodSelector() {
+  document.getElementById('mood-selector-card').classList.remove('hidden');
+  document.getElementById('mood-summary-card').classList.add('hidden');
+}
+
+function saveMood() {
+  if (!currentMood) { showToast('Please select a mood first', 'warn'); return; }
+  const entries = DB.get('moods', []);
+  const note = document.getElementById('mood-note').value.trim();
+  entries.push({ date: Date.now(), mood: currentMood, note });
+  DB.set('moods', entries);
+  const last = entries.length > 1 ? new Date(entries[entries.length - 2].date).toDateString() : null;
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+  let streak = DB.get('streak', 0);
+  if (last === yesterday || last === today) streak++;
+  else if (last !== today) streak = 1;
+  DB.set('streak', streak);
+  document.getElementById('mood-note').value = '';
+  document.querySelectorAll('.mood-orbit-item').forEach(b => b.classList.remove('on'));
+  document.getElementById('mood-center-display').textContent = 'Tap a mood';
+  document.getElementById('mood-center-display').classList.remove('has-mood');
+  // Show summary, hide selector
+  const emojis = { amazing: '🤩', good: '😊', okay: '😐', low: '😔', terrible: '😫' };
+  const labels = { amazing: 'Amazing', good: 'Good', okay: 'Okay', low: 'Low', terrible: 'Terrible' };
+  document.getElementById('mood-summary-emoji').textContent = emojis[currentMood] || '😐';
+  document.getElementById('mood-summary-label').textContent = labels[currentMood] || currentMood;
+  document.getElementById('mood-summary-time').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('mood-selector-card').classList.add('hidden');
+  document.getElementById('mood-summary-card').classList.remove('hidden');
+  currentMood = '';
+  renderMoodList();
+  renderDashboard();
+  showToast('Mood saved! Taking care of yourself is brave. 💗', 'success');
+}
+
+function saveCheckup() {
+  const sleep = document.getElementById('sleep-quality').value;
+  const eat = document.getElementById('eat-quality').value;
+  const stress = document.getElementById('stress-source').value.trim();
+  const forward = document.getElementById('looking-forward').value.trim();
+  if (!sleep || !eat) { showToast('Please answer the first two questions', 'warn'); return; }
+  const checkups = DB.get('checkups', []);
+  checkups.push({ date: Date.now(), sleep, eat, stress, forward });
+  DB.set('checkups', checkups);
+  document.getElementById('sleep-quality').value = '';
+  document.getElementById('eat-quality').value = '';
+  document.getElementById('stress-source').value = '';
+  document.getElementById('looking-forward').value = '';
+  showToast('Check-up saved. Self-awareness is the first step to growth. 💪', 'success');
+}
+
+function renderMoodList() {
+  const entries = DB.get('moods', []);
+  const box = document.getElementById('mood-list');
+  if (!entries.length) { box.innerHTML = '<p style="color:var(--text-dim);font-size:13px">No entries yet. Start checking in!</p>'; return; }
+  box.innerHTML = entries.slice().reverse().map(e => `
+    <div class="journal-entry">
+      <div class="date">${new Date(e.date).toLocaleString()}</div>
+      <span class="mood-tag">${moodEmoji(e.mood)} ${e.mood}</span>
+      ${e.note ? `<p>${escapeHtml(e.note)}</p>` : ''}
+    </div>
+  `).join('');
+}
+
+// ===== JOURNAL =====
+function saveJournal() {
+  const text = document.getElementById('journal-text').value.trim();
+  if (!text) { showToast('Write something first', 'warn'); return; }
+  const entries = DB.get('journal', []);
+  entries.unshift({ date: Date.now(), text });
+  DB.set('journal', entries);
+  document.getElementById('journal-text').value = '';
+  document.getElementById('journal-prompt').classList.add('hidden');
+  renderJournal();
+  showToast('Entry saved. Your thoughts are safe here. 📓', 'success');
+}
+
+function renderJournal() {
+  const entries = DB.get('journal', []);
+  const box = document.getElementById('journal-list');
+  if (!entries.length) { box.innerHTML = '<p style="color:var(--text-dim);font-size:13px">No entries yet. Start writing — your future self will thank you. 📖</p>'; return; }
+  box.innerHTML = entries.map(e => `
+    <div class="journal-entry">
+      <div class="date">${new Date(e.date).toLocaleString()}</div>
+      <p>${escapeHtml(e.text)}</p>
+    </div>
+  `).join('');
+}
+
+function getJournalPrompt() {
+  const el = document.getElementById('journal-prompt');
+  const prompts = [
+    "What are three things that went well today, no matter how small? ✨",
+    "Write a letter to your future self. What do you want them to remember about who you are right now? 💌",
+    "What is one fear you'd like to release? What would your life look like without it? 🦋",
+    "Describe a moment today when you felt proud of yourself. 🌟",
+    "What does self-love look like for you? What's one way you can practice it this week? 💗",
+    "If your anxiety had a voice, what would it say? Now write a compassionate response to it. 🪞",
+    "What are you most grateful for in your body right now? 🙏",
+    "Write about a time you overcame something difficult. What strength did you discover? 💪",
+    "What would you tell a friend who is going through exactly what you're going through? Now say that to yourself. 🌸",
+    "Describe your ideal day — not what you think you should do, but what would truly make you happy. ☀️"
+  ];
+  el.textContent = prompts[Math.floor(Math.random() * prompts.length)];
+  el.classList.remove('hidden');
+}
+
+// ===== WORKOUT =====
+function addExercise() {
+  exercises.push({ name: '', sets: '', reps: '', weight: '' });
+  renderExercises();
+}
+
+function renderExercises() {
+  const box = document.getElementById('exercise-list');
+  box.innerHTML = exercises.map((ex, i) => `
+    <div class="exercise-row">
+      <input placeholder="Exercise" value="${escapeHtml(ex.name)}" onchange="exercises[${i}].name=this.value">
+      <input type="number" placeholder="Sets" value="${ex.sets}" onchange="exercises[${i}].sets=this.value">
+      <input type="number" placeholder="Reps" value="${ex.reps}" onchange="exercises[${i}].reps=this.value">
+      <input type="number" placeholder="kg" value="${ex.weight}" onchange="exercises[${i}].weight=this.value">
+      <button onclick="exercises.splice(${i},1);renderExercises()">×</button>
+    </div>
+  `).join('');
+}
+
+function finishWorkout() {
+  if (!exercises.length || !exercises.some(e => e.name)) { showToast('Add at least one exercise', 'warn'); return; }
+  const workouts = DB.get('workouts', []);
+  workouts.push({ date: Date.now(), exercises: [...exercises] });
+  DB.set('workouts', workouts);
+  const weekAgo = Date.now() - 7 * 86400000;
+  const thisWeek = workouts.filter(w => w.date > weekAgo).length;
+  DB.set('workouts_this_week', thisWeek);
+  exercises = [];
+  renderExercises();
+  document.getElementById('active-workout-info').innerHTML = '<p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Build your workout below or generate an AI plan.</p>';
+  showToast('Workout logged! You\'re getting stronger every day. 💪', 'success');
+  renderDashboard();
+}
+
+function startWorkout() { exercises = []; renderExercises(); }
+
+const BUILT_IN_PLANS = [
+  { name: 'Beginner Full Body', days: [
+    { day: 'Monday', items: ['Squats — 3×12', 'Push-ups — 3×10', 'Lunges — 3×12 each', 'Plank — 3×30s'] },
+    { day: 'Wednesday', items: ['Deadlifts — 3×10', 'Dumbbell Press — 3×12', 'Glute Bridges — 3×15', 'Side Plank — 3×20s each'] },
+    { day: 'Friday', items: ['Goblet Squats — 3×12', 'Rows — 3×12', 'Step-ups — 3×10 each', 'Bird Dog — 3×10 each'] }
+  ]},
+  { name: 'Study Break Energizer (10 min)', days: [
+    { day: 'Anytime', items: ['Jumping Jacks — 45s', 'Push-ups — 30s', 'High Knees — 45s', 'Plank — 30s', 'Stretch — 2 min'] }
+  ]},
+  { name: 'Strength Builder', days: [
+    { day: 'Monday (Push)', items: ['Bench Press — 4×8', 'Overhead Press — 3×10', 'Tricep Dips — 3×12', 'Lateral Raises — 3×15'] },
+    { day: 'Wednesday (Pull)', items: ['Pull-ups — 4×6', 'Barbell Rows — 4×8', 'Bicep Curls — 3×12', 'Face Pulls — 3×15'] },
+    { day: 'Friday (Legs)', items: ['Back Squats — 4×8', 'Romanian Deadlifts — 4×10', 'Leg Press — 3×12', 'Calf Raises — 3×20'] }
+  ]}
+];
+
+function renderWorkoutPlans() {
+  const box = document.getElementById('saved-plans');
+  const saved = DB.get('workout_plans', BUILT_IN_PLANS);
+  box.innerHTML = saved.map((plan, pi) => `
+    <div class="plan-day">
+      <h4>📋 ${escapeHtml(plan.name)} <button class="secondary" style="font-size:11px;padding:4px 10px" onclick="loadPlan(${pi})">Load Plan</button></h4>
+      ${plan.days.map(d => `<div style="margin:8px 0;padding:8px;background:rgba(0,0,0,.03);border-radius:8px"><b style="color:var(--lavender);font-size:11px">${d.day}</b><ul>${d.items.map(it => `<li>${escapeHtml(it)}</li>`).join('')}</ul></div>`).join('')}
+    </div>
+  `).join('');
+}
+
+function loadPlan(pi) {
+  const plans = DB.get('workout_plans', BUILT_IN_PLANS);
+  const plan = plans[pi];
+  const today = new Date().getDay();
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const todayName = dayNames[today];
+  const todayPlan = plan.days.find(d => d.day === todayName) || plan.days[0];
+  exercises = todayPlan.items.map(it => {
+    const m = it.match(/^(.+?)\s*[—-]\s*(\d+)×(\d+).*/);
+    return m ? { name: m[1], sets: m[2], reps: m[3], weight: '' } : { name: it, sets: '', reps: '', weight: '' };
+  });
+  renderExercises();
+  document.getElementById('active-workout-info').innerHTML = `<p style="color:var(--lavender);font-size:13px">📋 Loaded: <b>${escapeHtml(plan.name)}</b> — ${todayPlan.day}</p>`;
+  showTab('workout');
+}
+
+async function generateWorkoutPlan() {
+  const goal = document.getElementById('workout-goal').value.trim();
+  if (!goal) { showToast('Describe your goal first', 'warn'); return; }
+  const result = document.getElementById('ai-plan-result');
+  result.classList.remove('hidden');
+  result.innerHTML = '<span style="color:var(--text-dim)">🤖 Creating your personalized plan...</span>';
+  if (!settings.apiKey) {
+    result.innerHTML = '<span style="color:var(--text-dim)">Please add your API key in Settings to use AI generation. For now, try one of the built-in plans above!</span>';
+    return;
+  }
+  const prompt = `You are a certified personal trainer. Create a personalized workout plan based on this goal: "${goal}".
+
+Format as a structured plan with days of the week. For each day, list exercises with sets and reps. Keep it realistic and encouraging. If limited time, create shorter workouts. If no equipment, focus on bodyweight. Include rest days. End with an encouraging message. Keep under 400 words.`;
+  try {
+    const text = await callAI(prompt, { temperature: 0.7 });
+    result.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${escapeHtml(text)}</pre>`;
+  } catch (err) {
+    result.innerHTML = '<span style="color:#dc2626">Sorry, I couldn\'t generate a plan right now. Please check your API key.</span>';
+  }
+}
+
+// ===== BREATHING =====
+const BREATH_MODES = {
+  calm: { inhale: 4, hold: 7, exhale: 8, label: 'Calm (4-7-8)' },
+  box: { inhale: 4, hold: 4, exhale: 4, hold2: 4, label: 'Box (4-4-4-4)' },
+  energy: { inhale: 2, hold: 1, exhale: 2, label: 'Energy (2-1-2)' }
+};
+
+function setBreathMode(mode) {
+  breathingMode = mode;
+  ['calm', 'box', 'energy'].forEach(m => {
+    const btn = document.getElementById('btn-' + m);
+    btn.style.background = ''; btn.style.borderColor = ''; btn.style.color = '';
+  });
+  const btn = document.getElementById('btn-' + mode);
+  btn.style.background = 'var(--sky-soft)';
+  btn.style.borderColor = 'var(--sky)';
+  btn.style.color = 'var(--sky)';
+  document.getElementById('breath-label').textContent = BREATH_MODES[mode].label + ' — Press Start';
+}
+
+function toggleBreathing() {
+  const circle = document.getElementById('breath-circle');
+  const label = document.getElementById('breath-label');
+  const btn = document.getElementById('breath-toggle');
+  if (breathingActive) {
+    breathingActive = false;
+    clearTimeout(breathingTimer);
+    circle.style.transition = '';
+    circle.style.transform = 'scale(1)';
+    btn.textContent = '▶ Resume';
+    label.textContent = BREATH_MODES[breathingMode].label + ' — Paused';
+    return;
+  }
+  breathingActive = true;
+  btn.textContent = '⏸ Pause';
+  runBreathCycle();
+}
+
+function runBreathCycle() {
+  if (!breathingActive) return;
+  const circle = document.getElementById('breath-circle');
+  const label = document.getElementById('breath-label');
+  const mode = BREATH_MODES[breathingMode];
+  label.textContent = 'Breathe In...';
+  circle.style.transition = `transform ${mode.inhale}s ease-in-out`;
+  circle.style.transform = 'scale(1.35)';
+  breathingTimer = setTimeout(() => {
+    if (!breathingActive) return;
+    if (mode.hold) {
+      label.textContent = 'Hold...';
+      breathingTimer = setTimeout(() => { if (!breathingActive) return; doExhale(circle, label, mode); }, mode.hold * 1000);
+    } else {
+      doExhale(circle, label, mode);
+    }
+  }, mode.inhale * 1000);
+}
+
+function doExhale(circle, label, mode) {
+  label.textContent = 'Breathe Out...';
+  circle.style.transition = `transform ${mode.exhale}s ease-in-out`;
+  circle.style.transform = 'scale(1)';
+  breathingTimer = setTimeout(() => {
+    if (!breathingActive) return;
+    if (mode.hold2) {
+      label.textContent = 'Hold...';
+      breathingTimer = setTimeout(() => { if (breathingActive) runBreathCycle(); }, mode.hold2 * 1000);
+    } else {
+      runBreathCycle();
+    }
+  }, mode.exhale * 1000);
+}
+
+// ===== COUNSELOR / AI CHAT =====
+function escapeHtml(t) {
+  const d = document.createElement('div');
+  d.textContent = t;
+  return d.innerHTML;
+}
+
+function formatMessage(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  html = html.replace(/\*(.+?)\*/g, '<i>$1</i>');
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function restoreChatHistory() {
+  const chat = document.getElementById('counselor-chat');
+  chat.innerHTML = '';
+  for (const msg of chatHistory) {
+    if (msg.role === 'user') chat.innerHTML += `<div class="msg user">${escapeHtml(msg.content)}</div>`;
+    else if (msg.role === 'model' || msg.role === 'assistant') chat.innerHTML += `<div class="msg coach"><b>Sheena 💗</b>${formatMessage(msg.content)}</div>`;
+    else if (msg.role === 'announce') chat.innerHTML += `<div class="msg announce">${escapeHtml(msg.content)}</div>`;
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function addChatMessage(role, content, type = 'msg') {
+  const chat = document.getElementById('counselor-chat');
+  const div = document.createElement('div');
+  if (type === 'announce') { div.className = 'msg announce'; div.textContent = content; }
+  else if (role === 'user') { div.className = 'msg user'; div.textContent = content; }
+  else { div.className = 'msg coach'; div.innerHTML = '<b>Sheena 💗</b>' + formatMessage(content); }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function counselorPreset(text) {
+  document.getElementById('counselor-input').value = text;
+  sendCounselor();
+}
+
+function toggleVoice() {
+  voiceOn = !voiceOn;
+  document.getElementById('voice-toggle-btn').textContent = voiceOn ? '🔊 Voice: On' : '🔊 Voice: Off';
+}
+
+function clearChat() {
+  if (!confirm('Clear this conversation? Your journal and mood data will stay safe.')) return;
+  chatHistory = [];
+  DB.set('chat_history', chatHistory);
+  document.getElementById('counselor-chat').innerHTML = '<div class="msg coach"><b>Sheena 💗</b>Hi there! I\'m Sheena, your wellness companion. How are you feeling right now? What\'s on your mind?</div>';
+}
+
+// ===== CRISIS DETECTION =====
+const CRISIS_KEYWORDS = [
+  'suicide', 'kill myself', 'end my life', 'want to die', 'better off dead',
+  'self-harm', 'cutting myself', 'hurt myself', 'end it all',
+  'not worth living', 'no reason to live', 'can\'t go on',
+  'abuse', 'being abused', 'domestic violence',
+  'eating disorder', 'starving myself', 'purge', 'binge and purge',
+  'overdose', 'pills to die'
+];
+
+function detectCrisis(text) {
+  const lower = text.toLowerCase();
+  return CRISIS_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function showCrisisBanner() {
+  document.getElementById('crisis-banner').classList.add('show');
+}
+
+function dismissCrisis() {
+  document.getElementById('crisis-banner').classList.remove('show');
+}
+
+// ===== AI API =====
+const SYSTEM_PROMPT = `You are Sheena, a warm, supportive AI friend and companion for a medical student preparing for NEET PG. You are NOT a licensed therapist, doctor, or mental health professional. You are her caring digital best friend who helps with everything — emotions, studies, fitness, nutrition, sleep, motivation, and life in general.
+
+YOU HAVE FULL MEMORY: You can see the user's recent mood logs, meals, water intake, sleep data, workouts, journal entries, and NEET PG study progress. Use this information to personalize every response. If they slept poorly, be gentler. If they ate well and worked out, celebrate that. If their NEET progress is low, motivate them without pressure.
+
+YOUR PERSONALITY:
+- Warm, empathetic, and non-judgmental — like a best friend who truly cares
+- You validate feelings before offering suggestions
+- You use gentle humor when appropriate
+- You celebrate small wins enthusiastically
+- You are honest about your limitations as an AI
+- You are fun, encouraging, and genuinely interested in her life
+
+YOUR CAPABILITIES (you do ALL of these):
+- Emotional support, active listening, and mental wellness coaching
+- NEET PG study partner: explain concepts, quiz her, create mnemonics, review topics, motivate
+- Workout and fitness buddy: suggest exercises, celebrate consistency, help with form tips
+- Nutrition guide: comment on meals, suggest healthy options, celebrate good choices
+- Sleep coach: give wind-down tips, celebrate good sleep, gently nudge when sleep is poor
+- Life friend: chat about anything — relationships, family, hobbies, dreams, fears
+- Productivity partner: help with study schedules, focus techniques, time management
+- Motivation and confidence building
+- Guided breathing, grounding, gratitude, and mindfulness practices
+- CBT-inspired reframing techniques
+
+SAFETY RULES:
+- If someone mentions self-harm, suicide, abuse, or severe crisis: IMMEDIATELY encourage them to contact 988 (Suicide & Crisis Lifeline), text HOME to 741741, or call 911. Do NOT try to handle crises alone.
+- Never diagnose medical or mental health conditions.
+- Never prescribe medication.
+- Always remind users that you are an AI, not a human professional.
+- Encourage human connection: "Have you shared this with someone you trust?"
+- If someone seems stuck in negative thought loops, gently suggest professional help.
+
+CONVERSATION STYLE:
+- Keep responses concise (2-4 short paragraphs max)
+- Use emojis naturally and sparingly
+- Ask thoughtful follow-up questions
+- Remember context from the conversation AND the user's logged data
+- Reference specific things you know: "I noticed you didn't sleep well last night..." or "You've been crushing your water goals!"
+- End with an encouraging closing when appropriate
+- Adapt your tone: be a study buddy when she's learning, a cheerleader when she's down, a coach when she's working out
+
+When the user shares something personal, always start with validation: "I hear you," "That sounds really hard," or "Thank you for trusting me with that."
+
+TOOL COMMANDS — You can log data for the user by including a JSON command block at the VERY END of your response, after your normal message. Only use this when the user explicitly asks you to log something or when they tell you they just did something (ate, slept, worked out, etc.). Example:
+
+{"tool":"log_mood","mood":"good","note":"Feeling positive after study session"}
+
+Available tools:
+- log_mood: mood (amazing/good/okay/low/terrible), note (optional string)
+- log_meal: description (string), calories (number, optional), moodAfter (string, optional), productivity (1-10, optional)
+- log_water: glasses (number)
+- log_sleep: hours (number), quality (excellent/good/fair/poor), notes (optional string)
+- log_workout: exercises (array of strings), durationMinutes (number, optional)
+- log_journal: text (string)
+- mark_study_done: topicName (string), subtopicName (string)
+
+Always respond with your normal warm message first, then add the JSON tool command on its own line at the end if needed.`;
+
+function resolveModel() {
+  if (settings.model === 'custom' && settings.customModel) return settings.customModel;
+  if (settings.model && settings.model !== 'custom') return settings.model;
+  return getDefaultModel(settings.provider);
+}
+
+function stopGeneration() {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+  // Also stop Android TTS if speaking
+  if (window.SHIMSAndroid && window.SHIMSAndroid.stopSpeaking) {
+    window.SHIMSAndroid.stopSpeaking();
+  }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  hideStopButton();
+  setVoiceState('idle');
+}
+
+function showStopButton() {
+  const btn = document.getElementById('conv-stop-btn');
+  if (btn) btn.style.display = 'inline-flex';
+  const sendBtn = document.getElementById('conv-send');
+  if (sendBtn) sendBtn.style.display = 'none';
+}
+
+function hideStopButton() {
+  const btn = document.getElementById('conv-stop-btn');
+  if (btn) btn.style.display = 'none';
+  const sendBtn = document.getElementById('conv-send');
+  if (sendBtn) sendBtn.style.display = 'inline-flex';
+}
+
+async function callAI(prompt, opts = {}) {
+  const { maxTokens, temperature = 0.7 } = opts;
+  const provider = settings.provider;
+  const apiKey = settings.apiKey;
+  const model = resolveModel();
+  if (!model) throw new Error('No model selected. Go to Settings and pick a model.');
+  if (!apiKey) throw new Error('No API key. Add your key in Settings.');
+
+  // Cancel any previous request
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+  const signal = currentAbortController.signal;
+
+  try {
+    if (provider === 'gemini') return await callGemini(prompt, model, apiKey, maxTokens, temperature, signal);
+    if (provider === 'anthropic') return await callAnthropic(prompt, model, apiKey, maxTokens, temperature, signal);
+    if (provider === 'openai') return await callOpenAI(prompt, model, apiKey, maxTokens, temperature, signal);
+    throw new Error('Unknown provider: ' + provider);
+  } finally {
+    currentAbortController = null;
+    hideStopButton();
+  }
+}
+
+function getDefaultModel(provider) {
+  if (provider === 'gemini') return 'gemini-2.0-flash';
+  if (provider === 'anthropic') return 'claude-3-5-haiku-20241022';
+  if (provider === 'openai') return 'gpt-4o-mini';
+  return '';
+}
+
+async function callGemini(prompt, model, apiKey, maxTokens, temperature, signal) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const genConfig = { temperature };
+  if (maxTokens) genConfig.maxOutputTokens = maxTokens;
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: genConfig,
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' }
+    ]
+  };
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '{}');
+    let errMsg = `Gemini API error: ${res.status}`;
+    try { const err = JSON.parse(text); errMsg = err.error?.message || err.message || errMsg; } catch (e) {}
+    throw new Error(errMsg);
+  }
+  const data = await res.json();
+  if (data.promptFeedback?.blockReason) {
+    throw new Error(`Response blocked by Gemini safety filter: ${data.promptFeedback.blockReason}. Try a different prompt or model.`);
+  }
+  if (!data.candidates || data.candidates.length === 0) {
+    throw new Error('Gemini returned no response. The model may have refused to answer. Try again or switch models.');
+  }
+  const candidate = data.candidates[0];
+  if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+    throw new Error(`Gemini stopped early: ${candidate.finishReason}. Try a shorter prompt or different model.`);
+  }
+  return candidate.content?.parts?.[0]?.text || '';
+}
+
+async function callGeminiMultimodal(base64Image, promptText) {
+  const model = resolveModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: promptText }, { inline_data: { mime_type: 'image/jpeg', data: base64Image } }] }],
+    generationConfig: { temperature: 0.3 },
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' }
+    ]
+  };
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '{}');
+    let errMsg = `Gemini API error: ${res.status}`;
+    try { const err = JSON.parse(text); errMsg = err.error?.message || err.message || errMsg; } catch (e) {}
+    throw new Error(errMsg);
+  }
+  const data = await res.json();
+  if (data.promptFeedback?.blockReason) {
+    throw new Error(`Response blocked by Gemini safety filter: ${data.promptFeedback.blockReason}`);
+  }
+  if (!data.candidates || data.candidates.length === 0) {
+    throw new Error('Gemini returned no response for image analysis.');
+  }
+  return data.candidates[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function callAnthropic(prompt, model, apiKey, maxTokens, temperature, signal) {
+  const body = { model, temperature, messages: [{ role: 'user', content: prompt }] };
+  if (maxTokens) body.max_tokens = maxTokens; else body.max_tokens = 4096;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error?.message || `Anthropic API error: ${res.status}`); }
+  const data = await res.json();
+  return data.content?.[0]?.text || '';
+}
+
+async function callOpenAI(prompt, model, apiKey, maxTokens, temperature, signal) {
+  const body = { model, temperature, messages: [{ role: 'user', content: prompt }] };
+  if (maxTokens) body.max_tokens = maxTokens;
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error?.message || `OpenAI API error: ${res.status}`); }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// ===== SEND COUNSELOR MESSAGE =====
+async function sendCounselor() {
+  const input = document.getElementById('counselor-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (detectCrisis(text)) {
+    showCrisisBanner();
+    addChatMessage('announce', '🆘 I noticed you might be going through something very difficult. Your safety matters most. Please reach out to 988 (Suicide & Crisis Lifeline), text HOME to 741741, or call 911 if you\'re in immediate danger. You don\'t have to go through this alone.');
+    input.value = '';
+    return;
+  }
+
+  addChatMessage('user', text);
+  chatHistory.push({ role: 'user', content: text, date: Date.now() });
+  input.value = '';
+
+  if (!settings.apiKey) {
+    addChatMessage('announce', '🔑 Please add your API key in Settings (⚙️) to chat with the AI counselor. Get a free Gemini key at aistudio.google.com/app/apikey');
+    return;
+  }
+
+  const contextMessages = chatHistory.slice(-20);
+  let conversationContext = '';
+  for (const msg of contextMessages) {
+    if (msg.role === 'user') conversationContext += `User: ${msg.content}\n`;
+    else if (msg.role === 'model' || msg.role === 'assistant') conversationContext += `Sheena: ${msg.content}\n`;
+  }
+
+  const contextData = getCrossAppContext();
+  const langInstr = getLangInstructions();
+
+  const prompt = `${SYSTEM_PROMPT}${langInstr}\n\nCONVERSATION HISTORY:\n${conversationContext}\n${contextData}\n\nUser just said: "${text}"\n\nRespond as Sheena. Use the context above to personalize your response — reference specific things you know about the user.`;
+
+  const chat = document.getElementById('counselor-chat');
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'msg coach';
+  typingDiv.id = 'typing-indicator';
+  typingDiv.innerHTML = '<b>Sheena 💗</b><span style="color:var(--text-dim)">Thinking...</span>';
+  chat.appendChild(typingDiv);
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    let reply = await callAI(prompt, { temperature: 0.8 });
+    if (!reply || !reply.trim()) {
+      addChatMessage('announce', '⚠️ Sheena returned an empty response. Try again or switch models in Settings.');
+      return;
+    }
+    reply = executeAITools(reply);
+    if (reply) {
+      addChatMessage('model', reply);
+      chatHistory.push({ role: 'model', content: reply, date: Date.now() });
+      DB.set('chat_history', chatHistory);
+      if (voiceOn || settings.voiceEnabled) speakText(reply);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      addChatMessage('announce', '⏹ Stopped.');
+      return;
+    }
+    console.error('Counselor error:', err);
+    addChatMessage('announce', '⚠️ ' + (err.message || 'Something went wrong. Check your API key and internet connection.'));
+  } finally {
+    document.getElementById('typing-indicator')?.remove();
+  }
+}
+
+// ===== CROSS-APP CONTEXT (full memory for AI) =====
+function getCrossAppContext() {
+  let contextData = '';
+
+  // Mood patterns & trends
+  const moods = DB.get('moods', []);
+  if (moods.length > 0) {
+    const recent = moods.slice(-7);
+    const moodCounts = {};
+    recent.forEach(m => { moodCounts[m.mood] = (moodCounts[m.mood] || 0) + 1; });
+    const mostCommon = Object.entries(moodCounts).sort((a,b) => b[1]-a[1])[0];
+    contextData += `\n\nMOOD PATTERN (last 7 days): ${recent.length} check-ins. Most common: ${mostCommon ? mostCommon[0] : 'N/A'}.`;
+    contextData += '\nRecent moods:\n' + recent.slice(-3).map(m => `- ${new Date(m.date).toLocaleDateString()}: ${m.mood}${m.note ? ' — ' + m.note : ''}`).join('\n');
+  }
+
+  // Nutrition patterns
+  const meals = DB.get('meals', []);
+  if (meals.length > 0) {
+    const recent = meals.slice(-5);
+    const todayCals = meals.filter(m => new Date(m.date).toDateString() === new Date().toDateString()).reduce((s,m) => s+(m.calories||0),0);
+    contextData += `\n\nNUTRITION: ${meals.length} meals logged total. Today's calories: ~${todayCals}kcal.`;
+    contextData += '\nRecent meals:\n' + recent.map(m => `- ${m.description.substring(0,40)}${m.calories?', '+m.calories+'kcal':''}${m.moodAfter?', felt '+m.moodAfter:''}`).join('\n');
+  }
+
+  // Hydration streak
+  const waterLog = DB.get('water_log', {});
+  const today = new Date().toDateString();
+  const todayWater = waterLog[today] || 0;
+  const waterGoal = DB.get('water_goal', 8);
+  const waterStreak = DB.get('water_streak', 0);
+  contextData += `\n\nHYDRATION: ${todayWater}/${waterGoal} glasses today. Streak: ${waterStreak} days.`;
+
+  // Sleep patterns
+  const sleepLog = DB.get('sleep_log', []);
+  if (sleepLog.length > 0) {
+    const recent = sleepLog.slice(-3);
+    const avgSleep = (recent.reduce((s,l) => s+(parseFloat(l.duration)||0),0) / recent.length).toFixed(1);
+    contextData += `\n\nSLEEP (last ${recent.length} nights): avg ${avgSleep} hrs.`;
+    contextData += '\n' + recent.map(l => `- ${l.duration}h, quality: ${l.quality}${l.notes?', notes: '+l.notes.slice(0,30):''}`).join('\n');
+  }
+
+  // Workout consistency
+  const workouts = DB.get('workouts', []);
+  if (workouts.length > 0) {
+    const last7 = workouts.filter(w => Date.now() - w.date < 7*86400000);
+    const last = workouts[workouts.length - 1];
+    contextData += `\n\nWORKOUTS: ${workouts.length} total. ${last7.length} in last 7 days. Last: ${new Date(last.date).toLocaleDateString()} (${last.exercises.length} exercises).`;
+  }
+
+  // NEET progress
+  const neetProg = calculateNeetProgress();
+  const neetProgressData = DB.get('neet_progress', {});
+  const completedTopics = Object.values(neetProgressData).flatMap(Object.values).filter(Boolean).length;
+  contextData += `\n\nNEET PG: ${neetProg}% complete. ${completedTopics} subtopics mastered.`;
+
+  // Journal insights
+  const journal = DB.get('journal', []);
+  if (journal.length > 0) {
+    const recent = journal.slice(0, 3);
+    contextData += `\n\nJOURNAL (${journal.length} entries):`;
+    contextData += '\n' + recent.map(j => `- ${new Date(j.date).toLocaleDateString()}: "${j.text.slice(0,60)}${j.text.length>60?'...':''}"`).join('\n');
+  }
+
+  // Checkup data
+  const checkups = DB.get('checkups', []);
+  if (checkups.length > 0) {
+    const last = checkups[checkups.length - 1];
+    contextData += `\n\nLAST CHECKUP: Sleep: ${last.sleep}, Eating: ${last.eat}${last.stress?', Stress: '+last.stress:''}${last.forward?', Looking forward to: '+last.forward:''}`;
+  }
+
+  // Collective intelligence summary
+  const streak = DB.get('streak', 0);
+  contextData += `\n\nOVERALL STREAK: ${streak} days of consistent check-ins.`;
+
+  return contextData;
+}
+
+// ===== AI TOOL EXECUTION =====
+function executeAITools(reply) {
+  if (!reply) return reply;
+  // Look for JSON tool command at the end of the response
+  const lines = reply.trim().split('\n');
+  const lastLine = lines[lines.length - 1].trim();
+  if (!lastLine.startsWith('{') || !lastLine.endsWith('}')) return reply;
+  
+  let cmd;
+  try { cmd = JSON.parse(lastLine); } catch (e) { return reply; }
+  if (!cmd || !cmd.tool) return reply;
+  
+  try {
+    switch (cmd.tool) {
+      case 'log_mood':
+        if (cmd.mood) {
+          const entries = DB.get('moods', []);
+          entries.push({ date: Date.now(), mood: cmd.mood, note: cmd.note || '' });
+          DB.set('moods', entries);
+          showToast(`Mood logged: ${cmd.mood} 💗`, 'success');
+          renderMoodList(); renderDashboard();
+        }
+        break;
+      case 'log_meal':
+        if (cmd.description) {
+          const meals = DB.get('meals', []);
+          meals.push({ date: Date.now(), description: cmd.description, calories: cmd.calories || 0, moodAfter: cmd.moodAfter || '', productivity: cmd.productivity || 5 });
+          DB.set('meals', meals);
+          showToast('Meal logged! 🍎', 'success');
+          renderFoodList(); renderDashboard();
+        }
+        break;
+      case 'log_water':
+        if (cmd.glasses) {
+          const log = DB.get('water_log', {});
+          const today = new Date().toDateString();
+          log[today] = (log[today] || 0) + parseInt(cmd.glasses);
+          DB.set('water_log', log);
+          showToast(`+${cmd.glasses} glasses of water 💧`, 'success');
+          renderWaterTracker(); renderDashboard();
+        }
+        break;
+      case 'log_sleep':
+        if (cmd.hours && cmd.quality) {
+          const sleepLog = DB.get('sleep_log', []);
+          sleepLog.push({ date: Date.now(), duration: cmd.hours, quality: cmd.quality, notes: cmd.notes || '' });
+          DB.set('sleep_log', sleepLog);
+          showToast('Sleep logged! 😴', 'success');
+          renderDashboard();
+        }
+        break;
+      case 'log_workout':
+        if (cmd.exercises && cmd.exercises.length) {
+          const workouts = DB.get('workouts', []);
+          workouts.push({ date: Date.now(), exercises: cmd.exercises.map(e => ({ name: e, sets: 3, reps: 10 })), duration: cmd.durationMinutes || 30 });
+          DB.set('workouts', workouts);
+          showToast('Workout logged! 💪', 'success');
+          renderDashboard();
+        }
+        break;
+      case 'log_journal':
+        if (cmd.text) {
+          const journal = DB.get('journal', []);
+          journal.unshift({ date: Date.now(), text: cmd.text });
+          DB.set('journal', journal);
+          showToast('Journal entry saved! 📓', 'success');
+          renderJournal(); renderDashboard();
+        }
+        break;
+      case 'mark_study_done':
+        // Find topic and subtopic by name
+        if (cmd.topicName && cmd.subtopicName) {
+          const schedule = getNeetSchedule();
+          for (let pi = 0; pi < schedule.length; pi++) {
+            for (let ti = 0; ti < schedule[pi].topics.length; ti++) {
+              if (schedule[pi].topics[ti].name.toLowerCase().includes(cmd.topicName.toLowerCase())) {
+                for (let si = 0; si < schedule[pi].topics[ti].subtopics.length; si++) {
+                  if (schedule[pi].topics[ti].subtopics[si].toLowerCase().includes(cmd.subtopicName.toLowerCase())) {
+                    const progress = DB.get('neet_progress', {});
+                    const topicKey = `p${pi}_t${ti}`;
+                    if (!progress[topicKey]) progress[topicKey] = {};
+                    progress[topicKey][`p${pi}_t${ti}_s${si}`] = true;
+                    DB.set('neet_progress', progress);
+                    showToast(`Marked done: ${schedule[pi].topics[ti].subtopics[si]} 📚`, 'success');
+                    renderNeetPlanner(); renderDashboard();
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+        break;
+    }
+  } catch (e) { console.error('AI tool error:', e); }
+  
+  // Return reply without the JSON command line
+  return lines.slice(0, -1).join('\n').trim();
+}
+
+// ===== LANGUAGE HELPERS =====
+function getLangInstructions() {
+  const lang = settings.conversationLang || 'en';
+  if (lang === 'hi') return '\n\nLANGUAGE: Respond in Hindi (Devanagari script). Be warm and natural. Use Hindi emojis and expressions that feel authentic. Example tone: "Arre yaar, aaj thoda stress lag raha hai? Chal baat karte hain — main hoon na! 💗"';
+  if (lang === 'hi-en') return '\n\nLANGUAGE: Respond in Hinglish — use Roman Hindi mixed naturally with English words. This is how young Indians actually text and talk. Be casual, warm, and friendly. Example tone: "Hey! Aaj kaise ho? Padhai thoda overwhelming lag rahi hai kya? Chalo ek saath figure out karte hain 💪"';
+  return '\n\nLANGUAGE: Respond in English. Be warm, friendly, and supportive.';
+}
+
+function getVoiceLangCode() {
+  const lang = settings.conversationLang || 'en';
+  if (lang === 'hi') return 'hi-IN';
+  if (lang === 'hi-en') return 'hi-IN';
+  return 'en-US';
+}
+
+// ===== CONVERSATION MODE (global floating chat) =====
+let isRecording = false;
+let nativeSpeechCallback = null;
+
+function openConversation() {
+  document.getElementById('conv-overlay').classList.add('show');
+  document.getElementById('conv-fab').classList.add('hidden');
+  updateConvLangButtons();
+  // Load shared history
+  chatHistory = DB.get('chat_history', []);
+  if (chatHistory.length > 0) {
+    renderConvMessages();
+  }
+  document.getElementById('conv-input').focus();
+}
+
+function closeConversation() {
+  document.getElementById('conv-overlay').classList.remove('show');
+  document.getElementById('conv-fab').classList.remove('hidden');
+  stopListening();
+  if (liveVoiceMode) stopLiveVoiceMode();
+}
+
+function setConvLang(lang) {
+  settings.conversationLang = lang;
+  DB.set('settings', settings);
+  updateConvLangButtons();
+  showToast('Language set to ' + (lang === 'hi' ? 'Hindi' : lang === 'hi-en' ? 'Hinglish' : 'English') + ' 🇮🇳');
+}
+
+function updateConvLangButtons() {
+  const lang = settings.conversationLang || 'en';
+  ['en','hi','hi-en'].forEach(l => {
+    const btn = document.getElementById('conv-lang-' + l);
+    if (btn) btn.classList.toggle('active', l === lang);
+  });
+}
+
+function renderConvMessages() {
+  const box = document.getElementById('conv-messages');
+  box.innerHTML = '';
+  for (const msg of chatHistory) {
+    const div = document.createElement('div');
+    div.className = 'conv-msg ' + (msg.role === 'user' ? 'user' : msg.role === 'announce' ? 'announce' : 'assistant');
+    if (msg.role === 'assistant') div.innerHTML = '<b>Sheena 💗</b><br>' + formatMessage(msg.content);
+    else div.textContent = msg.content;
+    box.appendChild(div);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function addConvMessage(role, content) {
+  const box = document.getElementById('conv-messages');
+  const div = document.createElement('div');
+  div.className = 'conv-msg ' + (role === 'user' ? 'user' : role === 'announce' ? 'announce' : 'assistant');
+  if (role === 'assistant') div.innerHTML = '<b>Sheena 💗</b><br>' + formatMessage(content);
+  else div.textContent = content;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendConversation() {
+  const input = document.getElementById('conv-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  if (detectCrisis(text)) {
+    addConvMessage('announce', '🆘 I noticed you might be going through something very difficult. Your safety matters most. Please reach out to 988 (Suicide & Crisis Lifeline), text HOME to 741741, or call 911 if you\'re in immediate danger. You don\'t have to go through this alone.');
+    return;
+  }
+
+  addConvMessage('user', text);
+  chatHistory.push({ role: 'user', content: text, date: Date.now() });
+
+  if (!settings.apiKey) {
+    addConvMessage('announce', '🔑 Please add your API key in Settings (⚙️) to chat with Sheena. Get a free Gemini key at aistudio.google.com/app/apikey');
+    return;
+  }
+
+  const contextMessages = chatHistory.slice(-20);
+  let conversationContext = '';
+  for (const msg of contextMessages) {
+    if (msg.role === 'user') conversationContext += `User: ${msg.content}\n`;
+    else if (msg.role === 'assistant') conversationContext += `Sheena: ${msg.content}\n`;
+  }
+
+  const contextData = getCrossAppContext();
+  const langInstr = getLangInstructions();
+
+  const prompt = `${SYSTEM_PROMPT}${langInstr}\n\nCONVERSATION HISTORY:\n${conversationContext}\n${contextData}\n\nUser just said: "${text}"\n\nRespond as Sheena. Use the context above to personalize your response — reference specific things you know about the user.`;
+
+  const box = document.getElementById('conv-messages');
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'conv-typing';
+  typingDiv.id = 'conv-typing';
+  typingDiv.innerHTML = '<span></span><span></span><span></span>';
+  box.appendChild(typingDiv);
+  box.scrollTop = box.scrollHeight;
+
+  showStopButton();
+  try {
+    let reply = await callAI(prompt, { temperature: 0.8 });
+    if (!reply || !reply.trim()) {
+      addConvMessage('announce', '⚠️ Sheena returned an empty response. Try again or switch models in Settings.');
+      return;
+    }
+    reply = executeAITools(reply);
+    if (reply) {
+      addConvMessage('assistant', reply);
+      chatHistory.push({ role: 'assistant', content: reply, date: Date.now() });
+      DB.set('chat_history', chatHistory);
+      if (settings.voiceEnabled) speakText(reply);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      addConvMessage('announce', '⏹ Stopped.');
+      return;
+    }
+    console.error('Conversation error:', err);
+    addConvMessage('announce', '⚠️ ' + (err.message || 'Something went wrong. Check your API key and internet connection.'));
+  } finally {
+    document.getElementById('conv-typing')?.remove();
+    hideStopButton();
+  }
+}
+
+// ===== LIVE VOICE MODE (ChatGPT-style voice conversation) =====
+
+function setVoiceState(state) {
+  voiceState = state;
+  const statusEl = document.getElementById('conv-status');
+  const statusText = document.getElementById('conv-status-text');
+  const micBtn = document.getElementById('conv-mic');
+  if (!statusEl || !statusText) return;
+
+  statusEl.style.display = 'flex';
+  statusEl.className = 'conv-status ' + state;
+
+  if (state === 'idle') {
+    statusText.textContent = liveVoiceMode ? 'Live mode on — tap mic or wait for Sheena' : 'Ready';
+    if (micBtn) { micBtn.classList.remove('recording'); micBtn.textContent = '🎙'; }
+  } else if (state === 'listening') {
+    statusText.textContent = liveVoiceMode ? '🔴 Listening... speak now' : '🔴 Listening...';
+    if (micBtn) { micBtn.classList.add('recording'); micBtn.textContent = '⏹'; }
+  } else if (state === 'thinking') {
+    statusText.textContent = '🧠 Sheena is thinking...';
+    if (micBtn) { micBtn.classList.remove('recording'); micBtn.textContent = '🎙'; }
+  } else if (state === 'speaking') {
+    statusText.textContent = '🔊 Sheena is speaking...';
+    if (micBtn) { micBtn.classList.remove('recording'); micBtn.textContent = '🎙'; }
+  } else if (state === 'error') {
+    statusText.textContent = '⚠️ Something went wrong. Tap mic to try again.';
+    if (micBtn) { micBtn.classList.remove('recording'); micBtn.textContent = '🎙'; }
+  }
+}
+
+function toggleLiveVoiceMode() {
+  if (liveVoiceMode) {
+    stopLiveVoiceMode();
+  } else {
+    startLiveVoiceMode();
+  }
+}
+
+function startLiveVoiceMode() {
+  if (!settings.apiKey) {
+    addConvMessage('announce', '🔑 Please add your API key in Settings (⚙️) first. Get a free Gemini key at aistudio.google.com/app/apikey');
+    return;
+  }
+  liveVoiceMode = true;
+  const btn = document.getElementById('conv-live-btn');
+  if (btn) { btn.textContent = '⏹ Stop Live Voice'; btn.classList.add('stop'); }
+  const hint = document.getElementById('conv-live-hint');
+  if (hint) hint.textContent = 'Sheena is in live mode. She will listen after she finishes speaking. Tap Stop to end.';
+  setVoiceState('idle');
+  // Start listening immediately
+  startListening();
+}
+
+function stopLiveVoiceMode() {
+  liveVoiceMode = false;
+  const btn = document.getElementById('conv-live-btn');
+  if (btn) { btn.textContent = '🎙 Start Live Voice'; btn.classList.remove('stop'); }
+  const hint = document.getElementById('conv-live-hint');
+  if (hint) hint.textContent = 'Tap to start a hands-free voice conversation. Sheena will listen, think, speak, and listen again automatically.';
+  stopListening();
+  setVoiceState('idle');
+}
+
+// ===== UNIFIED LISTENING =====
+let currentRecognizer = null;
+let androidSpeechResolver = null;
+
+function startListening() {
+  if (voiceState === 'listening') return; // already listening
+  setVoiceState('listening');
+
+  // Android native bridge
+  if (window.SHIMSAndroid && window.SHIMSAndroid.startListening) {
+    const langCode = getVoiceLangCode();
+    window.SHIMSAndroid.startListening(langCode);
+
+    // Set up one-shot callback
+    window.onShimsNativeSpeech = function(result) {
+      let text = '';
+      let error = '';
+      try {
+        const data = typeof result === 'string' ? JSON.parse(result) : result;
+        if (data.ok && data.text) text = data.text;
+        else if (data.error) error = data.error;
+      } catch (e) {
+        if (typeof result === 'string' && result.trim()) text = result;
+      }
+      if (text) { onSpeechResult(text); return; }
+      if (error) {
+        // In live mode, silently retry common errors
+        if (liveVoiceMode) {
+          setVoiceState('idle');
+          setTimeout(() => startListening(), 600);
+          return;
+        }
+        // Non-live mode: show friendly toast
+        setVoiceState('idle');
+        showToast('🎙 ' + error, 'warn');
+        return;
+      }
+      // Empty result
+      if (liveVoiceMode) setTimeout(() => startListening(), 500);
+      else setVoiceState('idle');
+    };
+    return;
+  }
+
+  // Web Speech API fallback
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setVoiceState('error');
+    addConvMessage('announce', '🎙 Voice input not available on this device.');
+    return;
+  }
+
+  if (currentRecognizer) { try { currentRecognizer.stop(); } catch (e) {} }
+
+  const recognizer = new SpeechRecognition();
+  currentRecognizer = recognizer;
+  recognizer.lang = getVoiceLangCode();
+  recognizer.interimResults = false;
+  recognizer.maxAlternatives = 1;
+
+  recognizer.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    if (transcript) onSpeechResult(transcript);
+  };
+
+  recognizer.onerror = (event) => {
+    // Ignore "no-speech" errors in live mode — just restart
+    if (event.error === 'no-speech' || event.error === 'audio-capture' || event.error === 'not-allowed') {
+      if (liveVoiceMode) setTimeout(() => startListening(), 600);
+      else setVoiceState('idle');
+      return;
+    }
+    setVoiceState('error');
+    addConvMessage('announce', '🎙 Voice error: ' + event.error);
+  };
+
+  recognizer.onend = () => {
+    currentRecognizer = null;
+    // If we got no result and live mode is on, restart listening
+    if (liveVoiceMode && voiceState === 'listening') {
+      setTimeout(() => startListening(), 400);
+    }
+  };
+
+  try { recognizer.start(); } catch (e) {
+    setVoiceState('error');
+    if (liveVoiceMode) setTimeout(() => startListening(), 800);
+  }
+}
+
+function stopListening() {
+  if (currentRecognizer) {
+    try { currentRecognizer.stop(); currentRecognizer.abort(); } catch (e) {}
+    currentRecognizer = null;
+  }
+  if (window.SHIMSAndroid && window.SHIMSAndroid.stopListening) {
+    window.SHIMSAndroid.stopListening();
+  }
+  isRecording = false;
+}
+
+// ===== SPEECH RESULT HANDLER =====
+function onSpeechResult(text) {
+  if (!text || !text.trim()) {
+    if (liveVoiceMode) setTimeout(() => startListening(), 500);
+    return;
+  }
+
+  // Crisis check
+  if (detectCrisis(text)) {
+    addConvMessage('announce', '🆘 I noticed you might be going through something very difficult. Your safety matters most. Please reach out to 988 (Suicide & Crisis Lifeline), text HOME to 741741, or call 911 if you\'re in immediate danger.');
+    stopLiveVoiceMode();
+    return;
+  }
+
+  // Show user message
+  addConvMessage('user', text);
+  chatHistory.push({ role: 'user', content: text, date: Date.now() });
+  DB.set('chat_history', chatHistory);
+
+  // Build prompt and call AI
+  setVoiceState('thinking');
+  sendConversationFromVoice(text);
+}
+
+async function sendConversationFromVoice(text) {
+  const contextMessages = chatHistory.slice(-20);
+  let conversationContext = '';
+  for (const msg of contextMessages) {
+    if (msg.role === 'user') conversationContext += `User: ${msg.content}\n`;
+    else if (msg.role === 'assistant') conversationContext += `Sheena: ${msg.content}\n`;
+  }
+  const contextData = getCrossAppContext();
+  const langInstr = getLangInstructions();
+  const prompt = `${SYSTEM_PROMPT}${langInstr}\n\nCONVERSATION HISTORY:\n${conversationContext}\n${contextData}\n\nUser just said: "${text}"\n\nRespond as Sheena. Use the context above to personalize your response.`;
+
+  showStopButton();
+  try {
+    let reply = await callAI(prompt, { temperature: 0.8 });
+    if (!reply || !reply.trim()) {
+      addConvMessage('announce', '⚠️ Sheena returned an empty response. Try again or switch models.');
+      setVoiceState('idle');
+      if (liveVoiceMode) setTimeout(() => startListening(), 1000);
+      return;
+    }
+    reply = executeAITools(reply);
+    if (reply) onAIReply(reply);
+    else { setVoiceState('idle'); if (liveVoiceMode) setTimeout(() => startListening(), 1000); }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      addConvMessage('announce', '⏹ Stopped.');
+      setVoiceState('idle');
+      return;
+    }
+    console.error('Voice conversation error:', err);
+    addConvMessage('announce', '⚠️ ' + (err.message || 'Something went wrong.'));
+    setVoiceState('idle');
+    if (liveVoiceMode) setTimeout(() => startListening(), 1500);
+  } finally {
+    hideStopButton();
+  }
+}
+
+function onAIReply(reply) {
+  addConvMessage('assistant', reply);
+  chatHistory.push({ role: 'assistant', content: reply, date: Date.now() });
+  DB.set('chat_history', chatHistory);
+
+  // Stop any active listening before speaking so Sheena doesn't hear herself
+  stopListening();
+
+  if (settings.voiceEnabled) {
+    setVoiceState('speaking');
+    speakText(reply, () => {
+      // TTS finished callback
+      setVoiceState('idle');
+      if (liveVoiceMode) {
+        // Longer pause before listening again to avoid Sheena hearing her own voice
+        setTimeout(() => startListening(), 900);
+      }
+    });
+  } else {
+    setVoiceState('idle');
+    if (liveVoiceMode) setTimeout(() => startListening(), 800);
+  }
+}
+
+// ===== TTS with completion callback =====
+function speakText(text, onEnd) {
+  const clean = text.replace(/\*\*/g, '').replace(/\*/g, '').replace(/[#>`]/g, '');
+  ttsEndCallback = onEnd || null;
+  showStopButton(); // Show stop button during TTS so user can interrupt
+
+  // Android native bridge
+  if (window.SHIMSAndroid && window.SHIMSAndroid.speak) {
+    const langCode = getVoiceLangCode();
+    // Set up TTS completion callback from Android bridge
+    window.onShimsTTSComplete = function() {
+      hideStopButton();
+      if (ttsEndCallback) { ttsEndCallback(); ttsEndCallback = null; }
+    };
+    window.SHIMSAndroid.speak(clean, langCode);
+    // Safety net: timer fallback in case callback never fires
+    const wordCount = clean.split(/\s+/).length;
+    const durationMs = Math.max(3000, wordCount * 380 / (settings.voiceRate || 1.0));
+    setTimeout(() => {
+      hideStopButton();
+      if (ttsEndCallback) { ttsEndCallback(); ttsEndCallback = null; }
+    }, durationMs);
+    return;
+  }
+
+  // Web Speech API
+  if (!window.speechSynthesis) {
+    if (ttsEndCallback) { ttsEndCallback(); ttsEndCallback = null; }
+    return;
+  }
+
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.rate = settings.voiceRate || 1.0;
+  utter.pitch = 1.05;
+  utter.volume = 1;
+  utter.lang = getVoiceLangCode();
+
+  const voices = window.speechSynthesis.getVoices();
+  const langCode = getVoiceLangCode();
+  let preferredVoice = voices.find(v => v.lang === langCode);
+  if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(langCode.split('-')[0]));
+  if (!preferredVoice) preferredVoice = voices.find(v => v.name.includes('Female') || v.name.includes('Samantha') || v.name.includes('Victoria') || v.name.includes('Karen') || v.name.includes('Google US English'));
+  if (preferredVoice) utter.voice = preferredVoice;
+
+  utter.onend = () => {
+    hideStopButton();
+    if (ttsEndCallback) { ttsEndCallback(); ttsEndCallback = null; }
+  };
+  utter.onerror = () => {
+    hideStopButton();
+    if (ttsEndCallback) { ttsEndCallback(); ttsEndCallback = null; }
+  };
+
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utter);
+}
+
+// Legacy mic button (single tap to speak, not live mode)
+function toggleVoiceInput() {
+  if (isRecording || voiceState === 'listening') {
+    stopListening();
+    setVoiceState('idle');
+  } else {
+    // Single-shot voice: listen once, then send via text input
+    startListeningLegacy();
+  }
+}
+
+function startListeningLegacy() {
+  const micBtn = document.getElementById('conv-mic');
+  setVoiceState('listening');
+
+  if (window.SHIMSAndroid && window.SHIMSAndroid.startListening) {
+    window.SHIMSAndroid.startListening(getVoiceLangCode());
+    window.onShimsNativeSpeech = function(result) {
+      let text = '';
+      let error = '';
+      try {
+        const data = typeof result === 'string' ? JSON.parse(result) : result;
+        if (data.ok && data.text) text = data.text;
+        else if (data.error) error = data.error;
+      } catch (e) { if (typeof result === 'string') text = result; }
+      if (text) document.getElementById('conv-input').value = text;
+      else if (error) showToast('🎙 ' + error, 'warn');
+      stopListening();
+      setVoiceState('idle');
+    };
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    addConvMessage('announce', '🎙 Voice input not available.');
+    setVoiceState('idle');
+    return;
+  }
+  const rec = new SpeechRecognition();
+  rec.lang = getVoiceLangCode();
+  rec.interimResults = false;
+  rec.onresult = (e) => { document.getElementById('conv-input').value = e.results[0][0].transcript; };
+  rec.onerror = () => {};
+  rec.onend = () => { stopListening(); setVoiceState('idle'); };
+  rec.start();
+}
+
+// ===== TEST CONNECTION =====
+async function testConnection() {
+  const result = document.getElementById('test-result');
+  result.textContent = 'Testing...';
+  const key = document.getElementById('setting-apikey').value.trim();
+  const provider = document.getElementById('setting-provider').value;
+  const modelSelect = document.getElementById('setting-model').value;
+  const customModel = document.getElementById('setting-model-custom').value.trim();
+  if (!key) { result.textContent = '❌ Please enter an API key'; result.style.color = '#dc2626'; return; }
+
+  const original = { ...settings };
+  settings = { ...settings, apiKey: key, provider, model: modelSelect, customModel };
+  try {
+    const reply = await callAI('Say "Connection successful! Sheena is ready to support you." and nothing else.', { temperature: 0 });
+    settings = original;
+    if (reply.toLowerCase().includes('successful') || reply.toLowerCase().includes('ready')) {
+      result.textContent = '✅ Connected!';
+      result.style.color = '#00e676';
+    } else {
+      result.textContent = '⚠️ Connected but unexpected response';
+      result.style.color = '#f0a030';
+    }
+  } catch (err) {
+    settings = original;
+    result.textContent = '❌ ' + err.message;
+    result.style.color = '#dc2626';
+  }
+}
+
+// ===== DATA EXPORT / CLEAR =====
+function exportData() {
+  const data = {
+    moods: DB.get('moods', []),
+    checkups: DB.get('checkups', []),
+    journal: DB.get('journal', []),
+    workouts: DB.get('workouts', []),
+    workout_plans: DB.get('workout_plans', []),
+    chat_history: DB.get('chat_history', []),
+    neet_progress: DB.get('neet_progress', {}),
+    water_log: DB.get('water_log', {}),
+    water_goal: DB.get('water_goal', 8),
+    meals: DB.get('meals', []),
+    streak: DB.get('streak', 0),
+    exported_at: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sheena-wellness-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Data exported! 📥', 'success');
+}
+
+function clearAllData() {
+  if (!confirm('WARNING: This will permanently delete ALL your data — moods, journal, workouts, NEET progress, water log, meals, and chat history. This cannot be undone. Are you sure?')) return;
+  const keys = ['moods','checkups','journal','workouts','workout_plans','chat_history','streak','workouts_this_week','settings','neet_progress','water_log','water_goal','water_streak','meals'];
+  for (const k of keys) localStorage.removeItem('sheena_ai_' + k);
+  location.reload();
+}
+
+// ===== INIT APP =====
+init();
+</script>
+<!-- ===== CONVERSATION OVERLAY (accessible from any tab) ===== -->
+<div id="conv-overlay" class="conv-overlay" onclick="if(event.target===this)closeConversation()">
+  <div class="conv-panel">
+    <div class="conv-header">
+      <span style="font-size:24px">💬</span>
+      <h3>Sheena — Your Friend & Guide</h3>
+      <button class="conv-lang" id="conv-lang-en" onclick="setConvLang('en')">EN</button>
+      <button class="conv-lang" id="conv-lang-hi" onclick="setConvLang('hi')">HI</button>
+      <button class="conv-lang" id="conv-lang-hi-en" onclick="setConvLang('hi-en')">HINGLISH</button>
+      <button class="conv-close" onclick="closeConversation()">&times;</button>
+    </div>
+    <div class="conv-messages" id="conv-messages">
+      <div class="conv-msg assistant"><b>Sheena 💗</b><br>Hey there! I'm your friend, study partner, workout buddy, and wellness guide — all in one. How can I help you today? 😊</div>
+    </div>
+    <!-- Live Voice Status Bar -->
+    <div id="conv-status" class="conv-status" style="display:none">
+      <div class="conv-status-dot"></div>
+      <span id="conv-status-text">Ready</span>
+    </div>
+    <!-- Live Mode Toggle -->
+    <div class="conv-live-toggle">
+      <button class="conv-live-btn" id="conv-live-btn" onclick="toggleLiveVoiceMode()">🎙 Start Live Voice</button>
+      <small id="conv-live-hint">Tap to start a hands-free voice conversation. Sheena will listen, think, speak, and listen again automatically.</small>
+    </div>
+    <div class="conv-input-area">
+      <button class="conv-mic" id="conv-mic" onclick="toggleVoiceInput()" title="Tap to speak">🎙</button>
+      <input class="conv-input" id="conv-input" placeholder="Type or press the mic to talk..." onkeydown="if(event.key==='Enter')sendConversation()">
+      <button class="conv-send" id="conv-send" onclick="sendConversation()">➤</button>
+      <button class="conv-stop" id="conv-stop-btn" onclick="stopGeneration()" style="display:none" title="Stop generating">⏹</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FLOATING CHAT BUTTON ===== -->
+<button id="conv-fab" class="conv-fab" onclick="openConversation()" title="Talk to Sheena">💬</button>
+
+</body>
+</html>

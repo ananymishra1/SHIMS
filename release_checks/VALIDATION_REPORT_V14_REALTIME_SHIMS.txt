@@ -1,0 +1,18 @@
+SHIMS v14 Realtime Core validation
+
+Python compile: passed
+Frontend inline JavaScript syntax check: passed
+Regression tests: 34 passed
+No .env secrets included: passed
+No runtime sqlite database included: passed
+Major endpoints validated:
+- /health
+- /brain/turn
+- /chat/models
+- /web/health
+- /web/search
+- /realtime/status
+- /agents/list
+- /voice/profiles
+- /media/generate
+- /documents/generate

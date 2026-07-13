@@ -1,0 +1,8 @@
+# Optional SHIMS v14 realtime stack.
+# Base SHIMS works without these. Install when you want Pipecat/WebRTC-style realtime pipelines and voice wake/clone experiments.
+pipecat-ai>=0.0.95
+openwakeword>=0.6.0
+webrtcvad>=2.0.10
+piper-tts>=1.2.0
+sounddevice>=0.4.7
+soundfile>=0.12.1

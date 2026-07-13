@@ -1,0 +1,9 @@
+# Optional local AI media stack for real local image generation.
+# Install only after base install, preferably on a machine with NVIDIA GPU/CUDA.
+torch
+torchvision
+accelerate
+safetensors
+transformers
+diffusers
+xformers; sys_platform == 'win32'

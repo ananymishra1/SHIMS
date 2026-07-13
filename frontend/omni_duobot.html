@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050714">
+<title>SHIMS | Council of the Wises</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<style>
+:root{
+  --bg:#050714;
+  --panel:rgba(8,14,36,.78);
+  --panel-border:rgba(94,139,255,.18);
+  --text:#e8f0ff;
+  --muted:#8fa2c9;
+  --accent:#5e8bff;
+  --accent-glow:#5e8bff66;
+  --omni:#00f0ff;
+  --local:#ff2a6d;
+  --user:#f7ff58;
+  --gemini:#a78bfa;
+  --anthropic:#fbbf24;
+  --openai:#34d399;
+  --chair:#a6ffd8;
+  --success:#34d399;
+  --danger:#ff4d7c;
+  --radius:16px;
+  --font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden}
+body::before{
+  content:'';position:fixed;inset:0;
+  background:
+    radial-gradient(circle at 15% 25%, rgba(94,139,255,.18) 0%, transparent 35%),
+    radial-gradient(circle at 85% 15%, rgba(0,240,255,.12) 0%, transparent 30%),
+    radial-gradient(circle at 50% 85%, rgba(255,42,109,.12) 0%, transparent 35%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)' opacity='0.08'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:0;
+}
+.stars{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.star{position:absolute;background:#fff;border-radius:50%;opacity:.5;animation:twinkle 4s infinite ease-in-out}
+@keyframes twinkle{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:.8;transform:scale(1.2)}}
+
+#app{position:relative;z-index:1;display:flex;height:100vh;gap:14px;padding:14px}
+.glass{background:var(--panel);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid var(--panel-border);border-radius:var(--radius);box-shadow:0 12px 40px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.04)}
+
+.sidebar{width:280px;display:flex;flex-direction:column;gap:12px;padding:14px}
+.sidebar h1{margin:0;font-size:18px;letter-spacing:.08em;display:flex;align-items:center;gap:10px}
+.orb{width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent),0 0 24px var(--accent);animation:pulse 2.5s infinite}
+@keyframes pulse{0%,100%{transform:scale(.95);opacity:.8}50%{transform:scale(1.25);opacity:1}}
+.sidebar h2{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-size:12px;border:1px solid var(--panel-border);background:rgba(255,255,255,.05);color:var(--text);padding:7px 12px;border-radius:8px;cursor:pointer;transition:.15s}
+.btn:hover{background:rgba(255,255,255,.12);border-color:rgba(94,139,255,.4)}
+.btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+.btn.danger{background:rgba(255,77,124,.18);color:var(--danger);border-color:rgba(255,77,124,.35)}
+.btn.success{background:rgba(52,211,153,.18);color:var(--success);border-color:rgba(52,211,153,.35)}
+.conv-list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.conv-item{padding:10px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent;transition:.15s;background:rgba(255,255,255,.03)}
+.conv-item:hover,.conv-item.active{background:rgba(94,139,255,.12);border-color:rgba(94,139,255,.3)}
+.conv-item .topic{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv-item .meta{font-size:10px;color:var(--muted);margin-top:4px}
+
+.main{flex:1;display:flex;flex-direction:column;gap:14px;min-width:0}
+header.glass{padding:12px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header .title{font-size:16px;font-weight:700;letter-spacing:.05em}
+header .subtitle{font-size:11px;color:var(--muted);margin-top:2px}
+.tabs{display:flex;gap:6px;background:rgba(0,0,0,.25);padding:4px;border-radius:10px}
+.tab{font-size:12px;padding:6px 14px;border-radius:8px;border:none;background:transparent;color:var(--muted);cursor:pointer;transition:.15s}
+.tab.active{background:rgba(94,139,255,.2);color:var(--text);box-shadow:0 0 12px rgba(94,139,255,.15)}
+
+.chat{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:16px;min-height:0}
+.msg{max-width:82%;padding:12px 14px;border-radius:18px;position:relative;animation:fadeIn .25s ease;line-height:1.5;font-size:14px;white-space:pre-wrap}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.msg .badge{font-size:9px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:6px;opacity:.85}
+.msg .ts{font-size:10px;color:var(--muted);margin-top:8px;text-align:right}
+.msg.user{align-self:flex-end;background:linear-gradient(135deg,rgba(247,255,88,.14),rgba(247,255,88,.06));border:1px solid rgba(247,255,88,.35);color:var(--user)}
+.msg.primary{align-self:flex-start;background:rgba(0,240,255,.08);border:1px solid rgba(0,240,255,.3);color:var(--omni)}
+.msg.local{align-self:flex-start;background:rgba(255,42,109,.08);border:1px solid rgba(255,42,109,.3);color:var(--local)}
+.msg.gemini{align-self:flex-start;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.35);color:var(--gemini)}
+.msg.anthropic{align-self:flex-start;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.35);color:var(--anthropic)}
+.msg.openai{align-self:flex-start;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.35);color:var(--openai)}
+.msg.chair{align-self:center;background:rgba(166,255,216,.1);border:1px solid rgba(166,255,216,.35);color:var(--chair);max-width:92%}
+.msg.system{align-self:center;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.15);color:var(--muted);max-width:92%;font-size:12px}
+
+.inputbar{display:flex;gap:10px;padding:4px}
+.inputbar input{flex:1;background:rgba(0,0,0,.35);border:1px solid var(--panel-border);color:var(--text);padding:12px 16px;border-radius:12px;outline:none;font-size:14px}
+.inputbar input:focus{border-color:var(--accent);box-shadow:0 0 14px rgba(94,139,255,.25)}
+.inputbar button{padding:12px 20px;border-radius:12px}
+
+.thinking{display:none;align-self:center;flex-direction:column;align-items:center;gap:12px;padding:20px;color:var(--muted);font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+.thinking.active{display:flex}
+.orb-lg{width:48px;height:48px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#fff,var(--accent));box-shadow:0 0 30px var(--accent),0 0 60px var(--accent-glow);animation:pulse 1.8s infinite}
+
+.right{width:340px;display:flex;flex-direction:column;gap:14px}
+.panel{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.panel h3{margin:0;padding:14px 16px;font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);border-bottom:1px solid var(--panel-border)}
+.panel .body{flex:1;overflow:auto;padding:12px}
+.empty{text-align:center;padding:30px 10px;color:var(--muted);font-size:12px}
+
+.card{background:rgba(0,0,0,.25);border:1px solid var(--panel-border);border-radius:12px;padding:12px;margin-bottom:10px;font-size:12px}
+.card .src{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+.card .title{font-weight:700;font-size:13px;margin-bottom:6px}
+.card .field{margin-bottom:6px;line-height:1.45}
+.card .field b{color:var(--accent)}
+.card .btns{display:flex;gap:6px;margin-top:10px}
+.card button{flex:1;font-size:11px;padding:7px;border-radius:8px;border:1px solid var(--panel-border);background:rgba(255,255,255,.05);color:var(--text);cursor:pointer}
+.card button:hover{background:rgba(255,255,255,.1)}
+
+.task-input{display:flex;flex-direction:column;gap:8px;padding:12px;border-bottom:1px solid var(--panel-border)}
+.task-input input,.task-input textarea{background:rgba(0,0,0,.3);border:1px solid var(--panel-border);color:var(--text);padding:8px;border-radius:8px;outline:none;font-size:12px}
+.task-input textarea{resize:none}
+.task-input button{font-size:12px;padding:8px}
+.task .status{font-size:11px;color:var(--muted);margin:4px 0}
+
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);align-items:center;justify-content:center;z-index:1000}
+.modal.active{display:flex}
+.modal-box{width:560px;max-width:92%;max-height:90vh;overflow:auto;padding:22px}
+.modal-box h2{margin:0 0 16px;font-size:16px;color:var(--accent)}
+.tabs2{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--panel-border);padding-bottom:8px}
+.tab2{font-size:12px;padding:6px 12px;border-radius:6px;border:none;background:transparent;color:var(--muted);cursor:pointer}
+.tab2.active{background:rgba(94,139,255,.15);color:var(--text)}
+.form-row{margin-bottom:12px}
+.form-row label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px}
+.form-row input,.form-row select,.form-row textarea{width:100%;background:rgba(0,0,0,.35);border:1px solid var(--panel-border);color:var(--text);padding:8px;border-radius:8px;outline:none;font-size:12px}
+.form-row textarea{resize:vertical;min-height:60px}
+.form-row input[type=checkbox]{width:auto;vertical-align:middle;margin-right:6px}
+.member-card{background:rgba(0,0,0,.2);border:1px solid var(--panel-border);border-radius:10px;padding:12px;margin-bottom:12px}
+.member-card h4{margin:0 0 10px;font-size:13px;color:var(--accent)}
+.key-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:12px}
+.key-row .form-row{flex:1;margin-bottom:0}
+.key-row .form-row.narrow{flex:0 0 140px}
+.key-status{font-size:11px;padding:5px 8px;border-radius:6px;background:rgba(0,0,0,.2);color:var(--muted);white-space:nowrap}
+.key-status.ok{color:var(--success);background:rgba(52,211,153,.1)}
+.key-status.bad{color:var(--danger);background:rgba(255,77,124,.1)}
+@media(max-width:1024px){#app{flex-direction:column}.sidebar,.right{width:100%;height:auto}.right{flex-direction:row}.panel{flex:1}}
+</style>
+</head>
+<body data-theme="aurora">
+<div class="stars" id="stars"></div>
+<div id="app">
+  <aside class="sidebar glass">
+    <h1><span class="orb"></span> SHIMS Council</h1>
+    <div class="btn-row">
+      <button class="btn primary" onclick="duobot.newConversation()">+ New</button>
+      <button class="btn" id="auto-btn" onclick="duobot.autoRunToggle()">Auto: OFF</button>
+    </div>
+    <h2>Conversations</h2>
+    <div class="conv-list" id="conv-list"></div>
+  </aside>
+
+  <main class="main">
+    <header class="glass">
+      <div>
+        <div class="title">COUNCIL OF THE WISES</div>
+        <div class="subtitle" id="conv-subtitle">Primary Omni ↔ Local Factory</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="tabs">
+          <button class="tab active" id="tab-free" onclick="duobot.setMode('free')">Free</button>
+          <button class="tab" id="tab-improvement" onclick="duobot.setMode('improvement')">Improvement</button>
+          <button class="tab" id="tab-council" onclick="duobot.setMode('council')">Council</button>
+        </div>
+        <button class="btn" onclick="duobot.runTurn()">Run turn</button>
+        <button class="btn" onclick="duobot.finalize()">Finalize</button>
+        <button class="btn" onclick="duobot.checkCapabilities()">Caps</button>
+        <button class="btn" onclick="duobot.openSettings()">Settings</button>
+        <button class="btn" onclick="location.href='/'">← Omni</button>
+      </div>
+    </header>
+    <div class="chat glass" id="chat">
+      <div class="thinking" id="thinking"><div class="orb-lg"></div><div>Council is deliberating…</div></div>
+    </div>
+    <div class="inputbar">
+      <input id="user-input" placeholder="Speak to the Council…" onkeydown="if(event.key==='Enter')duobot.sendUser()">
+      <button class="btn primary" onclick="duobot.sendUser()">Send</button>
+    </div>
+  </main>
+
+  <aside class="right">
+    <div class="panel glass">
+      <h3>Collaborative Tasks</h3>
+      <div class="task-input">
+        <input id="task-title" placeholder="Project title">
+        <textarea id="task-desc" rows="2" placeholder="Describe the app or task…"></textarea>
+        <button class="btn primary" onclick="duobot.startTask()">Start project</button>
+      </div>
+      <div class="body" id="task-list"></div>
+    </div>
+    <div class="panel glass">
+      <h3>Improvement Proposals</h3>
+      <div class="body" id="prop-list"></div>
+    </div>
+    <div class="panel glass" id="council-panel" style="display:none">
+      <h3>Pending Council Actions</h3>
+      <div class="body" id="council-actions"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="modal" id="settings-modal">
+  <div class="modal-box glass">
+    <h2>AI Settings</h2>
+    <div class="tabs2">
+      <button class="tab2 active" onclick="duobot.settingsTab('general')" id="stab-general">General</button>
+      <button class="tab2" onclick="duobot.settingsTab('council')" id="stab-council">Council Personas</button>
+      <button class="tab2" onclick="duobot.settingsTab('keys')" id="stab-keys">API Keys</button>
+    </div>
+    <div id="settings-general">
+      <div class="form-row">
+        <label>Primary provider</label>
+        <select id="set-primary-provider">
+          <option value="kimi">Kimi (cloud)</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="huggingface">Hugging Face</option>
+          <option value="ollama">Ollama (local)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Primary model</label>
+        <input id="set-primary-model" list="dl-models-primary" placeholder="e.g. kimi-k2.6">
+      </div>
+      <div class="form-row">
+        <label>Local (Factory) model</label>
+        <select id="set-local-model"></select>
+      </div>
+      <div class="form-row">
+        <label><input type="checkbox" id="set-council-auto"> Council auto-execute</label>
+      </div>
+      <div class="form-row">
+        <label>Council chair</label>
+        <select id="set-council-chair">
+          <option value="primary">Omni</option>
+          <option value="gemini">Gemini</option>
+          <option value="anthropic">Claude</option>
+          <option value="openai">OpenAI</option>
+          <option value="local">Factory</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label><input type="checkbox" id="set-council-rag"> Feed SHIMS source context to council (saves tokens)</label>
+      </div>
+    </div>
+    <div id="settings-council" style="display:none">
+      <div id="member-settings"></div>
+    </div>
+    <div id="settings-keys" style="display:none">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Keys are saved to your <code>.env</code> file. Only changed fields are updated; masked values are left untouched.</p>
+      <div id="key-settings"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button class="btn" onclick="duobot.closeSettings()">Cancel</button>
+      <button class="btn primary" onclick="duobot.saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+<datalist id="dl-models-anthropic">
+  <option value="claude-opus-4">
+  <option value="claude-sonnet-4-6">
+  <option value="claude-3-5-sonnet-latest">
+  <option value="claude-3-haiku-20240307">
+</datalist>
+<datalist id="dl-models-openai">
+  <option value="gpt-4o">
+  <option value="gpt-4o-mini">
+  <option value="o3-mini">
+  <option value="o1-mini">
+  <option value="gpt-4.1">
+  <option value="gpt-4.1-mini">
+</datalist>
+<datalist id="dl-models-gemini">
+  <option value="gemini-2.5-pro">
+  <option value="gemini-2.5-flash">
+  <option value="gemini-2.0-flash">
+  <option value="gemini-1.5-pro">
+</datalist>
+<datalist id="dl-models-primary">
+  <option value="kimi-k2.6">
+  <option value="moonshot-v1-8k">
+  <option value="gpt-4o">
+  <option value="claude-sonnet-4-6">
+  <option value="gemini-2.5-pro">
+  <option value="deepseek-chat">
+  <option value="qwen-max">
+</datalist>
+<script src="/static/js/omni_duobot.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+SHIMS v14.2 GMP Powerhouse validation
+
+Checks completed in sandbox:
+- Python compile: passed
+- Full regression suite: 44 passed
+- Equipment tracker page: passed
+- R&D tech-transfer page: passed
+- Equipment seed import: >=150 records and key J.K. Lifecare tags detected
+- Equipment status history: passed
+- Production plan reservations and manpower roster: passed
+- Tech-transfer package and scale-up trial records: passed
+- ZIP integrity: passed after package build
+
+GMP note: this is launchable internal alpha software. It is not a validated production GxP system until site CSV, IQ/OQ/PQ, SOPs, user training, access review, electronic-signature validation, backup/restore validation, and QA approval are completed.
