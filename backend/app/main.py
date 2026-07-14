@@ -4637,6 +4637,12 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         model = _preferred_local_model(await _ollama_names())
     if not model:
         raise RuntimeError(f"No model available for provider '{provider}'")
+    # Optional fast-chat model override: load a small non-reasoning model in LM
+    # Studio (e.g. Qwen2.5-7B-Instruct) and set SHIMS_FAST_CHAT_MODEL so simple
+    # conversational turns skip the heavyweight reasoning model entirely.
+    fast_chat_model = os.getenv("SHIMS_FAST_CHAT_MODEL", "").strip()
+    if fast_chat_model and provider == "lmstudio" and fast_chat_model in lm_names:
+        model = fast_chat_model
     history = _sessions.setdefault(session_id, []) if req.conversation_mode else []
     # ---- Unlimited virtual context ----
     # The prompt window carries only the recent turns; everything older lives
@@ -4664,7 +4670,15 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                 recall_block = "\n".join(lines)
         except Exception:
             pass
-    system_text = _system_prompt() + (("\n\n" + recall_block) if recall_block else "")
+    # Fast-lane instruction: reasoning models (e.g. Gemma 4, Qwen 3) emit long
+    # hidden-thinking blocks even for "hi", adding 3-15s before the first visible
+    # token. For simple chat we explicitly forbid reasoning tags so the reply is
+    # immediate and conversational.
+    fast_instruction = (
+        "\n\nThis is a simple conversational turn. "
+        "Do not use reasoning or thinking tags. Answer immediately and concisely."
+    )
+    system_text = _system_prompt() + fast_instruction + (("\n\n" + recall_block) if recall_block else "")
     messages = [{"role": "system", "content": system_text}] + history[-50:] + [{"role": "user", "content": req.message}]
     yield _jsonl({"type": "meta", "session_id": session_id, "model": model, "provider": provider,
                   "route": f"{provider}-fast-path", "agent": "chat", "brain": f"unified-v13+{BRAIN_VERSION}",
@@ -4675,13 +4689,16 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     answer = ""
     pending: list[bytes] = []
     reasoning_buffer = ""
+    first_token_at: float | None = None
 
     # NOTE: the stream collectors ``await`` these callbacks, so they must be
     # coroutine functions — plain defs made the fast lane crash on the first
     # token (``await None`` → TypeError) and every chat fell back to the slow
     # full pipeline.
     async def on_delta(delta: str) -> None:
-        nonlocal answer
+        nonlocal answer, first_token_at
+        if first_token_at is None:
+            first_token_at = time.perf_counter()
         answer += delta
         pending.append(_jsonl({"type": "token", "content": delta}))
 
@@ -4750,11 +4767,18 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                     route=f"{provider}-fast-path", provider=provider, model=model,
                 ))
         trust = build_trust(route=f"{provider}-fast-path", evidence=[], missing_evidence=[], requested_level="draft")
+        total_latency_ms = (time.perf_counter() - started) * 1000
+        first_token_ms = (first_token_at - started) * 1000 if first_token_at else None
         log_event("turn.done", route=f"{provider}-fast-path", provider=provider, model=model,
-                  latency_ms=(time.perf_counter() - started) * 1000, ok=True,
-                  message=req.message, metadata={"session_id": session_id, "answer_preview": answer[:240]})
+                  latency_ms=total_latency_ms, ok=True,
+                  message=req.message, metadata={
+                      "session_id": session_id,
+                      "answer_preview": answer[:240],
+                      "first_token_ms": first_token_ms,
+                  })
         yield _jsonl({"type": "done", "session_id": session_id, "model": model, "provider": provider,
-                      "route": f"{provider}-fast-path", **_trust_fields(trust)})
+                      "route": f"{provider}-fast-path", "latency_ms": total_latency_ms,
+                      "first_token_ms": first_token_ms, **_trust_fields(trust)})
     except Exception as exc:
         if answer.strip():
             # We already streamed real content — finish the turn instead of
