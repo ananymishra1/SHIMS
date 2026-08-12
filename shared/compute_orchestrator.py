@@ -311,6 +311,13 @@ class ComputeOrchestrator:
                 return True
         return self._comfy_reachable()
 
+    def comfy_launchable(self) -> bool:
+        """True when a ComfyUI install exists that the orchestrator can spawn."""
+        with self._lock:
+            if self._comfy_state == "unavailable":
+                return False
+        return self._locate_comfyui() is not None
+
     # ------------------------------------------------------------------ #
     # Subprocess helpers (patterns from shared/native_engine/runtime.py)
     # ------------------------------------------------------------------ #
@@ -353,7 +360,12 @@ class ComputeOrchestrator:
         env_dir = (os.getenv("COMFYUI_DIR") or "").strip()
         if env_dir:
             candidates.append(Path(env_dir))
-        candidates += [Path("C:/ComfyUI"), Path("C:/d/ComfyUI"), Path.home() / "ComfyUI"]
+        candidates += [
+            Path("C:/ComfyUI"),
+            Path("C:/d/ComfyUI"),
+            Path.home() / "ComfyUI",
+            Path("C:/Users/direc/AppData/Local/AMD/AI_Bundle/ComfyUI/ComfyUI"),
+        ]
         for directory in candidates:
             if not (directory / "main.py").is_file():
                 continue
@@ -361,6 +373,8 @@ class ComputeOrchestrator:
                 directory / "venv" / "Scripts" / "python.exe",
                 directory / "venv" / "bin" / "python",
                 directory / "python_embeded" / "python.exe",
+                directory.parent / "venv" / "Scripts" / "python.exe",
+                directory.parent / "python_embeded" / "python.exe",
             ):
                 if py.is_file():
                     return py, directory

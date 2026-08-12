@@ -622,10 +622,19 @@ def _note_orchestrator_activity() -> None:
 
 
 def _orchestrator_comfy_available() -> bool:
-    """True when the orchestrator can serve ComfyUI images (running or launchable)."""
+    """True when the orchestrator can serve ComfyUI images right now."""
     try:
         from shared.compute_orchestrator import get_orchestrator
         return get_orchestrator().comfy_available()
+    except Exception:
+        return False
+
+
+def _orchestrator_comfy_launchable() -> bool:
+    """True when the orchestrator can spawn a local ComfyUI install on demand."""
+    try:
+        from shared.compute_orchestrator import get_orchestrator
+        return get_orchestrator().comfy_launchable()
     except Exception:
         return False
 
@@ -4802,7 +4811,15 @@ async def _diffusers_image(prompt: str) -> dict[str, Any] | None:
 async def _comfyui_image(prompt: str) -> dict[str, Any] | None:
     """Generate an image through a local ComfyUI / Comfy Desktop instance."""
     try:
-        from shared.amd_acceleration import generate_comfy_image
+        from shared.amd_acceleration import comfy_ui_status, generate_comfy_image
+        from shared.compute_orchestrator import get_orchestrator
+
+        # If ComfyUI is not already running, ask the orchestrator to launch it.
+        if not comfy_ui_status().get("ok"):
+            launched = await asyncio.to_thread(get_orchestrator().ensure_comfyui)
+            if not launched:
+                return {"ok": False, "provider": "comfyui", "error": "ComfyUI is installed but could not be started."}
+
         filename = _safe_name(prompt, "png")
         path = IMAGE_DIR / filename
         result = await generate_comfy_image(prompt, output_path=path, width=1024, height=1024)
@@ -4887,7 +4904,7 @@ def _image_provider_plan(backend: str) -> list[tuple[str, Callable[[str], Awaita
     plan: list[tuple[str, Callable[[str], Awaitable[dict[str, Any] | None]]]] = []
     if _settings["media"].get("stable_diffusion_url"):
         plan.append(("stable-diffusion", providers["stable-diffusion"]))
-    if comfy_ui_status().get("ok") or _orchestrator_comfy_available():
+    if comfy_ui_status().get("ok") or _orchestrator_comfy_available() or _orchestrator_comfy_launchable():
         plan.append(("comfyui", providers["comfyui"]))
     if _clean_secret(os.getenv("OPENAI_API_KEY")):
         plan.append(("openai", providers["openai"]))
