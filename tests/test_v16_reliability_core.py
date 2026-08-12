@@ -63,7 +63,7 @@ def test_search_query_planner_avoids_raw_chat_prompt():
 def test_brain_stream_search_done_contains_trust_and_action(monkeypatch, tmp_path):
     c = _client(tmp_path, monkeypatch)
 
-    async def fake_search(query: str, max_results: int = 6, provider: str | None = None):
+    async def fake_search(query: str, max_results: int = 6, provider: str | None = None, planned_query=None):
         return {
             "ok": True,
             "query": "fluconazole API India price",
@@ -73,7 +73,28 @@ def test_brain_stream_search_done_contains_trust_and_action(monkeypatch, tmp_pat
             "query_plan": {"primary_query": "fluconazole API India price", "variants": ["fluconazole API India price"]},
         }
 
+    # **kw absorbs the max_tokens/context_length budget the chat lane forwards
+    # to the real streamer; without it the patched call raised TypeError and the
+    # turn fell back to an unsourced answer, which read as a trust regression.
+    async def fake_tool_stream(model, messages, tools, on_delta, **kw):
+        # The brain model decides to search on the first turn, then
+        # synthesizes an answer from the tool results on the follow-up turn.
+        if tools and not any("Tool results" in str(m.get("content", "")) for m in messages):
+            return {"content": "", "tool_calls": [
+                {"function": {"name": "web.search", "arguments": {"query": "fluconazole API India price"}}}
+            ]}
+        if on_delta:
+            await on_delta("Fluconazole API pricing needs supplier/date verification [1].")
+        return {"content": "Fluconazole API pricing needs supplier/date verification [1].", "tool_calls": []}
+
     monkeypatch.setattr(main, "_web_search", fake_search)
+    # Provider is left on auto here; native-only routing resolves local turns
+    # to the native engine — patch its tool-aware streamer (and keep the legacy
+    # ones patched for determinism).
+    monkeypatch.setattr("shared.agent_loop._native_chat_stream", fake_tool_stream)
+    monkeypatch.setattr("shared.agent_loop._ollama_chat_stream", fake_tool_stream)
+    monkeypatch.setattr("shared.agent_loop._lmstudio_chat_stream", fake_tool_stream)
+    monkeypatch.setattr(main, "_kick_native_load", lambda *a, **k: None)
     chunks = []
     with c.stream("POST", "/brain/turn", json={"message": "search web for latest fluconazole API price India", "web_mode": True}) as resp:
         assert resp.status_code == 200

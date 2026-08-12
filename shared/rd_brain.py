@@ -10,6 +10,7 @@ Supports:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -155,14 +156,15 @@ class RDBrain:
                 self.provider = "deepseek"
                 self.model = self.model or DEEPSEEK_MODELS[0]
             else:
-                self.provider = "ollama"
-                self.model = self.model or settings.ollama_model
+                self.provider = "native"
+                self.model = self.model or os.getenv("SHIMS_NATIVE_MODEL", "")
         elif self.provider == "chemdfm":
             self.model = self.model or CHEMDFM_DEFAULT_MODEL
         elif self.provider == "deepseek":
             self.model = self.model or DEEPSEEK_MODELS[0]
         elif self.provider == "qwen":
-            self.model = self.model or "qwen2.5:14b"
+            # Qwen now runs on the native engine; empty model = loaded GGUF.
+            self.model = self.model or os.getenv("SHIMS_NATIVE_MODEL", "")
         elif self.provider == "ollama":
             self.model = self.model or settings.ollama_model
 
@@ -196,36 +198,29 @@ class RDBrain:
             return await self._call_deepseek(prompt, system, temperature)
         if self.provider == "qwen":
             return await self._call_qwen(prompt, system, temperature)
-        # Fallback to shared ask_ai (ollama) — pass model so Ollama respects RDBrain selection
-        result = await ask_ai(prompt, system=system, provider="ollama", model=self.model, feature='chemistry')
+        # Fallback to shared ask_ai — explicit providers are honored; the
+        # default local route is the native engine.
+        provider = self.provider if self.provider in {"ollama", "lmstudio"} else "native"
+        result = await ask_ai(prompt, system=system, provider=provider, model=self.model, feature='chemistry')
         return result.text
 
     async def _call_qwen(self, prompt: str, system: str, temperature: float) -> str:
-        """Call Qwen2.5 14B via Ollama for R&D-specific deep reasoning."""
-        qwen_model = self.model or "qwen2.5:14b"
-        payload = {
-            "model": qwen_model,
-            "messages": [
-                {"role": "system", "content": system or "You are a pharmaceutical R&D scientist with deep expertise in organic synthesis, process development, and analytical chemistry."},
-                {"role": "user", "content": prompt},
-            ],
-            "stream": False,
-            "options": {"temperature": temperature, "num_ctx": 32768},
-        }
-        try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                res = await client.post(
-                    f"{settings.ollama_base_url.rstrip('/')}/api/chat",
-                    json=payload,
-                )
-                res.raise_for_status()
-                data = res.json()
-            text = data.get("message", {}).get("content") or data.get("response") or ""
-            return text.strip() or "Qwen returned an empty response."
-        except Exception as exc:
-            # Fallback to general Ollama provider
-            result = await ask_ai(prompt, system=system, provider="ollama", model=qwen_model, feature='chemistry')
-            return f"[Qwen fallback] {result.text}"
+        """Call a Qwen-class GGUF via the native engine for R&D-specific deep reasoning."""
+        from .local_llm import feature_chat
+        qwen_model = self.model or None  # GGUF id; None = currently loaded native model
+        messages = [
+            {"role": "system", "content": system or "You are a pharmaceutical R&D scientist with deep expertise in organic synthesis, process development, and analytical chemistry."},
+            {"role": "user", "content": prompt},
+        ]
+        text = await asyncio.to_thread(
+            feature_chat, messages, model=qwen_model, max_tokens=4096,
+            temperature=temperature, feature="chemistry",
+        )
+        if text.strip():
+            return text.strip()
+        # Fallback to the general native provider surface
+        result = await ask_ai(prompt, system=system, provider="native", model=qwen_model, feature='chemistry')
+        return f"[native fallback] {result.text}"
 
     async def _call_deepseek(self, prompt: str, system: str, temperature: float) -> str:
         key = _deepseek_key()
@@ -252,7 +247,7 @@ class RDBrain:
         key = _chemdfm_key()
         base = _chemdfm_base_url()
         if not key or not base:
-            result = await ask_ai(prompt, system=system, provider="ollama", feature='chemistry')
+            result = await ask_ai(prompt, system=system, provider="native", feature='chemistry')
             return f"[ChemDFM not configured; local chemistry fallback] {result.text}"
         endpoint = base.rstrip("/")
         if not endpoint.endswith("/chat/completions"):
@@ -284,7 +279,7 @@ class RDBrain:
                 data = r.json()
             return data["choices"][0]["message"]["content"]
         except Exception as exc:
-            result = await ask_ai(prompt, system=system, provider="ollama", feature='chemistry')
+            result = await ask_ai(prompt, system=system, provider="native", feature='chemistry')
             return f"[ChemDFM call failed: {exc}; local chemistry fallback] {result.text}"
 
     # ── Web search helpers for real patent grounding ───────────────────────

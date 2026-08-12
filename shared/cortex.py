@@ -139,6 +139,7 @@ def evolve_skill(name: str, summary: str, body: str = "", *, confidence: float =
     saved = skill_store.save_skill(
         name=name, summary=summary, body=body,
         tags=(tags or []) + ["cortex"], source="cortex-evolution",
+        created_from="cortex_evolution",
     )
     return {"ok": True, "decision": "applied", "confidence": confidence, "skill": saved}
 

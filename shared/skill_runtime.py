@@ -165,7 +165,16 @@ def _register_skill_tool(skill: dict[str, Any]) -> dict[str, Any]:
         agent_tools.TOOLS.pop(name, None)
 
     run_fn = _build_tool_runner(skill.get("id", "unknown"), source)
-    agent_tools.register_ephemeral_tool(name, description, run_fn)
+    parameters = schema.get("parameters") or {"type": "object", "properties": {}}
+    props = parameters.get("properties", {})
+    required = parameters.get("required", [])
+    tool = agent_tools.Tool(
+        name,
+        description,
+        agent_tools._schema(props, required),
+        run_fn,
+    )
+    agent_tools._register(tool)
     return {"ok": True, "tool": name}
 
 
@@ -227,8 +236,22 @@ def execute_skill(skill_id: str, args: dict[str, Any] | None = None) -> dict[str
     return {"ok": False, "error": "unreachable"}
 
 
+def _compact_schema(schema: dict[str, Any] | None, max_len: int = 300) -> str:
+    """Serialize a tool schema for prompt injection, capping length."""
+    if not schema:
+        return "{}"
+    text = json.dumps(schema, ensure_ascii=False)
+    if len(text) > max_len:
+        return text[:max_len] + " ... (truncated)"
+    return text
+
+
 def skill_prompt_block(query: str, limit: int = 3) -> str:
-    """Build a prompt fragment with relevant text skills and dynamic tool list."""
+    """Build a prompt fragment with relevant text skills and dynamic tool list.
+
+    For runtime='tool' skills the JSON schema is included so the model can call
+    the dynamic tool correctly. Schemas are truncated to keep the prompt compact.
+    """
     from .skills import relevant_skills
     skills = relevant_skills(query, limit=limit)
     lines: list[str] = []
@@ -237,12 +260,24 @@ def skill_prompt_block(query: str, limit: int = 3) -> str:
         for s in skills:
             prefix = "[tool]" if s.get("runtime") == "tool" else "[memo]"
             lines.append(f"- {prefix} {s.get('name')}: {s.get('summary', '')}")
-    dynamic = [n for n, t in agent_tools.TOOLS.items() if n.startswith("skill.")]
+            if s.get("runtime") == "tool":
+                schema = s.get("tool_schema")
+                if schema:
+                    lines.append(f"  schema: {_compact_schema(schema)}")
+    # List all tools that were registered from runtime='tool' skills. These may
+    # have arbitrary names, not just the built-in "skill.*" helpers.
+    tool_skill_names: set[str] = set()
+    for s in list_skills(limit=200):
+        if s.get("runtime") == "tool":
+            tname = s.get("tool_name") or (s.get("tool_schema") or {}).get("name")
+            if tname:
+                tool_skill_names.add(tname)
+    dynamic = [(n, t) for n, t in agent_tools.TOOLS.items() if n in tool_skill_names]
     if dynamic:
         lines.append("Dynamic tools available from learned skills:")
-        for n in dynamic[:10]:
-            t = agent_tools.TOOLS[n]
-            lines.append(f"- {n}: {t.description[:120]}")
+        for n, t in dynamic[:10]:
+            schema_text = _compact_schema(t.parameters)
+            lines.append(f"- {n}: {t.description[:120]} schema: {schema_text}")
     return "\n".join(lines)
 
 

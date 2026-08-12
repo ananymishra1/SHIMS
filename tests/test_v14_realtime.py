@@ -26,14 +26,28 @@ def test_v14_web_health_and_search_endpoint_no_crash(monkeypatch):
 
 
 def test_v14_brain_web_mode_routes_to_search(monkeypatch):
+    """Web-intent turns are routed by the brain model itself: it calls the
+    web.search tool and results stream back as a search event."""
     c = TestClient(app)
-    async def fake_search(query, max_results=6, provider=None):
+    async def fake_search(query, max_results=6, provider=None, planned_query=None):
         return {'ok': True, 'query': query, 'provider': 'test', 'results': [{'title': 'One', 'url': 'https://example.com', 'snippet': 'Example result'}]}
+    async def fake_tool_stream(model, messages, tools, on_delta, **kw):
+        if tools and not any("Tool results" in str(m.get("content", "")) for m in messages):
+            return {"content": "", "tool_calls": [
+                {"function": {"name": "web.search", "arguments": {"query": "current AI news"}}}
+            ]}
+        if on_delta:
+            await on_delta("Here is the current AI news.")
+        return {"content": "Here is the current AI news.", "tool_calls": []}
     import backend.app.main as m
     monkeypatch.setattr(m, '_web_search', fake_search)
+    # Native-only routing: provider=ollama resolves to the native engine, so
+    # the unified full lane streams via agent_loop._native_chat_stream.
+    monkeypatch.setattr("shared.agent_loop._native_chat_stream", fake_tool_stream)
+    monkeypatch.setattr(m, "_kick_native_load", lambda *a, **k: None)
     with c.stream('POST', '/brain/turn', json={'message': 'what is current AI news', 'web_mode': True, 'source': 'typed', 'provider': 'ollama'}) as r:
         body = ''.join(r.iter_text())
-    assert 'tool:web_search' in body
+    assert 'web.search' in body
     assert 'Example result' in body
 
 

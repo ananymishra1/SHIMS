@@ -61,7 +61,7 @@ class Settings:
 
     ollama_base_url: str = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
     ollama_model: str = os.getenv('OLLAMA_MODEL', 'llama3.2:latest')
-    ai_provider: str = os.getenv('SHIMS_AI_PROVIDER', 'ollama')
+    ai_provider: str = os.getenv('SHIMS_AI_PROVIDER', 'native')
     openai_api_key: str = os.getenv('OPENAI_API_KEY', '')
     openai_model: str = os.getenv('OPENAI_MODEL', 'gpt-4o')
     anthropic_api_key: str = os.getenv('ANTHROPIC_API_KEY', '')
@@ -83,6 +83,31 @@ class Settings:
     huggingface_base_url: str = os.getenv('HUGGINGFACE_BASE_URL', 'http://127.0.0.1:8080')
     huggingface_api_key: str = os.getenv('HUGGINGFACE_API_KEY', '')
     huggingface_model: str = os.getenv('HUGGINGFACE_MODEL', 'meta-llama/Llama-3.1-8B-Instruct')
+
+    # Dedicated local inference engines (OpenAI-compatible servers)
+    vllm_base_url: str = os.getenv('VLLM_BASE_URL', 'http://127.0.0.1:8000')
+    vllm_api_key: str = os.getenv('VLLM_API_KEY', '')
+    vllm_model: str = os.getenv('VLLM_MODEL', '')
+
+    sglang_base_url: str = os.getenv('SGLANG_BASE_URL', 'http://127.0.0.1:30000')
+    sglang_api_key: str = os.getenv('SGLANG_API_KEY', '')
+    sglang_model: str = os.getenv('SGLANG_MODEL', '')
+
+    aphrodite_base_url: str = os.getenv('APHRODITE_BASE_URL', 'http://127.0.0.1:2242')
+    aphrodite_api_key: str = os.getenv('APHRODITE_API_KEY', '')
+    aphrodite_model: str = os.getenv('APHRODITE_MODEL', '')
+
+    koboldcpp_base_url: str = os.getenv('KOBOLDCPP_BASE_URL', 'http://127.0.0.1:5001')
+    koboldcpp_api_key: str = os.getenv('KOBOLDCPP_API_KEY', '')
+    koboldcpp_model: str = os.getenv('KOBOLDCPP_MODEL', '')
+
+    # SHIMS-owned native GGUF engine (embedded koboldcpp runtime, provider 'native').
+    # native_gpu_layers -1 = auto-computed from the launch plan.
+    native_enabled: bool = env_bool('SHIMS_NATIVE_ENABLED', True)
+    native_model_path: str = os.getenv('SHIMS_NATIVE_MODEL', '')
+    native_ctx: int = env_int('SHIMS_NATIVE_CTX', 16384)
+    native_gpu_layers: int = env_int('SHIMS_NATIVE_GPU_LAYERS', -1)
+    native_port: int = env_int('SHIMS_NATIVE_PORT', 5115)
 
     # LM Studio: local OpenAI-compatible server (default port 1234). Preferred over
     # Ollama when running, since it can use GPU backends (Vulkan/Metal/CUDA) that

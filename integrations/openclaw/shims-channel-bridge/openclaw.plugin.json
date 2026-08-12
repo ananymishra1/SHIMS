@@ -1,0 +1,40 @@
+{
+  "id": "shims-channel-bridge",
+  "name": "SHIMS Channel Bridge",
+  "description": "Relays inbound channel messages (WhatsApp) from OpenClaw into the SHIMS Omni backend.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "shims_channel_status"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "shimsUrl": {
+        "type": "string",
+        "description": "SHIMS Omni backend base URL (default http://127.0.0.1:8010)."
+      },
+      "bridgeToken": {
+        "type": "string",
+        "description": "Must equal SHIMS_BRIDGE_TOKEN on the SHIMS server. The relay fails closed without it."
+      },
+      "channels": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Channel ids to relay. Default: [\"whatsapp\"]."
+      },
+      "relayGroups": {
+        "type": "boolean",
+        "description": "Relay group messages as well as direct messages. Default false."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Per-request timeout for the relay POST (default 8000)."
+      }
+    }
+  }
+}

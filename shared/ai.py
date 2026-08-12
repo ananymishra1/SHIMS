@@ -318,8 +318,37 @@ class LMStudioProvider(AIProvider):
             return fallback
 
 
+class NativeProvider(AIProvider):
+    """SHIMS native engine provider — delegates to the embedded engine facade."""
+    async def complete(self, prompt: str, system: str = '', tools: Optional[list[dict[str, Any]]] = None, model: Optional[str] = None) -> AIResult:
+        try:
+            import asyncio
+            from .native_engine import get_engine
+            engine = get_engine()
+            messages = [
+                {'role': 'system', 'content': system or 'You are SHIMS, a careful local-first AI operating system.'},
+                {'role': 'user', 'content': prompt},
+            ]
+            result = await asyncio.to_thread(engine.chat_raw, messages)
+            used_model = engine.loaded_model_id() or model or 'native'
+            return AIResult(
+                text=(result.get('content') or '').strip() or 'Native engine returned an empty response.',
+                provider='native',
+                model=used_model,
+                route='native',
+                raw=result,
+            )
+        except Exception as exc:
+            fallback = await FallbackProvider().complete(prompt, system, tools, model=model)
+            fallback.text = f'Native engine unavailable ({exc}). {fallback.text}'
+            fallback.ok = False
+            fallback.error = str(exc)
+            fallback.route = 'native:fallback'
+            return fallback
+
+
 def get_provider(name: Optional[str] = None) -> AIProvider:
-    provider = (name or settings.ai_provider or 'ollama').lower().strip()
+    provider = (name or settings.ai_provider or 'native').lower().strip()
     if provider == 'openai':
         return OpenAIProvider()
     if provider in {'gemini', 'google'}:
@@ -337,6 +366,8 @@ def get_provider(name: Optional[str] = None) -> AIProvider:
         return OpenAICompatibleProvider('chemdfm', 'http://127.0.0.1:8000/v1', 'OpenDFM/ChemDFM-R-14B', 'CHEMDFM_API_KEY')
     if provider == 'lmstudio':
         return LMStudioProvider()
+    if provider == 'native':
+        return NativeProvider()
     if provider == 'fallback':
         return FallbackProvider()
     return OllamaProvider()
@@ -359,3 +390,127 @@ def extract_json_maybe(text: str) -> Any:
         except Exception:
             return None
     return None
+
+
+# ── Voice / TTS helpers ────────────────────────────────────────────────
+
+def _create_audio(text: str, lang: str = "en-IN", backend: str | None = None) -> dict[str, Any]:
+    """Generate TTS audio and return a web-playable file URL.
+
+    Backends (in priority order when ``backend`` is ``auto`` or unset):
+      1. edge-tts  – free, fast, natural-sounding Azure voices
+      2. pyttsx3   – offline robot voice fallback
+      3. openai    – only when backend is explicitly "openai" and a key exists
+      4. fish      – local fish-speech-2 when explicitly requested
+
+    Files are written to ``data/media/audio/`` and served under ``/media/files/audio/``.
+    """
+    import asyncio
+    import os
+    import re
+    import uuid
+    from pathlib import Path
+
+    text = (text or "").strip()
+    if not text:
+        return {"ok": False, "error": "empty text", "file_url": None, "engine": None}
+
+    chosen_backend = (backend or os.getenv("SHIMS_AUDIO_BACKEND") or "auto").strip().lower()
+
+    repo_root = Path(__file__).resolve().parents[1]
+    audio_dir = repo_root / "data" / "media" / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"tts_{uuid.uuid4().hex[:12]}.mp3"
+    out_path = audio_dir / filename
+    file_url = f"/media/files/audio/{filename}"
+
+    # -- OpenAI TTS (explicit only) --
+    if chosen_backend in {"openai", "openai-tts"}:
+        api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if api_key:
+            try:
+                import httpx
+                voice = os.getenv("OPENAI_TTS_VOICE", "alloy").strip() or "alloy"
+                model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts").strip() or "gpt-4o-mini-tts"
+                r = httpx.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": model, "voice": voice, "input": text[:4096]},
+                    timeout=60,
+                )
+                r.raise_for_status()
+                out_path.write_bytes(r.content)
+                return {"ok": True, "file_url": file_url, "engine": "openai", "path": str(out_path)}
+            except Exception as exc:
+                if chosen_backend.startswith("openai"):
+                    return {"ok": False, "error": f"OpenAI TTS failed: {exc}", "file_url": None, "engine": "openai"}
+        # fall through to local fallback unless explicitly openai-only
+
+    # -- fish-speech-2 (explicit only) --
+    if chosen_backend in {"fish", "fish-speech", "fishspeech"}:
+        try:
+            from shared.compute_orchestrator import get_orchestrator
+            orch = get_orchestrator()
+            if orch.ensure_fish():
+                import httpx
+                base = orch._fish_base_url().rstrip("/")
+                r = httpx.post(
+                    f"{base}/v1/tts",
+                    json={"text": text[:500], "format": "mp3"},
+                    timeout=120,
+                )
+                r.raise_for_status()
+                out_path.write_bytes(r.content)
+                return {"ok": True, "file_url": file_url, "engine": "fish-speech", "path": str(out_path)}
+        except Exception as exc:
+            if chosen_backend in {"fish", "fish-speech", "fishspeech"}:
+                return {"ok": False, "error": f"fish-speech TTS failed: {exc}", "file_url": None, "engine": "fish-speech"}
+
+    # -- edge-tts (preferred local/free) --
+    if chosen_backend in {"auto", "edge", "edge-tts", ""}:
+        try:
+            import edge_tts
+            # Map common language tags to a reasonable default voice.
+            voice_map = {
+                "en-in": "en-IN-PrabhatNeural",
+                "en": "en-US-AriaNeural",
+                "hi": "hi-IN-MadhurNeural",
+                "es": "es-ES-AlvaroNeural",
+                "fr": "fr-FR-HenriNeural",
+                "de": "de-DE-ConradNeural",
+                "zh": "zh-CN-YunxiNeural",
+                "ja": "ja-JP-KeitaNeural",
+            }
+            low = (lang or "en").lower().replace("_", "-")
+            voice = os.getenv("SHIMS_EDGE_TTS_VOICE", "").strip()
+            if not voice:
+                voice = voice_map.get(low, voice_map.get(low.split("-")[0], "en-US-AriaNeural"))
+
+            async def _edge() -> None:
+                communicate = edge_tts.Communicate(text[:5000], voice)
+                await communicate.save(str(out_path))
+
+            asyncio.run(_edge())
+            if out_path.exists() and out_path.stat().st_size > 0:
+                return {"ok": True, "file_url": file_url, "engine": "edge-tts", "voice": voice, "path": str(out_path)}
+        except Exception as exc:
+            if chosen_backend in {"edge", "edge-tts"}:
+                return {"ok": False, "error": f"edge-tts failed: {exc}", "file_url": None, "engine": "edge-tts"}
+
+    # -- pyttsx3 offline fallback --
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        # pyttsx3 saves as WAV; keep the same base URL shape.
+        wav_path = out_path.with_suffix(".wav")
+        wav_filename = wav_path.name
+        wav_url = f"/media/files/audio/{wav_filename}"
+        engine.save_to_file(text[:5000], str(wav_path))
+        engine.runAndWait()
+        if wav_path.exists() and wav_path.stat().st_size > 0:
+            return {"ok": True, "file_url": wav_url, "engine": "pyttsx3", "path": str(wav_path)}
+    except Exception as exc:
+        return {"ok": False, "error": f"pyttsx3 fallback failed: {exc}", "file_url": None, "engine": "pyttsx3"}
+
+    return {"ok": False, "error": "no TTS backend produced audio", "file_url": None, "engine": chosen_backend}

@@ -100,6 +100,10 @@ Key variables:
 | `DEEPSEEK_API_KEY` | DeepSeek cloud routing |
 | `QWEN_API_KEY` | DashScope / Qwen cloud routing |
 | `HUGGINGFACE_BASE_URL` | Local OpenAI-compatible endpoint (TGI, vLLM, llama.cpp server) |
+| `VLLM_BASE_URL` / `VLLM_MODEL` | vLLM local server |
+| `SGLANG_BASE_URL` / `SGLANG_MODEL` | SGLang local server |
+| `APHRODITE_BASE_URL` / `APHRODITE_MODEL` | Aphrodite Engine local server |
+| `KOBOLDCPP_BASE_URL` / `KOBOLDCPP_MODEL` | KoboldCPP local server |
 
 Never commit `.env` — it is already ignored.
 

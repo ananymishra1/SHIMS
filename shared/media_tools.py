@@ -58,16 +58,50 @@ def generate_image(
     backend: str = "auto",
     width: int = 1024,
     height: int = 1024,
+    queue_if_busy: bool = True,
 ) -> dict[str, Any]:
     """Generate an image using the best available backend.
 
-    Backends: auto, pollinations, openai, diffusers, qwen, stable-diffusion
+    Backends: auto, pollinations, comfyui, openai, diffusers, qwen, stable-diffusion.
+
+    With ``backend="comfyui"`` (or ``auto`` when the compute orchestrator reports
+    ComfyUI available but the machine is currently busy), the job is queued for
+    downtime generation via the compute orchestrator and ``{"queued": job_id}``
+    is returned instead of blocking on a busy GPU.
     """
     backend = (backend or "auto").lower()
-    # For now, only pollinations is guaranteed sync + no key. Others can be added.
+    if backend == "comfyui" or (backend == "auto" and queue_if_busy and _orchestrator_wants_queue()):
+        return _queue_orchestrator_image(prompt, width=width, height=height)
     if backend in {"auto", "pollinations"}:
         return generate_image_pollinations(prompt, width=width, height=height)
-    return {"ok": False, "error": f"backend '{backend}' not available in sync tool mode; try pollinations or use /media/generate endpoint"}
+    return {"ok": False, "error": f"backend '{backend}' not available in sync tool mode; try pollinations/comfyui or use /media/generate endpoint"}
+
+
+def _orchestrator_wants_queue() -> bool:
+    """True when ComfyUI is launchable but the machine is too busy to run it now."""
+    try:
+        from .compute_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return orch.comfy_available() and not orch.is_idle()
+    except Exception:
+        return False
+
+
+def _queue_orchestrator_image(prompt: str, width: int = 1024, height: int = 1024) -> dict[str, Any]:
+    """Enqueue a downtime ComfyUI job through the compute orchestrator."""
+    try:
+        from .compute_orchestrator import get_orchestrator
+        job_id = get_orchestrator().queue_image_job(prompt, width=width, height=height)
+        return {
+            "ok": True,
+            "provider": "comfyui",
+            "type": "image",
+            "queued": job_id,
+            "title": prompt[:80],
+            "note": "Queued for downtime generation; check /api/orchestrator/image-job/" + job_id,
+        }
+    except Exception as exc:
+        return {"ok": False, "provider": "comfyui", "error": str(exc)[:200]}
 
 
 def generate_video_placeholder(prompt: str) -> dict[str, Any]:

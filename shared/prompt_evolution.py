@@ -17,9 +17,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-import httpx
-
 from .config import STORAGE_DIR
+from .local_llm import feature_chat
 from .security import new_id
 
 VARIANTS_DIR = STORAGE_DIR / "prompt_variants"
@@ -229,25 +228,17 @@ def _llm_mutate_fn(prompt: str, n: int = 3) -> list[str]:
         'Return: ["variant1", "variant2", "variant3"]'
     )
 
-    model = os.getenv("SHIMS_MUTATION_MODEL", "qwen2.5:7b")
-    host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-    payload = {
-        "model": model,
-        "messages": [
+    model = os.getenv("SHIMS_MUTATION_MODEL") or None  # GGUF id; None = loaded native model
+    raw = feature_chat(
+        [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "stream": False,
-        "options": {"temperature": 0.8, "num_predict": 2048},
-        "keep_alive": "5m",
-    }
-
-    with httpx.Client(timeout=90.0) as client:
-        r = client.post(f"{host}/api/chat", json=payload)
-        r.raise_for_status()
-        data = r.json()
-
-    raw = (data.get("message") or {}).get("content") or data.get("response") or ""
+        model=model,
+        max_tokens=2048,
+        temperature=0.8,
+        feature="prompt_mutation",
+    )
     raw = raw.strip()
     if "[" in raw and "]" in raw:
         raw = raw[raw.find("[") : raw.rfind("]") + 1]

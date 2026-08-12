@@ -26,8 +26,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-import httpx
-
 from .security import new_id
 
 
@@ -132,31 +130,30 @@ def _ensure_async_llm(llm: RawLLMCaller | None) -> LLMCaller:
 
 
 async def _default_llm_call(system: str, prompt: str) -> dict[str, Any]:
-    """Best-effort async LLM call to the local Ollama endpoint.
+    """Best-effort async LLM call to the native engine loopback.
 
     Tests can monkeypatch this function. Returns {"ok": bool, "text": str,
     "error": str}.
     """
-    host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-    model = os.getenv("SHIMS_ORCHESTRATOR_MODEL", os.getenv("SHIMS_ROUTER_MODEL", "qwen2.5:7b"))
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.3, "num_predict": 2048},
-        "keep_alive": "5m",
-    }
+    from .local_llm import feature_chat
+
+    model = os.getenv("SHIMS_ORCHESTRATOR_MODEL") or None  # GGUF id; None = loaded native model
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(f"{host}/api/chat", json=payload)
-            r.raise_for_status()
-            data = r.json()
+        text = await asyncio.to_thread(
+            feature_chat,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            model=model,
+            max_tokens=2048,
+            temperature=0.3,
+            feature="swarm_orchestrator",
+        )
     except Exception as exc:
         return {"ok": False, "text": "", "error": str(exc)[:200]}
-    text = (data.get("message") or {}).get("content") or data.get("response") or ""
+    if not text:
+        return {"ok": False, "text": "", "error": "native engine unavailable"}
     return {"ok": True, "text": text.strip(), "error": ""}
 
 

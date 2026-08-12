@@ -10,8 +10,8 @@
 <title>SHIMS</title>
   <!-- Flash-free theme: set data-theme before CSS paints. Aurora = default, Classic = space/neon. -->
   <script>(function(){try{var t=localStorage.getItem('shims_theme')||'aurora';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','aurora');}})();</script>
-  <link rel="stylesheet" href="/static/css/shims_omni.css?v=20260713-lmstudio-clean">
-  <link rel="stylesheet" href="/static/css/shims_agent.css?v=20260713-lmstudio-clean">
+  <link rel="stylesheet" href="/static/css/shims_omni.css?v=20260804-native-clean">
+  <link rel="stylesheet" href="/static/css/shims_agent.css?v=20260804-native-clean">
   <noscript><style>#boot{display:none!important}</style></noscript>
 </head>
 <body>
@@ -62,6 +62,7 @@
     <div class="topbar-status">
       <span class="chip" id="chip-llm"><span class="dot"></span><span>LLM</span></span>
       <span class="chip chip-soft" id="chip-modelinfo" title="Active model / route"><span id="tb-model">auto</span><span class="chip-sep">·</span><span id="tb-latency" class="muted">—ms</span></span>
+      <span class="chip chip-soft chip-native" id="chip-native" title="SHIMS native engine (built-in GGUF inference)"><span class="dot"></span><span id="tb-native">native: off</span></span>
       <span class="chip" id="chip-db"><span class="dot"></span><span>DB</span></span>
       <span class="chip" id="chip-net"><span class="dot"></span><span>NET</span></span>
       <span class="chip" id="chip-clock"><span class="dot"></span><span id="clock">00:00:00</span></span>
@@ -166,8 +167,34 @@
       <span>⌘ Command Center</span>
       <button class="cmd-dock-x" onclick="document.getElementById('cmd-dock').classList.remove('open')" title="Close">✕</button>
     </div>
+    <!-- Native Engine heartbeat + controls -->
+    <div class="panel-header" onclick="togglePanelSection('native')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+      <span>⚡ Native Engine</span><span class="panel-chevron" id="chevron-native">▾</span>
+    </div>
+    <div class="panel-body" id="body-native" style="padding-bottom:6px;flex:0 0 auto;font-size:11px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span id="native-dot" style="font-size:10px">●</span>
+        <span id="native-state" style="font-weight:600">checking…</span>
+        <span id="native-uptime" style="margin-left:auto;font-size:9px;color:var(--text-dim)"></span>
+      </div>
+      <div id="native-model" style="font-size:10px;color:var(--text-dim);word-break:break-all;margin-bottom:4px">—</div>
+      <div id="native-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:9px;color:var(--text-dim);margin-bottom:6px"></div>
+      <div id="native-pin-status" style="font-size:10px;margin-bottom:4px;padding:3px 6px;border-radius:4px;background:rgba(116,255,185,.08);border-left:2px solid #74ffb9">
+        <span style="color:#74ffb9;font-weight:600">📌 Pinned:</span> <span id="native-pin-name" style="color:var(--text-dim)">—</span>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:3px">
+        <select id="native-model-select" style="flex:1;min-width:0;font-size:10px;background:var(--bg,#0b0f17);color:inherit;border:1px solid var(--line);border-radius:4px;padding:2px"></select>
+      </div>
+      <div style="display:flex;gap:4px">
+        <button onclick="nativePinSelected()" style="flex:1;font-size:10px;padding:3px;cursor:pointer;background:#2563eb;color:#fff;border:0;border-radius:4px;font-weight:600" title="Pin this model for ALL chat — persists across restarts">📌 Set as brain</button>
+        <button onclick="nativeLoadSelected()" style="font-size:10px;padding:3px 8px;cursor:pointer" title="Load without pinning (session only)">Load once</button>
+        <button onclick="nativeUnload()" style="font-size:10px;padding:3px 6px;cursor:pointer" title="Unload model, free RAM">⏏</button>
+      </div>
+      <div id="native-action-note" style="font-size:9px;color:var(--text-dim);margin-top:3px"></div>
+    </div>
+
     <!-- Agent Roster -->
-    <div class="panel-header" onclick="togglePanelSection('roster')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+    <div class="panel-header" onclick="togglePanelSection('roster')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line)">
       <span>🤖 Agent Roster</span><span class="panel-chevron" id="chevron-roster">▾</span>
     </div>
     <div class="panel-body" id="body-roster" style="padding-bottom:6px;flex:0 0 auto;max-height:140px">
@@ -207,15 +234,6 @@
           <div class="stage-dot" id="stage-done" style="flex:1;height:3px;border-radius:2px;background:var(--line)"></div>
         </div>
       </div>
-    </div>
-
-    <!-- Thinking now renders INLINE in each answer (see .turn-thinking). Legacy
-         hidden stubs keep older helpers null-safe without a side panel. -->
-    <div id="think-legacy" hidden>
-      <span id="think-status"></span>
-      <span id="think-dot-plan"></span><span id="think-dot-context"></span>
-      <span id="think-dot-tool"></span><span id="think-dot-generate"></span>
-      <div id="think-lines"></div><input id="think-inject-input">
     </div>
 
     <!-- Plans & Schedule -->
@@ -258,6 +276,52 @@
         <button class="v9-btn" style="font-size:10px;padding:4px 8px" onclick="enterpriseAction('list_dashboard')">Dashboard</button>
         <button class="v9-btn" style="font-size:10px;padding:4px 8px" onclick="enterpriseAction('harmonize')">Harmonize</button>
         <button class="v9-btn" style="font-size:10px;padding:4px 8px" onclick="loadEnterpriseDashboard()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Brain Controls -->
+    <div class="panel-header" onclick="togglePanelSection('brain')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line)">
+      <span>🧠 Brain Controls</span><span class="panel-chevron" id="chevron-brain">▸</span>
+    </div>
+    <div class="panel-body hidden" id="body-brain" style="padding-top:8px;flex:0 0 auto;max-height:280px;overflow:auto">
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:11px">
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:6px">Reasoning
+          <select id="bc-reasoning" style="font-size:10px;padding:3px 4px;max-width:130px">
+            <option value="auto">auto</option>
+            <option value="none">none (fastest)</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:6px">Temperature
+          <span style="display:flex;align-items:center;gap:6px">
+            <input id="bc-temperature" type="range" min="0" max="1.5" step="0.05" style="width:90px" oninput="document.getElementById('bc-temperature-val').textContent=this.value" />
+            <span id="bc-temperature-val" style="min-width:28px;text-align:right">0.2</span>
+          </span>
+        </label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:6px">Context
+          <select id="bc-ctx" style="font-size:10px;padding:3px 4px;max-width:130px">
+            <option value="4096">4096</option>
+            <option value="8192">8192</option>
+            <option value="16384">16384</option>
+            <option value="32768">32768</option>
+          </select>
+        </label>
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:6px">Parallel slots
+          <select id="bc-slots" style="font-size:10px;padding:3px 4px;max-width:130px">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <div class="v9-row" style="flex-wrap:wrap">
+          <button class="v9-btn" style="font-size:10px;padding:4px 8px" onclick="saveLlmControls()">Save Brain Controls</button>
+          <button class="v9-btn hidden" id="bc-reload" style="font-size:10px;padding:4px 8px" onclick="reloadNativeEngine()">Reload engine now</button>
+        </div>
+        <div id="bc-status" style="font-size:10px;color:var(--text-dim)"></div>
       </div>
     </div>
 
@@ -333,13 +397,6 @@
       <button class="mode-pill" id="mode-converse" data-short="CONV"><span class="led"></span>CONVERSE</button>
       <button class="mode-pill" id="mode-web" data-short="WEB"><span class="led"></span>WEB ALLOW</button>
       <button class="mode-pill" id="mode-peers" data-short="PEER"><span class="led"></span>PEERS</button>
-    </div>
-    <div class="provider-pills" id="provider-pills" title="Click to select AI provider">
-      <button class="provider-pill" data-provider="lmstudio" data-model="" onclick="setProviderPill(this)">⚡ LM Studio<span class="pill-model" id="pill-model-lmstudio"></span></button>
-      <button class="provider-pill" data-provider="anthropic" data-model="claude-sonnet-4-6" onclick="setProviderPill(this)">🟠 Claude</button>
-      <button class="provider-pill" data-provider="openai" data-model="gpt-4o-mini" onclick="setProviderPill(this)">🟢 GPT</button>
-      <button class="provider-pill" data-provider="gemini" data-model="gemini-2.5-flash" onclick="setProviderPill(this)">🔵 Gemini</button>
-      <button class="provider-pill" id="pill-more" data-provider="" data-model="" title="More providers — Kimi, DeepSeek, Qwen, Ollama" onclick="document.getElementById('btn-model').click()">☁️ More ▾</button>
     </div>
     <div class="privacy-bar" id="privacy-bar" title="Privacy mode controls whether sensitive data can leave this machine">
       <button class="privacy-btn" data-mode="strict" onclick="setPrivacyMode('strict')">🔒 Strict</button>
@@ -453,11 +510,28 @@
   <div class="pane-header"><div class="pane-title">&#9881; Settings</div><button class="pane-close" onclick="closePane()">&#10005;</button></div>
   <div class="pane-body">
     <div class="pane-section-title">AI Model</div>
-    <div class="setting-row"><label>Provider</label><select class="mf-select" id="set-provider" onchange="loadSettings()"><option value="lmstudio" selected>⚡ LM Studio (local, GPU)</option><option value="auto">✨ Auto-Select</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="kimi">Kimi</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen / Alibaba</option></select></div>
+    <div class="setting-row"><label>Provider</label><select class="mf-select" id="set-provider"><option value="native" selected>🧠 SHIMS Native (built-in)</option><option value="auto">✨ Auto-Select</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="kimi">Kimi</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen / Alibaba</option></select></div>
     <div class="setting-row"><label>Model</label><select class="mf-select" id="set-model"><option value="auto">Auto</option></select></div>
+    <div class="setting-row" style="font-size:11px;color:var(--text-dim)"><span id="set-brain-model-active">Active brain model: &mdash;</span></div>
     <div class="setting-row" style="font-size:11px;color:var(--text-dim);line-height:1.4">💡 On this machine (128GB RAM) the fastest human-like conversation comes from small quantized local models (7-9B). Larger models are better for hard reasoning but feel slower.</div>
 
+    <div class="pane-section-title">🧩 Native Models (GGUF)</div>
+    <div class="setting-row" style="font-size:11px;color:var(--text-dim);line-height:1.4">Browse and download GGUF models from Hugging Face straight into SHIMS, then load them into the native engine — no LM Studio or HF CLI needed.</div>
+    <div class="setting-row">
+      <div class="set-row"><label style="flex:1">📦 Installed</label><button class="set-test" onclick="mmRefreshLocal()">Refresh</button></div>
+      <div id="mm-installed" style="font-size:11px"></div>
+    </div>
+    <div class="setting-row">
+      <label>🤗 Download from Hugging Face</label>
+      <div class="set-row"><input class="key-input" id="mm-hf-query" placeholder="e.g. qwen2.5 7b instruct gguf" onkeydown="if(event.key==='Enter')mmSearchHF()"/><button class="set-test" onclick="mmSearchHF()">Search</button></div>
+      <div id="mm-hf-results" style="font-size:11px"></div>
+      <div id="mm-hf-files" style="font-size:11px"></div>
+      <div id="mm-downloads" style="font-size:11px"></div>
+    </div>
+
     <div class="pane-section-title">🎙 Conversation & Voice</div>
+    <div class="setting-row"><label>Voice Output (TTS)</label><select class="mf-select" id="set-tts-engine" onchange="setTtsEngine(this.value)"><option value="">Loading...</option></select></div>
+    <div class="setting-row" style="font-size:11px;color:var(--text-dim)"><span id="tts-engine-status">Choose which engine speaks. Fish Speech 2 = human voice clone.</span></div>
     <div class="setting-row"><label>Voice Language</label><select class="mf-select" id="set-voice-lang"><option value="en-IN">Indian English</option><option value="hi-IN">Hindi</option><option value="en-US">US English</option></select></div>
     <div class="setting-row"><label>Speech Model (STT)</label><select class="mf-select" id="set-stt-model" onchange="setSttModel(this.value)"><option value="">Loading...</option></select></div>
     <div class="setting-row" style="font-size:11px;color:var(--text-dim);flex-wrap:wrap;gap:8px"><span id="stt-model-status">Larger = more accurate. Switch applies on your next spoken command.</span><button class="mf-gen-btn secondary" style="font-size:11px;padding:4px 10px" onclick="resetSttCache()">Reset STT cache</button></div>
@@ -474,26 +548,15 @@
     </details>
 
     <details class="settings-advanced">
-      <summary class="pane-section-title">⚡ Local Servers <span style="font-weight:400;font-size:10px;color:var(--text-dim)">— LM Studio / HuggingFace endpoints</span></summary>
-      <div class="local-provider-block">
-        <div class="setting-row"><label>⚡ LM Studio</label><div class="set-row"><input class="key-input" id="lmstudio-url" placeholder="http://127.0.0.1:1234"/><button class="set-test" id="test-lmstudio" onclick="testConnection('lmstudio')">Test</button></div><select class="mf-select set-model" id="model-lmstudio"><option>Auto-populate</option></select></div>
-        <div class="setting-row"><label>Download a model</label><div class="set-row"><input class="key-input" id="lmstudio-pull-name" placeholder="e.g. qwen2.5-coder-7b or a huggingface.co URL"/><button class="set-test" onclick="pullLmstudioModel()">Download</button></div></div>
-        <div class="setting-row" style="font-size:11px;color:var(--text-dim)" id="lmstudio-pull-log"></div>
-      </div>
-      <div class="local-provider-block">
-        <div class="setting-row"><label>🤗 HuggingFace</label><div class="set-row"><input class="key-input" id="hf-url" placeholder="http://127.0.0.1:8080"/><button class="set-test" id="test-huggingface" onclick="testConnection('huggingface')">Test</button></div><select class="mf-select set-model" id="model-huggingface"><option>Auto-populate</option></select></div>
-        <div class="setting-row"><label>HF Token (optional)</label><input class="key-input" id="key-huggingface" type="password" placeholder="hf_..."/></div>
-      </div>
+      <summary class="pane-section-title">Agent Specialist Models <span style="font-weight:400;font-size:10px;color:var(--text-dim)">— optional, click to expand</span></summary>
+      <div class="setting-row"><label>Router</label><select class="mf-select agent-model-select" id="agent-model-router" data-env="SHIMS_ROUTER_MODEL"><option value="">Auto</option></select></div>
+      <div class="setting-row"><label>Fast</label><select class="mf-select agent-model-select" id="agent-model-fast" data-env="SHIMS_FAST_MODEL"><option value="">Auto</option></select></div>
+      <div class="setting-row"><label>Smart</label><select class="mf-select agent-model-select" id="agent-model-smart" data-env="SHIMS_SMART_MODEL"><option value="">Auto</option></select></div>
+      <div class="setting-row"><label>Coder</label><select class="mf-select agent-model-select" id="agent-model-coder" data-env="SHIMS_CODER_MODEL"><option value="">Auto</option></select></div>
+      <div class="setting-row"><label>Creative</label><select class="mf-select agent-model-select" id="agent-model-creative" data-env="SHIMS_CREATIVE_MODEL"><option value="">Auto</option></select></div>
+      <div class="setting-row"><label>Chemistry</label><select class="mf-select agent-model-select" id="agent-model-chemistry" data-env="SHIMS_CHEMISTRY_MODEL"><option value="">Auto</option></select></div>
+      <div class="setting-row"><label>Research</label><select class="mf-select agent-model-select" id="agent-model-research" data-env="SHIMS_RESEARCH_MODEL"><option value="">Auto</option></select></div>
     </details>
-
-    <div class="pane-section-title">Agent Specialist Models</div>
-    <div class="setting-row"><label>Router</label><select class="mf-select agent-model-select" id="agent-model-router" data-env="SHIMS_ROUTER_MODEL"><option value="">Auto</option></select></div>
-    <div class="setting-row"><label>Fast</label><select class="mf-select agent-model-select" id="agent-model-fast" data-env="SHIMS_FAST_MODEL"><option value="">Auto</option></select></div>
-    <div class="setting-row"><label>Smart</label><select class="mf-select agent-model-select" id="agent-model-smart" data-env="SHIMS_SMART_MODEL"><option value="">Auto</option></select></div>
-    <div class="setting-row"><label>Coder</label><select class="mf-select agent-model-select" id="agent-model-coder" data-env="SHIMS_CODER_MODEL"><option value="">Auto</option></select></div>
-    <div class="setting-row"><label>Creative</label><select class="mf-select agent-model-select" id="agent-model-creative" data-env="SHIMS_CREATIVE_MODEL"><option value="">Auto</option></select></div>
-    <div class="setting-row"><label>Chemistry</label><select class="mf-select agent-model-select" id="agent-model-chemistry" data-env="SHIMS_CHEMISTRY_MODEL"><option value="">Auto</option></select></div>
-    <div class="setting-row"><label>Research</label><select class="mf-select agent-model-select" id="agent-model-research" data-env="SHIMS_RESEARCH_MODEL"><option value="">Auto</option></select></div>
     <div class="pane-section-title">Privacy & Data Safety</div>
     <div class="setting-row"><label>Privacy Mode</label><select class="mf-select" id="set-privacy-mode"><option value="strict">🔒 Strict — Local only, never cloud</option><option value="balanced">⚖️ Balanced — Auto-detect sensitive data</option><option value="performance">🚀 Performance — Prefer cloud, ask for sensitive</option></select></div>
     <details class="settings-advanced">
@@ -510,42 +573,6 @@
       <div class="setting-row"><label>Local Access Token</label><input class="key-input" id="key-token" type="password" placeholder="Paste hosting access token..."/></div>
       <div class="setting-row"><label>Peer URL (v1 &#8596; v2)</label><input class="key-input" id="key-peer" placeholder="http://127.0.0.1:8001"/></div>
     </details>
-    <div class="pane-section-title">Appearance</div>
-    <div class="setting-row"><label>Theme Preview</label><div class="set-theme">
-      <button class="theme-chip on" data-theme="dark" onclick="setThemePreview('dark')">Dark</button>
-      <button class="theme-chip" data-theme="light" onclick="setThemePreview('light')">Light</button>
-      <button class="theme-chip" data-theme="midnight" onclick="setThemePreview('midnight')">Midnight</button>
-      <button class="theme-chip" data-theme="amber" onclick="setThemePreview('amber')">Amber</button>
-    </div></div>
-    <!-- Desktop-only settings (Electron). Revealed by initDesktopSettings(). -->
-    <div id="desktop-settings">
-      <div class="pane-section-title">Desktop App</div>
-      <div class="ds-row">
-        <div class="ds-label"><div class="ds-name">Launch at login</div><div class="ds-desc">Start Shims automatically when you sign in</div></div>
-        <div class="ds-toggle" id="ds-autoStart"></div>
-      </div>
-      <div class="ds-row">
-        <div class="ds-label"><div class="ds-name">Require access token</div><div class="ds-desc">Enforce LOCAL_ACCESS_TOKEN for LAN / tunnel access</div></div>
-        <div class="ds-toggle" id="ds-requireToken"></div>
-      </div>
-      <div class="ds-row">
-        <div class="ds-label"><div class="ds-name">Diagnostic logging</div><div class="ds-desc">Write a desktop log file to help with support</div></div>
-        <div class="ds-toggle" id="ds-logging"></div>
-      </div>
-      <div class="ds-row">
-        <div class="ds-label"><div class="ds-name">Automatic updates</div><div class="ds-desc">Check GitHub Releases for new versions on startup</div></div>
-        <div class="ds-toggle" id="ds-autoUpdate"></div>
-      </div>
-      <div class="ds-row">
-        <div class="ds-label"><div class="ds-name">Cowork folder</div><div class="ds-folder" id="ds-cowork-path">Not set</div></div>
-        <button class="ds-btn" id="ds-pick-folder">Choose</button>
-      </div>
-      <div class="ds-row">
-        <div class="ds-label"><div class="ds-name">Software updates</div><div class="ds-update-status" id="ds-update-status">—</div></div>
-        <button class="ds-btn" id="ds-check-updates">Check Now</button>
-      </div>
-    </div>
-
     <div class="pane-section-title">Support</div>
     <div class="setting-row"><button class="mf-gen-btn secondary" onclick="window.open('mailto:support@jklifecare.com?subject=SHIMS%20Support','_blank')">Email Support</button></div>
     <div class="setting-row"><button class="mf-gen-btn secondary" onclick="reportAbuse()">Report Abuse</button></div>
@@ -556,7 +583,7 @@
       <a href="/terms" target="_blank" style="color:var(--accent);font-size:12px">Terms of Use</a>
       <a href="/content-policy" target="_blank" style="color:var(--accent);font-size:12px">Content Policy</a>
     </div>
-    <div style="margin:4px 0 12px;font-size:11px;color:var(--text-dim)">SHIMS Omni launch build - JK Lifecare</div>
+    <div style="margin:4px 0 12px;font-size:11px;color:var(--text-dim)">SHIMS Omni launch build</div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="save-btn" onclick="saveSettings()">Save Settings</button>
@@ -771,7 +798,7 @@
       });
     })();
   </script>
-  <script src="/static/js/shims_omni.js?v=20260713-lmstudio-clean" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_omni.js'"></script>
-  <script src="/static/js/shims_agent.js?v=20260713-lmstudio-clean" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_agent.js'"></script>
+  <script src="/static/js/shims_omni.js?v=20260804-native-clean" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_omni.js'"></script>
+  <script src="/static/js/shims_agent.js?v=20260804-native-clean" defer onerror="var l=document.getElementById('boot-log'); if(l) l.textContent='Failed to load shims_agent.js'"></script>
 </body>
 </html>

@@ -56,7 +56,7 @@ body{
   user-select:none;
 }
 /* Code / CLI surfaces stay monospace in every theme. */
-pre,code,.coder-editor,.coder-console,#coder-editor,.atc-out,.adc-diff,.ajc-log,.think-line,.cli,.mono{font-family:var(--mono-font)}
+pre,code,.coder-editor,.coder-console,#coder-editor,.atc-out,.adc-diff,.ajc-log,.cli,.mono{font-family:var(--mono-font)}
 /* Aurora softens the retro CRT chrome; Classic keeps it full-strength. */
 .scanline{opacity:0}
 [data-theme="classic"] .scanline{opacity:1}
@@ -271,6 +271,10 @@ input,textarea{font-family:inherit;color:inherit;background:none;border:none;out
 .chip.warn .dot{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .chip.err{color:var(--red);border-color:rgba(255,90,122,.4)}
 .chip.err .dot{background:var(--red);box-shadow:0 0 8px var(--red)}
+
+/* SHIMS native engine status chip — reuses .ok/.warn states above */
+.chip-native{text-transform:none;letter-spacing:.04em}
+.chip-native.ok #tb-native{color:var(--cyan)}
 
 .topbar-actions{display:flex;gap:6px}
 .icon-btn{
@@ -508,39 +512,13 @@ a.nav-row{text-decoration:none;color:inherit}
   scrollbar-width:thin;
 }
 /* Safety net: at narrow widths the toolbar groups (agent toolbar, mode
-   pills, provider pills) can collectively exceed the dock's width. Rather
+   pills) can collectively exceed the dock's width. Rather
    than silently clip them with overflow:hidden, let the dock scroll so
    every control stays reachable instead of invisibly cut off. */
 .dock::-webkit-scrollbar{height:3px}
 .dock::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
-/* Provider selector pills — always visible in dock */
-.provider-select{display:none!important}
 .dock-modes{display:flex;gap:6px;flex-shrink:0}
-.provider-pills{
-  display:flex;gap:5px;flex-wrap:nowrap;align-items:center;
-  flex-shrink:1;min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;
-  scrollbar-width:thin;
-}
-.provider-pills::-webkit-scrollbar{height:3px}
-.provider-pills::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
-.provider-pill{
-  padding:5px 10px;border:1px solid var(--line);border-radius:999px;
-  font-size:10px;letter-spacing:.06em;color:var(--text-dim);background:rgba(2,6,22,.6);
-  cursor:pointer;transition:all .2s;white-space:nowrap;
-}
-.provider-pill:hover{border-color:var(--cyan);color:var(--cyan)}
-.provider-pill.on{border-color:var(--cyan);background:rgba(124,240,255,.12);color:var(--cyan);box-shadow:0 0 10px rgba(124,240,255,.15)}
-.provider-pill .pill-model{font-size:9px;opacity:.7;margin-left:4px}
-.provider-pill[data-provider="ollama"].on{border-color:#a78bfa;background:rgba(167,139,250,.12);color:#a78bfa;box-shadow:0 0 10px rgba(167,139,250,.15)}
-.provider-pill[data-provider="anthropic"].on{border-color:#ff9e44;background:rgba(255,158,68,.12);color:#ff9e44;box-shadow:0 0 10px rgba(255,158,68,.15)}
-.provider-pill[data-provider="openai"].on{border-color:#10a37f;background:rgba(16,163,127,.12);color:#10a37f;box-shadow:0 0 10px rgba(16,163,127,.15)}
-.provider-pill[data-provider="gemini"].on{border-color:#4285f4;background:rgba(66,133,244,.12);color:#4285f4;box-shadow:0 0 10px rgba(66,133,244,.15)}
 .privacy-bar{display:none!important}
-@media(max-width:480px){
-  .provider-pills{gap:3px}
-  .provider-pill:not(.on){display:none}
-  .provider-pill.on{padding:4px 8px;font-size:9px}
-}
 .dock-orb{
   width:46px;height:46px;border-radius:50%;
   border:1px solid var(--line);
@@ -575,13 +553,6 @@ a.nav-row{text-decoration:none;color:inherit}
 .send-btn svg{width:16px;height:16px}
 
 .dock-modes{display:flex;gap:6px;flex-shrink:0}
-.provider-select{
-  background:rgba(2,6,22,.7);border:1px solid var(--line);border-radius:8px;
-  color:var(--text);font-size:11px;padding:6px 10px;cursor:pointer;
-  font-family:'JetBrains Mono',monospace;outline:none;
-}
-.provider-select:focus{border-color:var(--cyan)}
-.provider-select option{background:#021423;color:var(--text)}
 .mode-pill{
   padding:8px 14px;border:1px solid var(--line);border-radius:999px;
   font-size:9.5px;letter-spacing:.25em;text-transform:uppercase;color:var(--text-dim);
@@ -893,10 +864,10 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 .set-test{padding:8px 12px;border:1px solid var(--cyan);border-radius:6px;background:rgba(124,240,255,.08);color:var(--cyan);font-size:10px;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;transition:all .2s;white-space:nowrap}
 .set-test:hover{background:rgba(124,240,255,.18);box-shadow:0 0 14px rgba(124,240,255,.3)}
 .set-model{margin-top:4px}
-.set-theme{display:flex;gap:8px;flex-wrap:wrap}
-.theme-chip{padding:6px 14px;border:1px solid var(--line);border-radius:999px;font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--text-dim);cursor:pointer;transition:all .2s}
-.theme-chip:hover{color:var(--text);border-color:rgba(124,240,255,.4)}
-.theme-chip.on{color:var(--cyan);border-color:var(--cyan);background:rgba(124,240,255,.1)}
+.mm-progress{height:4px;background:rgba(124,240,255,.08);border-radius:2px;overflow:hidden;margin-top:6px}
+.mm-progress-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--amber));width:0%;transition:width .4s ease-out;box-shadow:0 0 8px var(--cyan)}
+.mm-badge{display:inline-block;padding:1px 6px;border:1px solid rgba(124,240,255,.35);border-radius:4px;font-size:9px;letter-spacing:.1em;color:var(--cyan);vertical-align:middle}
+.mm-badge.dim{border-color:var(--line);color:var(--text-dim)}
 
 /* ───────── CUSTOM TITLE BAR ───────── */
 .titlebar{position:fixed;top:0;left:0;right:0;height:36px;background:rgba(2,6,22,.9);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 14px;-webkit-app-region:drag;user-select:none;z-index:200;display:none}
@@ -1155,37 +1126,6 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 .ac-status.ok{color:var(--green)}
 .ac-status.no,.ac-status.err{color:var(--red)}
 
-/* ───────── DESKTOP SETTINGS (Electron only) ─────────
-   Section in the Settings pane revealed only when running inside the
-   Electron shell (window.shimsDesktop). Backed by IPC to the main process. */
-#desktop-settings{display:none}
-.ds-row{display:flex;align-items:center;gap:12px;padding:10px 0;
-  border-bottom:1px dashed rgba(124,240,255,.08)}
-.ds-row:last-child{border-bottom:none}
-.ds-label{flex:1;min-width:0}
-.ds-label .ds-name{font-size:12px;color:var(--text)}
-.ds-label .ds-desc{font-size:10px;color:var(--text-dim);margin-top:2px;line-height:1.4}
-.ds-toggle{
-  flex-shrink:0;width:46px;height:24px;border-radius:999px;
-  border:1px solid var(--line);background:rgba(2,6,22,.7);
-  position:relative;cursor:pointer;transition:all .2s;
-}
-.ds-toggle::after{
-  content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;
-  border-radius:50%;background:var(--text-dim);transition:all .2s;
-}
-.ds-toggle.on{border-color:var(--cyan);background:rgba(124,240,255,.15)}
-.ds-toggle.on::after{left:24px;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
-.ds-btn{
-  flex-shrink:0;padding:7px 14px;border:1px solid var(--cyan);border-radius:6px;
-  background:rgba(124,240,255,.08);color:var(--cyan);font-size:10px;
-  letter-spacing:.18em;text-transform:uppercase;cursor:pointer;transition:all .2s;
-}
-.ds-btn:hover{background:rgba(124,240,255,.18);box-shadow:0 0 12px rgba(124,240,255,.3)}
-.ds-folder{font-size:10.5px;color:var(--cyan-dim);word-break:break-all;margin-top:2px}
-.ds-update-status{font-size:10px;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--text-dim);margin-top:3px}
-
 /* ───────── UPDATE BANNER (D.1) ─────────
    Top-centre banner shown when the Electron auto-updater reports news. */
 #update-banner{
@@ -1224,6 +1164,12 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 .session-new{width:100%;justify-content:center;margin-bottom:8px}
 .session-chip{cursor:pointer;margin-bottom:7px;transition:border-color .2s,background .2s,transform .2s}
 .session-chip:hover,.session-chip.active{border-color:rgba(124,240,255,.42);background:rgba(124,240,255,.09);transform:translateY(-1px)}
+.session-chip{display:flex;align-items:center;gap:8px}
+.session-chip .session-open{display:flex;flex-direction:column;min-width:0;flex:1}
+.session-chip .session-open b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-del{flex:0 0 auto;opacity:0;border:0;background:transparent;color:#f87171;cursor:pointer;font-size:13px;line-height:1;padding:4px 6px;border-radius:6px;transition:opacity .15s,background .15s}
+.session-chip:hover .session-del,.session-chip.active .session-del{opacity:.75}
+.session-del:hover{opacity:1;background:rgba(248,113,113,.14)}
 .empty-pane.compact{padding:16px 8px;font-size:10px}
 .agent-row.offline .ag-dot{background:#5a3244}
 .media-card{border:1px solid rgba(124,240,255,.24);background:rgba(2,12,28,.55);border-radius:14px;padding:10px;margin-top:10px}.media-card img,.media-card video{max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,.08)}.media-card a{color:#7cf0ff}.bubble .content .media-card{font-size:12px}
@@ -1259,24 +1205,6 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 .patent-card{border:1px solid rgba(124,240,255,.18);border-left:3px solid rgba(124,240,255,.55);border-radius:10px;padding:10px 12px;background:rgba(0,0,0,.16);margin:8px 0;font-size:11px}
 .patent-card b{color:#e9fbff;font-size:12px}
 .patent-card small{display:block;color:#9eb6c1;margin-top:4px}
-
-/* ───────── Thinking Sidebox ───────── */
-.think-box{ border:1px solid rgba(124,240,255,.22); border-radius:10px; background:rgba(0,0,0,.28); padding:10px; margin-top:8px; max-height:none; overflow:auto; font-size:12px; }
-.think-box .think-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
-.think-box .think-head b{ color:var(--cyan); font-size:11px; letter-spacing:.08em; }
-.think-box .think-stage{ display:flex; gap:4px; margin-bottom:6px; }
-.think-dot{ width:7px; height:7px; border-radius:50%; background:var(--line); }
-.think-dot.on{ background:var(--cyan); box-shadow:0 0 6px var(--cyan); }
-.think-line{ padding:3px 0; color:var(--text-dim); border-bottom:1px solid rgba(124,240,255,.06); }
-.think-line:last-child{ border-bottom:none; }
-.think-line b{ color:var(--amber-soft); font-weight:600; }
-.think-inject{ display:flex; gap:6px; margin-top:6px; }
-.think-inject input{ flex:1; background:rgba(0,0,0,.35); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-size:11px; color:var(--text); }
-.think-inject button{ padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:rgba(124,240,255,.1); color:var(--cyan); font-size:11px; cursor:pointer; }
-.think-inject button:hover{ background:rgba(124,240,255,.2); }
-.think-actions{ display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; }
-.think-actions button{ padding:5px 10px; border-radius:6px; border:1px solid rgba(255,90,122,.35); background:rgba(255,90,122,.1); color:var(--red); font-size:11px; cursor:pointer; }
-.think-actions button:hover{ background:rgba(255,90,122,.2); }
 
 /* ───────── Proposal Card (Yes/No Dialog) ───────── */
 .agent-proposal-card{ border:1px solid rgba(124,240,255,.22); border-radius:12px; background:rgba(0,0,0,.32); margin-top:10px; overflow:hidden; }
@@ -1331,7 +1259,6 @@ details.settings-advanced summary:hover{color:var(--cyan)}
 
 .panel-body.hidden{ display:none; }
 .panel-chevron{ font-size:10px; color:var(--text-dim); transition:transform .2s; }
-#body-thinking .think-box{ margin-top:0; }
 #body-desktop .v9-row, #body-plans .v9-row, #body-enterprise .v9-row{ gap:6px; }
 
 /* ════════════════════════════════════════════════════════════════════

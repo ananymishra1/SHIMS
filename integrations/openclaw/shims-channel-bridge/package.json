@@ -1,0 +1,19 @@
+{
+  "name": "shims-channel-bridge",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin relaying inbound channel messages (WhatsApp) into SHIMS Omni.",
+  "type": "module",
+  "main": "index.js",
+  "private": true,
+  "openclaw": {
+    "extensions": ["./index.js"]
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.1"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  }
+}

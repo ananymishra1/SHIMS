@@ -137,7 +137,7 @@ def schedule_task(
 ) -> dict[str, Any]:
     if schedule_type not in {"once", "interval", "cron"}:
         return {"ok": False, "error": "invalid schedule_type"}
-    if action_type not in {"tool", "plan", "message", "inbox_ingest"}:
+    if action_type not in {"tool", "plan", "message", "inbox_ingest", "comms_digest", "day_observer", "nightly_cycle"}:
         return {"ok": False, "error": "invalid action_type"}
     next_run = _parse_when(schedule_type, when)
     if next_run is None:

@@ -92,22 +92,97 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+# Common English function words carry no retrieval signal — without filtering,
+# a query like "can you check if the desktop bridge is running?" matches any
+# document containing "the"/"is"/"you" and recency alone admits zero-overlap
+# chunks into every turn.
+_STOPWORDS = {
+    "the", "a", "an", "can", "you", "your", "is", "are", "was", "were",
+    "what", "how", "please", "check", "tell", "show", "give", "make", "do",
+    "does", "did", "it", "this", "that", "these", "those", "of", "to", "in",
+    "on", "for", "with", "and", "or", "but", "if", "then", "so", "at", "by",
+    "from", "up", "about", "into", "over", "after", "me", "my", "we", "our",
+    "they", "them", "he", "she", "his", "her", "i", "im", "lets", "let",
+    "us", "ok", "okay", "yes", "no", "hi", "hello", "hey", "thanks", "thank",
+    "could", "would", "should", "will", "shall", "may", "might", "must",
+    "need", "want", "get", "got", "go", "going", "there", "here", "when",
+    "where", "which", "who", "why", "not", "now", "just", "also", "too",
+    "very", "much", "many", "some", "any", "all", "each", "few", "more",
+    "most", "other", "such", "only", "own", "same", "than", "once",
+}
+
+
+def _rag_min_score() -> float:
+    try:
+        return float(os.getenv("SHIMS_RAG_MIN_SCORE", "1.5"))
+    except Exception:
+        return 1.5
+
+
+def _vector_min_sim() -> float:
+    try:
+        return float(os.getenv("SHIMS_VECTOR_MIN_SIM", "0.62"))
+    except Exception:
+        return 0.62
+
+
+def _rag_strong_score() -> float:
+    """Admission bar for keyword hits — weak single-token matches against the
+    corpus used to flood the addendum with irrelevant pharma/regulatory chunks
+    on any conversational turn. Set SHIMS_RAG_STRONG_SCORE <= SHIMS_RAG_MIN_SCORE
+    to restore the old lenient behavior."""
+    try:
+        return float(os.getenv("SHIMS_RAG_STRONG_SCORE", "3.0"))
+    except Exception:
+        return 3.0
+
+
+def _vector_strong_sim() -> float:
+    """Admission bar for vector hits. Set SHIMS_VECTOR_STRONG_SIM <=
+    SHIMS_VECTOR_MIN_SIM to restore the old lenient behavior."""
+    try:
+        return float(os.getenv("SHIMS_VECTOR_STRONG_SIM", "0.70"))
+    except Exception:
+        return 0.70
+
+
+def _rag_coverage_min() -> int:
+    """Distinct query content tokens a keyword hit must match when the query
+    has 2+ content tokens (phrase matches always pass). Stops one stray shared
+    word ("output", "useful") from admitting an unrelated corpus chunk.
+    Set SHIMS_RAG_COVERAGE_MIN=1 to restore score-only admission."""
+    try:
+        return max(1, int(os.getenv("SHIMS_RAG_COVERAGE_MIN", "2")))
+    except Exception:
+        return 2
+
+
 def _tokens(text: str) -> list[str]:
-    return [w.lower() for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9_+-]{2,}", text or "") if len(w) > 2]
+    return [
+        w.lower()
+        for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9_+-]{2,}", text or "")
+        if len(w) > 2 and w.lower() not in _STOPWORDS
+    ]
 
 
 def _score(query: str, text: str, *, weight: float = 1.0, pinned: bool = False, created_at: float | None = None) -> float:
     q = _tokens(query)
     if not q:
+        if (query or "").strip():
+            # Stopword-only query: no content signal at all — do not let
+            # weight/recency alone admit the chunk.
+            return 0.0
         recency = 0.0
         if created_at:
             recency = max(0.0, 1.0 - ((_now() - created_at) / (90 * 86400)))
         return (2.0 if pinned else 0.0) + float(weight) + recency
     hay = (text or "").lower()
     score = 0.0
+    overlap = 0
     seen = set(q)
     for tok in seen:
         if tok in hay:
+            overlap += 1
             score += 1.0
             score += min(3, hay.count(tok)) * 0.15
     phrase = _clean(query).lower()
@@ -116,7 +191,9 @@ def _score(query: str, text: str, *, weight: float = 1.0, pinned: bool = False, 
     if pinned:
         score += 0.75
     score *= max(0.1, float(weight or 1.0))
-    if created_at:
+    if created_at and overlap >= 1:
+        # Recency only nudges chunks that already share a content token with
+        # the query — it never admits a zero-overlap chunk by itself.
         score += max(0.0, 0.35 - ((_now() - created_at) / (30 * 86400)))
     return round(score, 4)
 
@@ -190,6 +267,62 @@ def _connect() -> Generator[sqlite3.Connection, None, None]:
         )
         con.execute("CREATE INDEX IF NOT EXISTS idx_brain_knowledge_title ON knowledge_chunks(title)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_brain_knowledge_created ON knowledge_chunks(created_at)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_brain_knowledge_updated ON knowledge_chunks(updated_at)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_brain_knowledge_source ON knowledge_chunks(source_type, source_uri)")
+        # Full-text index over the knowledge corpus.
+        #
+        # Retrieval used to score only the newest 1,500 chunks (a Python scan),
+        # so once the corpus grew past that, most of it became unreachable:
+        # measured on this machine, 173 chunks mentioned "immunogenicity" and
+        # NONE were in that window, so the query silently returned unrelated
+        # context instead. FTS5 lets SQLite index-match the whole corpus in
+        # milliseconds; Python then scores only the matched candidates.
+        #
+        # `content=`/`content_rowid=` makes this an external-content index: it
+        # stores the inverted index only, not a second copy of the text.
+        try:
+            con.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+                    title,
+                    chunk_text,
+                    content='knowledge_chunks',
+                    content_rowid='id',
+                    tokenize="unicode61 remove_diacritics 2"
+                )
+                """
+            )
+            # Keep the index in lockstep with the table it mirrors.
+            con.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS knowledge_fts_ai AFTER INSERT ON knowledge_chunks BEGIN
+                    INSERT INTO knowledge_fts(rowid, title, chunk_text)
+                    VALUES (new.id, new.title, new.chunk_text);
+                END
+                """
+            )
+            con.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS knowledge_fts_ad AFTER DELETE ON knowledge_chunks BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, title, chunk_text)
+                    VALUES ('delete', old.id, old.title, old.chunk_text);
+                END
+                """
+            )
+            con.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS knowledge_fts_au AFTER UPDATE ON knowledge_chunks BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, title, chunk_text)
+                    VALUES ('delete', old.id, old.title, old.chunk_text);
+                    INSERT INTO knowledge_fts(rowid, title, chunk_text)
+                    VALUES (new.id, new.title, new.chunk_text);
+                END
+                """
+            )
+        except Exception:
+            # No FTS5 in this SQLite build — retrieval falls back to the
+            # recency scan automatically (see _knowledge_candidates).
+            pass
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS research_items (
@@ -221,6 +354,17 @@ def _connect() -> Generator[sqlite3.Connection, None, None]:
             """
         )
         con.execute("CREATE INDEX IF NOT EXISTS idx_brain_tasks_status ON background_tasks(status)")
+        # Internal bookkeeping (index build state, migrations). Kept separate
+        # from `memories` so it never shows up in user-facing recall.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS brain_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
         # Defensive migration: add a result column for the task worker (older DBs lack it).
         try:
             con.execute("ALTER TABLE background_tasks ADD COLUMN result_json TEXT DEFAULT '{}'")
@@ -522,8 +666,116 @@ def _learn_explicit_memories(text: str) -> list[dict[str, Any]]:
 
 
 def _knowledge_rows(limit: int = 1500) -> list[sqlite3.Row]:
+    """Most-recently-updated chunks. Recency-only; see _knowledge_candidates
+    for query-driven retrieval across the whole corpus."""
     with _connect() as con:
         return con.execute("SELECT * FROM knowledge_chunks ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
+
+
+_FTS_READY: bool | None = None
+
+
+def ensure_fts_index(*, force: bool = False) -> dict[str, Any]:
+    """Populate the full-text index if it is missing or badly out of date.
+
+    The triggers in _connect keep it current going forward, but a database
+    created before the index existed needs one backfill.
+
+    Staleness is tracked with an explicit marker in brain_meta rather than by
+    counting the FTS table: this is an external-content index, so
+    ``SELECT COUNT(*) FROM knowledge_fts`` reads through to knowledge_chunks
+    and reports full coverage even when the index holds nothing.
+    """
+    global _FTS_READY
+    if _FTS_READY and not force:
+        return {"ok": True, "rebuilt": False, "cached": True}
+    try:
+        with _connect() as con:
+            chunks = con.execute("SELECT COUNT(*) FROM knowledge_chunks").fetchone()[0]
+            try:
+                con.execute("SELECT rowid FROM knowledge_fts LIMIT 1").fetchone()
+            except Exception:
+                _FTS_READY = False
+                return {"ok": False, "reason": "fts5_unavailable"}
+            row = con.execute("SELECT value FROM brain_meta WHERE key='fts_indexed_count'").fetchone()
+            indexed = int(row["value"]) if row and str(row["value"]).isdigit() else 0
+            # Rebuild when never built, or when drift is big enough to hurt recall.
+            stale = indexed == 0 or abs(chunks - indexed) > max(50, int(chunks * 0.02))
+            if force or stale:
+                con.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')")
+                con.execute(
+                    "INSERT INTO brain_meta(key, value, updated_at) VALUES('fts_indexed_count', ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                    (str(chunks), _now()),
+                )
+                con.commit()
+                _FTS_READY = True
+                log_event("brain.fts.rebuilt", route="brain:rag", provider="local", model=BRAIN_VERSION,
+                          ok=True, message=f"indexed {chunks} chunks", metadata={"chunks": chunks})
+                return {"ok": True, "rebuilt": True, "chunks": chunks, "indexed": chunks}
+            _FTS_READY = True
+            return {"ok": True, "rebuilt": False, "chunks": chunks, "indexed": indexed}
+    except Exception as exc:
+        _FTS_READY = False
+        return {"ok": False, "reason": str(exc)[:200]}
+
+
+def _fts_match_expression(query: str, *, max_terms: int = 12) -> str:
+    """Build a safe FTS5 MATCH expression from free-form user text.
+
+    Every token is quoted so FTS5 operators a user happens to type ("AND",
+    "*", "-", ":") are treated as literal text rather than syntax. Tokens are
+    OR-ed for recall; bm25 ranking decides what actually comes back first.
+    """
+    toks: list[str] = []
+    for tok in _tokens(query):
+        t = re.sub(r'[^A-Za-z0-9]', "", tok)
+        if len(t) > 2 and t not in toks:
+            toks.append(t)
+        if len(toks) >= max_terms:
+            break
+    return " OR ".join(f'"{t}"' for t in toks)
+
+
+def _knowledge_candidates(query: str, *, candidate_limit: int = 400, recency_floor: int = 150) -> list[sqlite3.Row]:
+    """Chunks worth scoring for ``query``, drawn from the ENTIRE corpus.
+
+    Uses the FTS index to find matches anywhere in the knowledge base, then
+    tops the list up with the newest chunks so recent context still surfaces
+    for vague queries. Falls back to pure recency if FTS is unavailable, so
+    behaviour degrades to the old path rather than breaking.
+    """
+    match = _fts_match_expression(query)
+    rows: list[sqlite3.Row] = []
+    seen: set[int] = set()
+    if match and ensure_fts_index().get("ok"):
+        try:
+            with _connect() as con:
+                for row in con.execute(
+                    """
+                    SELECT k.* FROM knowledge_fts f
+                    JOIN knowledge_chunks k ON k.id = f.rowid
+                    WHERE knowledge_fts MATCH ?
+                    ORDER BY bm25(knowledge_fts, 4.0, 1.0)
+                    LIMIT ?
+                    """,
+                    (match, candidate_limit),
+                ).fetchall():
+                    rows.append(row)
+                    seen.add(row["id"])
+        except Exception:
+            rows = []
+            seen = set()
+    # Always mix in some recent chunks: a vague query ("what were we doing?")
+    # has no useful FTS terms, and freshly ingested context should still win.
+    try:
+        for row in _knowledge_rows(recency_floor if rows else 1500):
+            if row["id"] not in seen:
+                rows.append(row)
+                seen.add(row["id"])
+    except Exception:
+        pass
+    return rows
 
 
 def _research_rows(limit: int = 500) -> list[sqlite3.Row]:
@@ -531,43 +783,128 @@ def _research_rows(limit: int = 500) -> list[sqlite3.Row]:
         return con.execute("SELECT * FROM research_items ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
 
 
+# Sources that are useful only when the user explicitly asks about SHIMS
+# internals, code, or system state. They otherwise pollute general queries
+# with high-importance self-awareness notes and source-code chunks.
+_NOISE_SOURCES = {
+    "self_awareness",
+    "boot_self_audit",
+    "shims_source",
+    "source",
+    "daily_lessons",
+}
+
+
+def _is_noisy(hit: BrainHit) -> bool:
+    src = (hit.source or "").lower()
+    tags = {t.lower() for t in (hit.tags or [])}
+    return src in _NOISE_SOURCES or bool(tags & _NOISE_SOURCES)
+
+
+_FEEDBACK_SOURCES = {"feedback", "omni_feedback"}
+_FEEDBACK_TAGS = {"feedback", "anti_pattern", "learned_preference"}
+
+
+def _is_feedback(hit: BrainHit) -> bool:
+    """Feedback memories store the user's rejected/liked question text — they
+    are style guidance, never retrieval evidence for a new query."""
+    src = (hit.source or "").lower()
+    tags = {t.lower() for t in (hit.tags or [])}
+    return (
+        src in _FEEDBACK_SOURCES
+        or hit.title.lower().startswith("omni_feedback:")
+        or bool(tags & _FEEDBACK_TAGS)
+    )
+
+
+def _is_core(hit: BrainHit) -> bool:
+    """Pinned system:* core memories already enter the prompt via
+    BRAIN_DIRECTIVES — they must not also fill retrieval top-k slots."""
+    src = (hit.source or "").lower()
+    tags = {t.lower() for t in (hit.tags or [])}
+    return src == "core" or (hit.title.lower().startswith("system:") and "core" in tags)
+
+
 def retrieve_context(query: str, *, limit: int = 8) -> dict[str, Any]:
     ensure_core_memories()
     q = _clean(query)
+    # If the user is asking about SHIMS itself, code, or system state, allow
+    # the noisy sources through; otherwise keep replies focused on user data.
+    allow_noise = any(t in q.lower() for t in ("shims", "system", "code", "source", "backend", "frontend", "self-awareness", "boot"))
+    min_score = _rag_min_score()
+    # Strong-hit gate: only genuinely relevant material is admitted. Weak hits
+    # (score >= min_score but < strong_score) are dropped entirely so chat
+    # turns are never grounded in junk corpus matches. The min_score env still
+    # applies when it is set HIGHER than the strong bar.
+    strong_score = max(_rag_strong_score(), min_score)
+    q_tokens = set(_tokens(q))
+    coverage_min = _rag_coverage_min()
+    q_phrase = _clean(q).lower()
+
+    def _admissible(body: str, score: float) -> bool:
+        """Score + coverage admission for keyword hits."""
+        if score < strong_score:
+            return False
+        if len(q_tokens) >= 2 and coverage_min >= 2:
+            hay = (body or "").lower()
+            if q_phrase and q_phrase in hay:
+                return True  # exact phrase — genuinely relevant
+            matched = sum(1 for tok in q_tokens if tok in hay)
+            if matched < min(coverage_min, len(q_tokens)):
+                return False
+        return True
+
     hits: list[BrainHit] = []
+    feedback_prefs: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
 
     def _add_hit(hit: BrainHit) -> None:
+        if _is_feedback(hit):
+            feedback_prefs.append(hit.to_dict())
+            return
+        if _is_core(hit):
+            return
+        if not allow_noise and _is_noisy(hit):
+            return
         key = f"{hit.kind}:{hit.source}:{hit.title}:{hit.content[:80]}"
         if key in seen_keys:
             return
         seen_keys.add(key)
         hits.append(hit)
 
-    # 1. Keyword/recency hits
+    # 1. Keyword/recency hits — admission bar: a hit must clear the strong
+    # score (SHIMS_RAG_STRONG_SCORE, default 3.0).
     for item in list_memories(query=q if q else None, limit=200):
         score = _score(q, item["key"] + " " + item["value"] + " " + " ".join(item["tags"]), weight=item["weight"], pinned=item["pinned"], created_at=item["updated_at"])
-        if score > 0:
+        if _admissible(item["key"] + " " + item["value"], score):
             _add_hit(BrainHit("memory", item["namespace"] + ":" + item["key"], item["value"], score, source=item["source"], tags=item["tags"], created_at=item["updated_at"]))
-    for row in _knowledge_rows():
+    for row in _knowledge_candidates(q):
+        if (row["source_type"] or "") == "conversation":
+            # Chat archives are per-session memory (recalled via recall_conversation).
+            # Admitting them into the GLOBAL retrieval bleeds one chat's content into
+            # unrelated chats — skip them here so sessions stay isolated.
+            continue
         tags = _load_json(row["tags_json"], [])
         body = f"{row['title']} {row['chunk_text']} {' '.join(tags)} {row['source_uri']}"
         score = _score(q, body, weight=float(row["importance"] or 1.0), created_at=row["updated_at"])
-        if score > 0:
+        if _admissible(body, score):
             _add_hit(BrainHit("rag", row["title"], row["chunk_text"], score, source=row["source_type"], url=row["source_uri"], tags=tags, created_at=row["updated_at"]))
     for row in _research_rows():
         body = f"{row['query']} {row['title']} {row['snippet']} {row['url']}"
         score = _score(q, body, weight=1.05, created_at=row["created_at"])
-        if score > 0:
+        if _admissible(body, score):
             _add_hit(BrainHit("research", row["title"], row["snippet"], score, source=row["provider"], url=row["url"], tags=[row["query"]], created_at=row["created_at"]))
 
-    # 2. Semantic vector hits (blended)
+    # 2. Semantic vector hits (blended) — similarity rescaled onto the keyword
+    # score range so strong_sim maps to ~2.0 and 1.0 maps to ~10.0.
+    min_sim = _vector_min_sim()
+    strong_sim = max(_vector_strong_sim(), min_sim)
     vector_hits = _search_vectors(q, limit=max(limit * 2, 12))
     for v in vector_hits:
         sim = float(v.get("similarity") or 0.0)
-        if sim < 0.45:
+        if sim < strong_sim:
             continue
-        score = round(sim * 12.0, 4)
+        score = round(2.0 + ((sim - strong_sim) / max(1e-6, 1.0 - strong_sim)) * 8.0, 4)
         source_type = v.get("source_type", "")
         source_id = v.get("source_id", "")
         text = _clean(v.get("text_content") or "")
@@ -578,12 +915,26 @@ def retrieve_context(query: str, *, limit: int = 8) -> dict[str, Any]:
             key = parts[2] if len(parts) > 2 else "memory"
             _add_hit(BrainHit("memory", f"{namespace}:{key}", text, score, source="vector", tags=meta.get("tags", ["vector"]), created_at=None))
         elif source_type == "knowledge_chunk":
+            if (meta.get("source_type") or "") == "conversation":
+                continue  # per-session chat archive — never surfaced cross-session (see above)
             title = meta.get("title") or "Knowledge"
             _add_hit(BrainHit("rag", title, text, score, source=meta.get("source_type", "vector"), url=meta.get("source_uri", ""), tags=meta.get("tags", ["vector"]), created_at=None))
         else:
             _add_hit(BrainHit("vector", source_id, text, score, source=source_type, tags=["vector"], created_at=None))
 
     hits.sort(key=lambda h: h.score, reverse=True)
+    # Adaptive relative floor: once there is a strong top hit, drop hits that are
+    # far weaker (noise) instead of padding to `limit` with marginal matches. When
+    # all hits are uniformly moderate, everything survives — so this raises quality
+    # without shrinking the larger context. Tune/disable with SHIMS_RAG_RELATIVE_FLOOR.
+    if hits:
+        try:
+            rel = float(os.getenv("SHIMS_RAG_RELATIVE_FLOOR", "0.35"))
+        except ValueError:
+            rel = 0.35
+        if rel > 0:
+            floor = hits[0].score * rel
+            hits = [h for h in hits if h.score >= floor] or hits[:1]
     selected = hits[: max(1, min(limit, 20))]
     context_text = format_context(selected)
     return {
@@ -591,6 +942,7 @@ def retrieve_context(query: str, *, limit: int = 8) -> dict[str, Any]:
         "query": q,
         "version": BRAIN_VERSION,
         "hits": [h.to_dict() for h in selected],
+        "feedback_prefs": feedback_prefs[:10],
         "memory_hits": len([h for h in selected if h.kind == "memory"]),
         "rag_hits": len([h for h in selected if h.kind == "rag"]),
         "research_hits": len([h for h in selected if h.kind == "research"]),
@@ -852,7 +1204,8 @@ def _task_skill_extraction(payload: dict[str, Any]) -> dict[str, Any]:
         for cand in extract_skill_candidates(r["user_text"] or ""):
             name = cand["phrase"][:48].strip().title() or "Preference"
             sk = save_skill(name, cand["phrase"], tags=[cand["kind"], "auto"],
-                            source="skill_extraction")
+                            source="skill_extraction",
+                            created_from="auto_extraction")
             learned.append(sk["name"])
     return {"skills_learned": len(learned), "names": learned[:10]}
 
@@ -1140,6 +1493,15 @@ def brain_prompt_addendum(query: str, *, agent: str = "supervisor", limit: int =
         lines.append("This is the first turn of the conversation — no prior history yet.")
     if ctx.get("context_text"):
         lines.append(ctx["context_text"])
+    # Feedback-derived preferences are style guidance, not evidence — render at
+    # most 3 as a short line instead of injecting them as retrieved context.
+    prefs = ctx.get("feedback_prefs") or []
+    if prefs:
+        lines.append("User preferences from feedback:")
+        for p in prefs[:3]:
+            summary = _clean(p.get("content") or "")[:160]
+            if summary:
+                lines.append(f"- {summary}")
     # Inject the most relevant learned skills (procedural memory), if any.
     try:
         from .skills import relevant_skills

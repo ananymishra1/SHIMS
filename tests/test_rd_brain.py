@@ -31,11 +31,11 @@ class TestRDBrainInit:
         assert brain.provider == "deepseek"
         assert brain.model == "deepseek-reasoner"
 
-    def test_auto_selects_ollama_when_no_key(self, monkeypatch):
+    def test_auto_selects_native_when_no_key(self, monkeypatch):
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.delenv("DEEPSEEK_KEY", raising=False)
         brain = RDBrain()
-        assert brain.provider == "ollama"
+        assert brain.provider == "native"
 
     def test_explicit_provider(self):
         brain = RDBrain(provider="ollama", model="llama3.2")

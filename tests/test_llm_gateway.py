@@ -58,12 +58,12 @@ def test_fallback_to_next_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr('shared.llm_gateway._RETRY_BACKOFF', 0.01)
     providers = {
         'anthropic': _FakeProvider('anthropic', [_fail('anthropic', 'HTTP 503'), _fail('anthropic', 'HTTP 503')]),
-        'ollama': _FakeProvider('ollama', [_ok('ollama')]),
+        'native': _FakeProvider('native', [_ok('native')]),
     }
     _patch_providers(monkeypatch, providers)
     gw = LLMGateway()
     result = asyncio.run(gw.complete('hi', feature='test', provider='anthropic'))
-    assert result.ok and result.provider == 'ollama'
+    assert result.ok and result.provider == 'native'
 
 
 def test_retry_on_fast_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,7 +81,7 @@ def test_circuit_breaker_opens_and_skips(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr('shared.llm_gateway._RETRY_BACKOFF', 0.01)
     providers = {
         'anthropic': _FakeProvider('anthropic', [_fail('anthropic', 'HTTP 500 x')] * 10),
-        'ollama': _FakeProvider('ollama', [_ok('ollama')] * 10),
+        'native': _FakeProvider('native', [_ok('native')] * 10),
     }
     _patch_providers(monkeypatch, providers)
     gw = LLMGateway()
@@ -90,7 +90,7 @@ def test_circuit_breaker_opens_and_skips(monkeypatch: pytest.MonkeyPatch) -> Non
     assert gw.breaker_open('anthropic')
     calls_before = providers['anthropic'].calls
     result = asyncio.run(gw.complete('hi', feature='test', provider='anthropic'))
-    assert result.ok and result.provider == 'ollama'
+    assert result.ok and result.provider == 'native'
     assert providers['anthropic'].calls == calls_before  # breaker skipped it
 
 

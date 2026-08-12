@@ -8,6 +8,7 @@ Usage:
     scripts/start_shims.py --no-bridge      # start omni only
     scripts/start_shims.py --dry-run        # print what would run
     scripts/start_shims.py --no-verify      # skip port health checks
+    scripts/start_shims.py --no-browser     # do not open Omni in browser
 
 Configuration is read from the project .env file:
     SHIMS_OMNI_PORT              default 8010
@@ -79,29 +80,52 @@ def _python() -> Path:
     return Path("python")
 
 
+def _batch_arg(arg: str) -> str:
+    """Quote a command argument for a Windows batch file when needed.
+
+    Spaces and shell metacharacters would otherwise split the argument or
+    be interpreted by cmd.exe (e.g. an empty token after ``--token``).
+    """
+    arg = str(arg)
+    if not arg or " " in arg or any(ch in arg for ch in '&|<>^'):
+        return f'"{arg}"'
+    return arg
+
+
 def _windows_service_batch(
     title: str,
     cwd: Path,
     command: list[str],
     env: dict[str, str] | None = None,
+    restart: bool = False,
 ) -> Path:
     """Write a temporary batch file that launches a service in a new window.
 
     Using a real .bat file avoids the nested-quote problems that make
     ``start ... cmd /k "cd ... && ..."`` fragile when paths contain spaces.
-    If the service exits with an error, the window pauses so the error is visible.
+    With ``restart`` the service is wrapped in a loop that relaunches it a few
+    seconds after any exit, so a backend crash self-recovers instead of leaving a
+    dead window. Otherwise, on error the window pauses so the error is visible.
     """
     log_dir = _log_dir()
     instance_id = (os.getenv("SHIMS_INSTANCE_ID") or "").strip()
     suffix = f"_{instance_id}" if instance_id else ""
     batch_path = log_dir / f"start_shims_{title.lower().replace(' ', '_')}{suffix}.bat"
-    cmd = " ".join(str(c) for c in command)
+    cmd = " ".join(_batch_arg(str(c)) for c in command)
     lines = ["@echo off", f"title {title}", f'cd /d "{cwd}"']
     for k, v in (env or {}).items():
         lines.append(f'set {k}={v}')
-    lines.append(f"echo [{title}] Starting ...")
-    lines.append(cmd)
-    lines.append("if errorlevel 1 pause")
+    if restart:
+        lines.append(":shims_loop")
+        lines.append(f"echo [{title}] Starting ...")
+        lines.append(cmd)
+        lines.append(f"echo [{title}] exited (code %errorlevel%). Restarting in 5s -- close this window to stop.")
+        lines.append("timeout /t 5 /nobreak >nul")
+        lines.append("goto shims_loop")
+    else:
+        lines.append(f"echo [{title}] Starting ...")
+        lines.append(cmd)
+        lines.append("if errorlevel 1 pause")
     batch_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return batch_path
 
@@ -185,7 +209,7 @@ def _wait_for_port(port: int, label: str, timeout: float = 30.0) -> bool:
 def _start_bridge(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     port = cfg["bridge_port"]
     token = cfg["bridge_token"]
-    if not token or token == "change-me-bridge-token":
+    if token == "change-me-bridge-token":
         print("[starter] WARNING: SHIMS_BRIDGE_TOKEN is not set in .env")
 
     print(f"[starter] starting Desktop Bridge on port {port}")
@@ -218,7 +242,6 @@ def _start_omni(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
         "SHIMS_DESKTOP_BRIDGE_TOKEN": cfg["bridge_token"],
         "HF_HUB_ENABLE_HF_TRANSFER": "",
         "HF_XET_HIGH_PERFORMANCE": "1",
-        "SHIMS_DISABLE_WHISPER": "1",
     }
     cmd = [
         str(_python()),
@@ -235,8 +258,27 @@ def _start_omni(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
         return
 
     _free_port(port)
-    _run_service("SHIMS Omni", ROOT_DIR, cmd, env=env)
+    # Supervise the backend: if uvicorn crashes it self-restarts instead of
+    # leaving a dead window (SHIMS is meant to be always-on).
+    _run_service("SHIMS Omni", ROOT_DIR, cmd, env=env, restart=True)
 
+
+
+def _start_whatsapp(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
+    node = shutil.which("node")
+    if not node:
+        print("[starter] WARNING: node not found — skipping WhatsApp sidecar")
+        return
+    sidecar = ROOT_DIR / "integrations" / "whatsapp" / "index.js"
+    if not sidecar.exists():
+        return
+    wa_port = _env_int("SHIMS_WHATSAPP_PORT", 5116)
+    print(f"[starter] starting WhatsApp sidecar on port {wa_port}")
+    cmd = [node, str(sidecar)]
+    if args.dry_run:
+        print("  ", " ".join(cmd))
+        return
+    _run_service("SHIMS WhatsApp", sidecar.parent, cmd)
 
 
 def _start_tray(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
@@ -258,12 +300,13 @@ def _run_service(
     cwd: Path,
     command: list[str],
     env: dict[str, str] | None = None,
+    restart: bool = False,
 ) -> None:
     system = platform.system()
     full_env = {**os.environ, **(env or {})}
 
     if system == "Windows":
-        batch_path = _windows_service_batch(title, cwd, command, env=env)
+        batch_path = _windows_service_batch(title, cwd, command, env=env, restart=restart)
         # Use CREATE_NEW_CONSOLE to open a dedicated window for this service.
         subprocess.Popen(
             ["cmd", "/k", str(batch_path)],
@@ -271,26 +314,50 @@ def _run_service(
             env=full_env,
             creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
-        print(f"  launcher: {batch_path}")
+        print(f"  launcher: {batch_path}" + ("  (auto-restart on crash)" if restart else ""))
     else:
         log = _log_dir() / f"start_shims_{title.lower().replace(' ', '_')}.log"
+        run_cmd = command
+        if restart:
+            import shlex
+            inner = " ".join(shlex.quote(str(c)) for c in command)
+            run_cmd = ["/bin/sh", "-c",
+                       f'while true; do {inner}; echo "[{title}] exited; restarting in 5s"; sleep 5; done']
         with open(log, "ab") as fh:
             prefix_cmd = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
             subprocess.Popen(
-                prefix_cmd + command,
+                prefix_cmd + run_cmd,
                 cwd=cwd,
                 env=full_env,
                 stdout=fh,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        print(f"  logging to {log}")
+        print(f"  logging to {log}" + ("  (auto-restart on crash)" if restart else ""))
 
 
 def _build_config() -> dict[str, Any]:
     omni_port   = _env_int("SHIMS_OMNI_PORT", DEFAULT_OMNI_PORT)
     bridge_port = _env_int("SHIMS_BRIDGE_PORT", DEFAULT_BRIDGE_PORT)
-    bridge_token = _env_str("SHIMS_BRIDGE_TOKEN", "")
+    # When a master password is set, the backend (main.py) authenticates the
+    # desktop bridge with the ONE derived secret, not SHIMS_BRIDGE_TOKEN. The
+    # bridge server we launch here must use the SAME token or every bridge call
+    # fails with "Invalid token". Derive it the same way the backend does so the
+    # two always agree; fall back to the legacy explicit token otherwise.
+    try:
+        from shared import bridge_auth
+        bridge_token = (
+            bridge_auth.derived_bridge_token()
+            if bridge_auth.is_password_set()
+            else _env_str("SHIMS_BRIDGE_TOKEN", "")
+        )
+    except Exception:
+        bridge_token = _env_str("SHIMS_BRIDGE_TOKEN", "")
+    if not bridge_token:
+        # An empty token would make ``bridge_server.py --token`` fail because
+        # argparse sees no value. Fall back to the same placeholder the
+        # one-click installer and backend config use so bridge + omni agree.
+        bridge_token = "change-me-bridge-token"
     bridge_uri  = _env_str(
         "SHIMS_DESKTOP_BRIDGE_URI",
         f"ws://localhost:{bridge_port}/bridge",
@@ -304,25 +371,47 @@ def _build_config() -> dict[str, Any]:
 
 
 def _print_summary(cfg: dict[str, Any]) -> None:
+    wa_port = _env_int("SHIMS_WHATSAPP_PORT", 5116)
     print()
     print("=" * 50)
     print(" SHIMS is running")
     print("=" * 50)
-    print(f"  Omni:    http://localhost:{cfg['omni_port']}")
-    print(f"  Council: http://localhost:{cfg['omni_port']}/omni-duobot")
-    print(f"  Bridge:  {cfg['bridge_uri']}")
+    print(f"  Omni:      http://localhost:{cfg['omni_port']}")
+    print(f"  Council:   http://localhost:{cfg['omni_port']}/omni-duobot")
+    print(f"  Bridge:    {cfg['bridge_uri']}")
+    print(f"  WhatsApp:  http://localhost:{wa_port}/qr  (scan to pair)")
     print("=" * 50)
+
+
+def _open_browser(url: str) -> None:
+    """Open the given URL in the user's default browser.
+
+    Non-blocking; failures are logged but not fatal.
+    """
+    print(f"[starter] opening browser: {url}")
+    system = platform.system()
+    try:
+        if system == "Windows":
+            os.startfile(url)
+        elif system == "Darwin":
+            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        print(f"[starter] could not open browser: {exc}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Start the SHIMS stack: Desktop Bridge + Omni.",
     )
-    parser.add_argument("--no-bridge", action="store_true", help="skip desktop bridge")
-    parser.add_argument("--no-omni",   action="store_true", help="skip SHIMS Omni")
-    parser.add_argument("--tray",      action="store_true", help="also launch tray coworker app")
-    parser.add_argument("--no-verify", action="store_true", help="skip port health checks")
-    parser.add_argument("--dry-run",   action="store_true", help="print commands, do not run")
+    parser.add_argument("--no-bridge",    action="store_true", help="skip desktop bridge")
+    parser.add_argument("--no-omni",      action="store_true", help="skip SHIMS Omni")
+    parser.add_argument("--no-whatsapp",  action="store_true", help="skip WhatsApp sidecar")
+    parser.add_argument("--tray",         action="store_true", help="also launch tray coworker app")
+    parser.add_argument("--no-verify",    action="store_true", help="skip port health checks")
+    parser.add_argument("--dry-run",      action="store_true", help="print commands, do not run")
+    parser.add_argument("--no-browser",   action="store_true", help="do not open Omni in browser")
     args = parser.parse_args()
 
     if not ENV_PATH.exists():
@@ -343,6 +432,9 @@ def main() -> int:
         _start_omni(args, cfg)
         if not args.dry_run:
             time.sleep(1)
+
+    if not args.no_whatsapp:
+        _start_whatsapp(args, cfg)
 
     if args.tray:
         if not args.dry_run:
@@ -366,6 +458,10 @@ def main() -> int:
             return 1
 
     _print_summary(cfg)
+
+    if not args.no_omni and not args.no_browser and not args.dry_run:
+        _open_browser(f"http://localhost:{cfg['omni_port']}/app")
+
     return 0
 
 

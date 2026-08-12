@@ -256,17 +256,14 @@ def run_project(project_id: str, entry: str | None = None) -> dict[str, Any]:
 
 
 def _prefer_coder_model(provider: str | None, model: str | None) -> str | None:
-    """If using local Ollama with no explicit model, prefer an installed coding model."""
+    """If using the native engine with no explicit model, prefer an installed coding GGUF."""
     if model:
         return model
-    if provider not in (None, "", "ollama"):
+    if provider not in (None, "", "native", "ollama"):
         return model
     try:
-        import os
-        import httpx
-        base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-        with httpx.Client(timeout=8) as c:
-            names = [m.get("name", "") for m in c.get(f"{base}/api/tags").json().get("models", [])]
+        from .native_engine import discovery
+        names = [m.get("id", "") for m in discovery.discover_models()]
         for pref in ("qwen2.5-coder", "coder", "deepseek-coder", "codellama", "qwen2.5"):
             hit = next((n for n in names if pref in n.lower()), None)
             if hit:

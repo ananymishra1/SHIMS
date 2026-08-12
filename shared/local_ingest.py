@@ -3,7 +3,7 @@
 Uses:
 - pypdf for text-based PDFs
 - python-docx / openpyxl for Office docs
-- Ollama vision model for scanned PDFs / images
+- LM Studio vision model (preferred) or Ollama vision model for scanned PDFs / images
 - omni-brain for storage (no cloud)
 """
 from __future__ import annotations
@@ -11,17 +11,19 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from .config import settings
+from .config import env_int, settings
 from .omni_brain import ingest_knowledge
 
 
 OLLAMA_BASE = settings.ollama_base_url.rstrip("/")
+LMSTUDIO_BASE = settings.lmstudio_base_url.rstrip("/")
 _VISION_MODELS = ["moondream", "llava", "llava-phi3", "bakllava", "llama3.2-vision"]
 
 
@@ -42,10 +44,11 @@ def _vision_model() -> str | None:
     return None
 
 
-def _ollama_vision_prompt() -> str:
+def _vision_ocr_prompt() -> str:
     return (
-        "You are an OCR engine. Extract every readable word and number from this image. "
-        "Preserve line breaks and tables as best as possible. Return ONLY the extracted text, no commentary."
+        "You are an OCR engine. Transcribe this document page faithfully, in full. "
+        "Extract every readable word and number, preserving line breaks and tables as best as possible. "
+        "Return ONLY the extracted text, no commentary."
     )
 
 
@@ -56,7 +59,7 @@ def _describe_with_ollama(image_bytes: bytes, model: str) -> str:
         "messages": [
             {
                 "role": "user",
-                "content": _ollama_vision_prompt(),
+                "content": _vision_ocr_prompt(),
                 "images": [b64],
             }
         ],
@@ -66,6 +69,66 @@ def _describe_with_ollama(image_bytes: bytes, model: str) -> str:
     r.raise_for_status()
     data = r.json()
     return data.get("message", {}).get("content", "")
+
+
+def _lmstudio_vision_model() -> str | None:
+    """Resolve the LM Studio vision model.
+
+    Order: env LMSTUDIO_VISION_MODEL -> SHIMS_CHAT_MODEL -> settings.lmstudio_model
+    -> auto-discovery (loaded VLM preferred, then any VLM, then first listed model).
+    """
+    model = os.getenv("LMSTUDIO_VISION_MODEL") or os.getenv("SHIMS_CHAT_MODEL") or settings.lmstudio_model
+    if model:
+        return model
+    # Auto-discovery: LM Studio's native API reports model type and load state;
+    # prefer a loaded VLM, then any VLM, then the first model from /v1/models.
+    try:
+        r = httpx.get(f"{LMSTUDIO_BASE}/api/v0/models", timeout=5)
+        r.raise_for_status()
+        models = r.json().get("data", [])
+        vlms = [m for m in models if m.get("type") == "vlm"]
+        for m in vlms:
+            if m.get("state") == "loaded":
+                return m.get("id")
+        if vlms:
+            return vlms[0].get("id")
+    except Exception:
+        pass
+    try:
+        r = httpx.get(f"{LMSTUDIO_BASE}/v1/models", timeout=5)
+        r.raise_for_status()
+        models = r.json().get("data", [])
+        if models:
+            return models[0].get("id")
+    except Exception:
+        pass
+    return None
+
+
+def _describe_with_lmstudio(image_bytes: bytes, model: str) -> str:
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    mime = "image/png" if image_bytes.startswith(b"\x89PNG") else "image/jpeg"
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _vision_ocr_prompt()},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                ],
+            }
+        ],
+        "stream": False,
+    }
+    headers = {}
+    if settings.lmstudio_api_key:
+        headers["Authorization"] = f"Bearer {settings.lmstudio_api_key}"
+    r = httpx.post(f"{LMSTUDIO_BASE}/v1/chat/completions", json=payload, headers=headers, timeout=180)
+    r.raise_for_status()
+    data = r.json()
+    choices = data.get("choices") or []
+    return choices[0].get("message", {}).get("content", "") if choices else ""
 
 
 def _render_pdf_page_to_image(pdf_path: Path, page_num: int = 0, dpi: int = 150) -> bytes:
@@ -80,6 +143,25 @@ def _render_pdf_page_to_image(pdf_path: Path, page_num: int = 0, dpi: int = 150)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=75)
     return buf.getvalue()
+
+
+def _ocr_image_batch(images: list[bytes]) -> tuple[list[str], str] | None:
+    """OCR a batch of page images: LM Studio first, Ollama as fallback.
+
+    Returns (texts, method) where method is "lmstudio_ocr" or "ollama_ocr",
+    or None if neither vision backend is available. Raises if the chosen
+    backend fails mid-batch.
+    """
+    lm_model = _lmstudio_vision_model()
+    if lm_model:
+        try:
+            return [_describe_with_lmstudio(img, lm_model) for img in images], "lmstudio_ocr"
+        except Exception:
+            pass  # LM Studio unreachable/errored: fall through to Ollama.
+    model = _vision_model()
+    if model:
+        return [_describe_with_ollama(img, model) for img in images], "ollama_ocr"
+    return None
 
 
 def extract_text_local(path: str | Path, prefer_ocr: bool = False) -> dict[str, Any]:
@@ -104,21 +186,35 @@ def extract_text_local(path: str | Path, prefer_ocr: bool = False) -> dict[str, 
             method = "pypdf"
         except Exception:
             text = ""
-        if not text.strip() or prefer_ocr:
-            model = _vision_model()
-            if not model:
-                return {"ok": False, "error": "No local Ollama vision model available for OCR"}
+        if not text.strip() and not prefer_ocr:
+            # Second chance: PyMuPDF extracts text from some PDFs pypdf can't.
             try:
                 import fitz
                 doc = fitz.open(str(p))
-                ocr_parts = []
-                for i in range(doc.page_count):
-                    img_bytes = _render_pdf_page_to_image(p, i)
-                    ocr_parts.append(_describe_with_ollama(img_bytes, model))
-                text = "\n\n".join(ocr_parts)
-                method = "ollama_ocr"
+                text = "\n".join(page.get_text() for page in doc)
+                if text.strip():
+                    method = "pymupdf"
+            except Exception:
+                text = ""
+        if not text.strip() or prefer_ocr:
+            max_pages = env_int("SHIMS_OCR_MAX_PAGES", 5)
+            try:
+                import fitz
+                doc = fitz.open(str(p))
+                total_pages = doc.page_count
+                images = [_render_pdf_page_to_image(p, i) for i in range(min(total_pages, max_pages))]
             except Exception as exc:
                 return {"ok": False, "error": f"OCR failed: {exc}"}
+            try:
+                result = _ocr_image_batch(images)
+            except Exception as exc:
+                return {"ok": False, "error": f"OCR failed: {exc}"}
+            if result is None:
+                return {"ok": False, "error": "No local vision model available for OCR (LM Studio unreachable, no Ollama vision model)"}
+            ocr_parts, method = result
+            text = "\n\n".join(ocr_parts)
+            if total_pages > max_pages:
+                text += f"\n[OCR truncated: first {max_pages} of {total_pages} pages]"
 
     elif ext == ".docx":
         try:
@@ -145,14 +241,14 @@ def extract_text_local(path: str | Path, prefer_ocr: bool = False) -> dict[str, 
             return {"ok": False, "error": f"xlsx extraction failed: {exc}"}
 
     elif ext in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
-        model = _vision_model()
-        if not model:
-            return {"ok": False, "error": "No local Ollama vision model available"}
         try:
-            text = _describe_with_ollama(p.read_bytes(), model)
-            method = "ollama_ocr"
+            result = _ocr_image_batch([p.read_bytes()])
         except Exception as exc:
             return {"ok": False, "error": f"image OCR failed: {exc}"}
+        if result is None:
+            return {"ok": False, "error": "No local vision model available for OCR (LM Studio unreachable, no Ollama vision model)"}
+        text = "\n\n".join(result[0])
+        method = result[1]
 
     elif ext == ".csv":
         try:

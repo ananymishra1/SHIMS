@@ -1,62 +1,39 @@
-"""Local LLM abstraction for SHIMS Personal AI.
+"""Compatibility shim — SHIMS Personal local LLM now lives in the native engine.
 
-Supports:
-- llama.cpp Python bindings (desktop/server)
-- Ollama API fallback
-- Mock mode for testing
+This module was the original llama-cpp-python/Ollama local-LLM abstraction.
+It is superseded by ``shared.native_engine`` (the SHIMS-owned embedded
+runtime); the public names are kept working as thin delegations so any
+lingering imports keep functioning.
 """
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import time
-from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 
-from shared.config import settings
+from shared.native_engine import discover_models, get_engine
 
 
 class LocalLLM:
-    """Unified interface for local LLM inference."""
+    """Unified interface for local LLM inference (native-engine backed)."""
 
     def __init__(self, model_path: str | None = None, n_ctx: int = 2048) -> None:
-        self.model_path = model_path or self._find_default_model()
+        self.model_path = model_path
         self.n_ctx = n_ctx
-        self._llama = None  # lazy import
-        self._model = None
-        self._ctx = None
-
-    def _find_default_model(self) -> str | None:
-        """Auto-discover a GGUF model in standard locations."""
-        candidates = [
-            Path.home() / ".shims" / "models",
-            Path("storage/models"),
-            Path("data/models"),
-        ]
-        for d in candidates:
-            if d.exists():
-                for f in sorted(d.glob("*.gguf"), key=lambda p: p.stat().st_size):
-                    return str(f)
-        return None
 
     def is_available(self) -> bool:
         """Check if a local model can be loaded."""
-        return self.model_path is not None and Path(self.model_path).exists()
+        if self.model_path:
+            from pathlib import Path
+            return Path(self.model_path).exists()
+        return bool(discover_models())
 
     def load(self) -> bool:
         """Load the model into memory. Returns True on success."""
-        if not self.is_available():
-            return False
         try:
-            import llama_cpp  # type: ignore
-            self._llama = llama_cpp
-            self._model = llama_cpp.Llama(
-                model_path=self.model_path,
-                n_ctx=self.n_ctx,
-                n_threads=max(2, os.cpu_count() or 4),
-                verbose=False,
-            )
+            engine = get_engine()
+            if self.model_path:
+                engine.ensure_loaded(self.model_path)
+            elif not engine.loaded_model_id():
+                engine.start()
             return True
         except Exception:
             return False
@@ -70,22 +47,18 @@ class LocalLLM:
         stop: list[str] | None = None,
     ) -> str:
         """Generate a text completion synchronously."""
-        if self._model is None and not self.load():
+        if not self.load():
             return "{\"error\":\"No local model available\"}"
-
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-
         try:
-            output = self._model.create_chat_completion(
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stop=stop or ["<|im_end|>", "<|endoftext|>", "<|user|>"],
-            )
-            return output["choices"][0]["message"]["content"].strip()
+            kw: dict[str, Any] = {"max_tokens": max_tokens, "temperature": temperature}
+            if stop:
+                kw["stop"] = stop
+            result = get_engine().chat_raw(messages, **kw)
+            return (result.get("content") or "").strip()
         except Exception as e:
             return f"{{\"error\":\"{str(e)}\"}}"
 
@@ -97,34 +70,41 @@ class LocalLLM:
         system_prompt: str | None = None,
     ) -> Iterator[str]:
         """Stream tokens as they are generated."""
-        if self._model is None and not self.load():
-            yield json.dumps({"error": "No local model available"})
+        if not self.load():
+            yield "{\"error\": \"No local model available\"}"
             return
-
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+        import json
+        import queue
+        import threading
+        deltas: queue.Queue = queue.Queue()
+        done = object()
 
-        try:
-            stream = self._model.create_chat_completion(
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stream=True,
-                stop=["<|im_end|>", "<|endoftext|>", "<|user|>"],
-            )
-            for chunk in stream:
-                delta = chunk["choices"][0]["delta"]
-                if "content" in delta:
-                    yield delta["content"]
-        except Exception as e:
-            yield json.dumps({"error": str(e)})
+        def _run() -> None:
+            try:
+                get_engine().chat_stream(messages, deltas.put,
+                                         max_tokens=max_tokens, temperature=temperature)
+            except Exception as e:
+                deltas.put(json.dumps({"error": str(e)}))
+            finally:
+                deltas.put(done)
+
+        threading.Thread(target=_run, daemon=True, name="local-llm-stream").start()
+        while True:
+            item = deltas.get()
+            if item is done:
+                return
+            yield item
 
     def unload(self) -> None:
         """Free model memory."""
-        self._model = None
-        self._ctx = None
+        try:
+            get_engine().unload()
+        except Exception:
+            pass
 
 
 def quick_local_chat(

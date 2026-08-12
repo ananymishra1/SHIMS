@@ -68,5 +68,6 @@ def test_resolve_agent_chemistry() -> None:
 
 def test_resolve_agent_defaults_when_no_env() -> None:
     provider, model, reason = resolve_agent("memory")
-    assert provider in {"ollama", "openai", "anthropic", "gemini", "huggingface", "kimi", "deepseek", "qwen"}
-    assert model
+    assert provider in {"native", "ollama", "openai", "anthropic", "gemini", "huggingface", "kimi", "deepseek", "qwen"}
+    # Native resolves to "" (= the engine's currently loaded GGUF).
+    assert model or provider == "native"

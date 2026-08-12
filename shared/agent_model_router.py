@@ -31,6 +31,7 @@ ROLE_ENV_VARS: dict[str, str] = {
 
 # Provider inference from model name prefixes / substrings.
 _PROVIDER_HINTS: list[tuple[str, str]] = [
+    ("native", "native/"),
     ("anthropic", "claude-"),
     ("openai", "gpt-"),
     ("openai", "o1"),
@@ -51,7 +52,8 @@ def _provider_from_model(model: str) -> str:
     for provider, hint in _PROVIDER_HINTS:
         if hint in low:
             return provider
-    return "ollama"
+    # Bare names are native-engine GGUF ids; Ollama tags keep their ":" hint.
+    return "native"
 
 
 def _parse_model_env(value: str) -> tuple[str, str]:
@@ -62,18 +64,36 @@ def _parse_model_env(value: str) -> tuple[str, str]:
         if provider.lower() in {
             "ollama", "openai", "anthropic", "gemini", "google",
             "kimi", "deepseek", "qwen", "huggingface", "chemdfm",
+            "vllm", "sglang", "aphrodite", "koboldcpp", "native",
         }:
             return provider.lower(), model.strip()
     return _provider_from_model(value), value
 
 
 def _default_model() -> tuple[str, str]:
-    provider = os.getenv("SHIMS_AI_PROVIDER", settings.ai_provider or "ollama").strip()
+    """The single brain model every agent lane follows.
+
+    Source of truth is the model the user hard-selects in Settings, persisted as
+    SHIMS_CHAT_PROVIDER / SHIMS_CHAT_MODEL and honored by the native engine boot.
+    Anchoring every role here keeps chat and agents on the *same* loaded model,
+    so an agent task never forces the native engine to evict and reload a
+    different GGUF mid-run (a major source of lag/stalls), and never routes a
+    role to a backend (huggingface/lmstudio) that isn't actually running.
+    """
+    chat_provider = (os.getenv("SHIMS_CHAT_PROVIDER") or "").strip().lower()
+    chat_model = (os.getenv("SHIMS_CHAT_MODEL") or "").strip()
+    provider = chat_provider or os.getenv("SHIMS_AI_PROVIDER", settings.ai_provider or "native").strip().lower()
+    if provider in ("", "auto"):
+        provider = "native"
+    if provider == "native":
+        # Prefer the pinned brain model; else SHIMS_NATIVE_MODEL; else the
+        # engine's currently loaded GGUF (empty string = whatever is loaded).
+        return provider, chat_model or os.getenv("SHIMS_NATIVE_MODEL", "")
     if provider == "ollama":
-        return provider, os.getenv("SHIMS_OLLAMA_MODEL", settings.ollama_model or "llama3.2:latest")
-    default = getattr(settings, f"{provider}_model", None)
-    if not default:
-        default = settings.ollama_model
+        return provider, chat_model or os.getenv("SHIMS_OLLAMA_MODEL", settings.ollama_model or "llama3.2:latest")
+    if chat_model:
+        return provider, chat_model
+    default = getattr(settings, f"{provider}_model", None) or settings.ollama_model
     return provider, default or "llama3.2:latest"
 
 

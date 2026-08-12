@@ -10,11 +10,10 @@ from backend.app.main import _extract_durable_facts_llm
 
 @pytest.fixture
 def patch_ollama_chat(monkeypatch):
+    """Legacy name: the extraction path now runs on the native engine via
+    shared.local_llm.feature_chat — patch that seam instead of _ollama_chat."""
     def _patch(response_text: str):
-        async def _fake(*args, **kwargs):
-            return response_text
-
-        monkeypatch.setattr("backend.app.main._ollama_chat", _fake)
+        monkeypatch.setattr("shared.local_llm.feature_chat", lambda *a, **k: response_text)
 
     return _patch
 

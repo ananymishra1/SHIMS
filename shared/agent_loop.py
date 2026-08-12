@@ -31,13 +31,16 @@ Agent Loop v2 enhancements:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
 import re
+import threading
 import time
 from typing import Any, AsyncGenerator, Callable
 
 import httpx
+import requests
 
 from .ai import extract_json_maybe
 from .config import settings
@@ -182,16 +185,29 @@ ESSENTIAL_TOOLS = [
 
 _MAX_RESULT_CHARS = 6000
 
-# v2: Model fallback chain (provider, model).  LM Studio is tried FIRST since
-# it is already running and uses GPU acceleration. Ollama is last fallback.
+# v3: Model fallback chain (provider, model). The native engine is prepended
+# when healthy (see _effective_fallback_chain); the static chain is cloud-only.
+# Ollama and other local servers are no longer fallback targets — local work
+# goes through the native engine exclusively.
 FALLBACK_CHAIN: list[tuple[str, str]] = [
-    ("lmstudio", settings.lmstudio_model),
     ("anthropic", "claude-sonnet-4-6"),
     ("openai", "gpt-4o"),
     ("google", "gemini-1.5-pro"),
-    ("huggingface", settings.huggingface_model),
-    ("ollama", settings.ollama_model),
 ]
+
+
+def _effective_fallback_chain() -> list[tuple[str, str]]:
+    """FALLBACK_CHAIN with the SHIMS native engine prepended — but only when
+    the engine reports healthy with a loaded model. Gated at call time so the
+    chain is byte-identical to FALLBACK_CHAIN when native is absent."""
+    try:
+        from .native_engine import get_engine
+        health = get_engine().health()
+        if health.get("ready") and health.get("model"):
+            return [("native", health["model"])] + FALLBACK_CHAIN
+    except Exception:
+        pass
+    return FALLBACK_CHAIN
 
 
 def _trim_for_model(result: dict[str, Any]) -> dict[str, Any]:
@@ -253,6 +269,8 @@ async def _llm_chat(
             result = await gateway.chat_messages(provider, model, messages, effective_tools, timeout=timeout)
         elif provider == "lmstudio":
             result = await _lmstudio_chat_raw(model, messages, tools or [], timeout=timeout)
+        elif provider == "native":
+            result = await _native_chat_raw(model, messages, tools or [], timeout=timeout)
         elif provider == "anthropic":
             result = await _anthropic_chat_stream_raw(model, messages, tools or [], timeout=timeout)
         elif _is_openai_compatible(provider):
@@ -286,7 +304,7 @@ async def _chat_with_fallback(
 ) -> tuple[dict[str, Any], str, str]:
     """Try LLM with fallback chain. Returns ({content, tool_calls}, provider, model)."""
     chain = [(preferred_provider, preferred_model)] + [
-        (p, m) for p, m in FALLBACK_CHAIN if (p, m) != (preferred_provider, preferred_model)
+        (p, m) for p, m in _effective_fallback_chain() if (p, m) != (preferred_provider, preferred_model)
     ]
 
     for idx, (provider, model) in enumerate(chain):
@@ -426,6 +444,64 @@ async def _lmstudio_chat_raw(model: str, messages: list[dict[str, Any]], tools: 
     return {"content": content, "tool_calls": tool_calls}
 
 
+async def _native_chat_raw(model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], timeout: float = 120.0) -> dict[str, Any]:
+    """Non-streaming SHIMS native engine chat turn. The engine owns its
+    runtime and exposes an internal loopback OpenAI-compatible endpoint;
+    returns {content, tool_calls} in the same shape as _lmstudio_chat_raw."""
+    from .native_engine import get_engine
+    engine = get_engine()
+    kw: dict[str, Any] = {"timeout": timeout}
+    if tools:
+        kw["tools"] = tools
+    return await asyncio.to_thread(engine.chat_raw, messages, **kw)
+
+
+async def _native_chat_stream(model: str, messages: list[dict[str, Any]],
+                              tools: list[dict[str, Any]], on_delta: Callable,
+                              *, max_tokens: int | None = None,
+                              context_length: int | None = None,
+                              on_reasoning: Callable | None = None,
+                              reasoning_effort: str | None = "none") -> dict[str, Any]:
+    """Streaming SHIMS native engine chat turn. True SSE streaming runs in a
+    worker thread (the engine client is synchronous); deltas are bridged onto
+    the event loop as they arrive, mirroring the LM Studio inline fast path.
+    Thinking models' reasoning_content is bridged via ``on_reasoning``."""
+    from .native_engine import get_engine
+    engine = get_engine()
+    loop = asyncio.get_running_loop()
+
+    def _sync_delta(text: str) -> None:
+        asyncio.run_coroutine_threadsafe(on_delta(text), loop)
+
+    def _sync_reasoning(text: str) -> None:
+        if on_reasoning is not None:
+            asyncio.run_coroutine_threadsafe(on_reasoning(text), loop)
+
+    kw: dict[str, Any] = {"on_reasoning": _sync_reasoning}
+    if tools:
+        kw["tools"] = tools
+    # Note: this koboldcpp build ignores reasoning_effort (verified 2026-07);
+    # thinking models still emit reasoning_content, which is why the
+    # on_reasoning bridge above exists. Servers that know the field honor it.
+    # Pass None to omit the field and let a thinking model reason at its own
+    # default — callers on the tool-capable chat lane do exactly that.
+    if reasoning_effort is not None:
+        kw["reasoning_effort"] = reasoning_effort
+        # Qwen3-family thinking models burn the whole output cap on hidden
+        # reasoning for even trivial turns ("hi"). When the caller suppresses
+        # thinking (none/low), tell the chat template directly — this is what
+        # actually stops reasoning_content on jinja-enabled servers.
+        if reasoning_effort in {"none", "low"}:
+            kw["chat_template_kwargs"] = {"enable_thinking": False}
+    if max_tokens:
+        kw["max_tokens"] = int(max_tokens)
+    if context_length:
+        # llama.cpp servers accept context_length; num_ctx is the ollama alias.
+        kw["context_length"] = int(context_length)
+        kw["num_ctx"] = int(context_length)
+    return await asyncio.to_thread(engine.chat_stream, messages, _sync_delta, **kw)
+
+
 _FINAL_FIELD_KEY_RE = re.compile(r'"final"\s*:\s*"')
 
 
@@ -523,6 +599,10 @@ async def _stream_chat_for_provider(
         return await _ollama_chat_stream(model, messages, tools, on_delta)
     if provider == "lmstudio":
         return await _lmstudio_chat_stream(model, messages, tools, on_delta)
+    if provider == "native":
+        return await _native_chat_stream(model, messages, tools, on_delta)
+    if provider in {"vllm", "sglang", "aphrodite", "koboldcpp"}:
+        return await _openai_compatible_chat_stream(provider, model, messages, tools, on_delta)
     if provider == "anthropic":
         return await _anthropic_chat_stream(model, messages, tools, on_delta)
     raise ValueError(f"no streaming implementation for provider '{provider}'")
@@ -530,26 +610,78 @@ async def _stream_chat_for_provider(
 
 # Providers whose wave-routing call can stream progressively (see
 # _stream_chat_for_provider). Keep in sync with that dispatcher.
-STREAMING_WAVE_PROVIDERS = {"ollama", "lmstudio", "anthropic"}
+STREAMING_WAVE_PROVIDERS = {"ollama", "lmstudio", "anthropic", "vllm", "sglang", "aphrodite", "koboldcpp", "native"}
+
+# Persistent requests session for LM Studio. Reusing the TCP connection cuts
+# first-token latency significantly compared to creating a new session per call.
+_LMSTUDIO_REQUESTS_SESSION: requests.Session | None = None
+
+# Dedicated executor for LM Studio HTTP calls so long-running brain/embedding
+# tasks do not starve the model call.
+_LMSTUDIO_THREAD_POOL: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _lmstudio_requests_session() -> requests.Session:
+    global _LMSTUDIO_REQUESTS_SESSION
+    if _LMSTUDIO_REQUESTS_SESSION is None:
+        _LMSTUDIO_REQUESTS_SESSION = requests.Session()
+    return _LMSTUDIO_REQUESTS_SESSION
+
+
+def _lmstudio_thread_pool() -> concurrent.futures.ThreadPoolExecutor:
+    global _LMSTUDIO_THREAD_POOL
+    if _LMSTUDIO_THREAD_POOL is None:
+        _LMSTUDIO_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="lmstudio-stream"
+        )
+    return _LMSTUDIO_THREAD_POOL
+
+
+def _latency_trace(line: str) -> None:
+    """Opt-in latency tracing; set SHIMS_LATENCY_LOG=<path> to enable.
+
+    Replaces instrumentation that appended to a hardcoded
+    ``C:/tmp/shims_latency.log`` from the hot path on every model call.
+    """
+    path = (os.getenv("SHIMS_LATENCY_LOG") or "").strip()
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _heartbeat_seconds(provider: str = "") -> float:
     """How long the agent stream may stay silent before a keepalive status
     event is emitted. Read per-call so tests and .env changes apply live.
-    Local providers skip keepalives for a cleaner, lower-latency feel."""
-    if provider in {"lmstudio", "ollama", "local"}:
+    Local providers skip keepalives for a cleaner, lower-latency feel —
+    unless SHIMS_STREAM_HEARTBEAT_SECONDS is set explicitly (tests/.env),
+    which always wins."""
+    explicit = (os.getenv("SHIMS_STREAM_HEARTBEAT_SECONDS") or "").strip()
+    if explicit:
+        try:
+            return max(0.05, float(explicit))
+        except Exception:
+            pass
+    if provider in {"lmstudio", "ollama", "local", "native"}:
         return float("inf")
-    try:
-        return max(0.05, float(os.getenv("SHIMS_STREAM_HEARTBEAT_SECONDS", "5.0")))
-    except Exception:
-        return 5.0
+    return 5.0
 
 
 async def _lmstudio_chat_stream(model: str, messages: list[dict[str, Any]],
-                                 tools: list[dict[str, Any]], on_delta: Callable) -> dict[str, Any]:
+                                 tools: list[dict[str, Any]], on_delta: Callable,
+                                 *, max_tokens: int | None = None,
+                                 context_length: int | None = None) -> dict[str, Any]:
     """Streaming LM Studio chat turn over its OpenAI-compatible SSE endpoint.
-    Mirrors _ollama_chat_stream's prose-vs-JSON buffering so raw tool calls
-    never flicker into the UI. Returns {content, tool_calls}.
+
+    On this Windows stack, incremental async streaming (httpx/aiohttp) and
+    per-call ``requests.post`` both add 30-60s to first-token latency. Running
+    a synchronous ``requests`` call in ``asyncio.to_thread`` with a persistent
+    Session is the only path found so far that stays within a few seconds of a
+    standalone script. We still call ``on_delta`` for every content chunk so the
+    rest of the pipeline receives a normal streaming event sequence.
 
     Retries once on 400 "Model reloaded" — LM Studio returns this transiently
     when it swaps models on the first request."""
@@ -562,18 +694,51 @@ async def _lmstudio_chat_stream(model: str, messages: list[dict[str, Any]],
     }
     if tools:
         payload["tools"] = tools
+    if max_tokens:
+        payload["max_tokens"] = int(max_tokens)
+    if context_length:
+        # LM Studio accepts context_length; num_ctx is the llama.cpp alias.
+        payload["context_length"] = int(context_length)
+        payload["num_ctx"] = int(context_length)
     headers = {"Content-Type": "application/json"}
     key = (settings.lmstudio_api_key or "").strip()
     if key:
         headers["Authorization"] = f"Bearer {key}"
+
     content = ""
     tool_calls_acc: dict[int, dict[str, Any]] = {}
-    mode: str | None = None
-    final_streamer: FinalFieldStreamer | None = None
 
-    async def _consume_stream(response) -> None:
-        nonlocal content, mode, final_streamer
-        async for line in response.aiter_lines():
+    def _call_sync() -> dict[str, Any]:
+        _latency_trace(f"[AGENT_LOOP] call_sync model={model} ctx={context_length} msgs={len(messages)}")
+        # Use a per-call Session created inside the worker thread. On this Windows
+        # stack a Session created and used in the same thread is faster than a
+        # shared Session accessed from multiple threads.
+        session = requests.Session()
+
+        def _do_request():
+            return session.post(
+                f"{base}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+                stream=True,
+                timeout=300,
+            )
+
+        r = _do_request()
+        # Retry once on transient "Model reloaded" 400
+        if r.status_code == 400 and "model reloaded" in (r.text or "").lower():
+            r.close()
+            time.sleep(1.5)
+            r = _do_request()
+        r.raise_for_status()
+
+        collected_content = ""
+        collected_tool_calls: dict[int, dict[str, Any]] = {}
+        req_start = time.time()
+        for raw_line in r.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8", errors="ignore").strip()
             if not line.startswith("data:"):
                 continue
             data_str = line[len("data:"):].strip()
@@ -587,7 +752,7 @@ async def _lmstudio_chat_stream(model: str, messages: list[dict[str, Any]],
             delta_obj = choice.get("delta") or {}
             for tc in delta_obj.get("tool_calls") or []:
                 idx = tc.get("index", 0)
-                slot = tool_calls_acc.setdefault(idx, {"function": {"name": "", "arguments": ""}})
+                slot = collected_tool_calls.setdefault(idx, {"function": {"name": "", "arguments": ""}})
                 fn = tc.get("function") or {}
                 if fn.get("name"):
                     slot["function"]["name"] += fn["name"]
@@ -595,44 +760,22 @@ async def _lmstudio_chat_stream(model: str, messages: list[dict[str, Any]],
                     slot["function"]["arguments"] += fn["arguments"]
             delta = delta_obj.get("content") or ""
             if delta:
-                content += delta
-                if mode is None:
-                    stripped = content.lstrip()
-                    if stripped:
-                        mode = "json" if (stripped[0] == "{" or stripped.startswith("`")) else "prose"
-                        if mode == "prose":
-                            await on_delta(content)
-                        else:
-                            final_streamer = FinalFieldStreamer()
-                            emitted = final_streamer.feed(content)
-                            if emitted:
-                                await on_delta(emitted)
-                elif mode == "prose":
-                    await on_delta(delta)
-                elif final_streamer is not None:
-                    emitted = final_streamer.feed(delta)
-                    if emitted:
-                        await on_delta(emitted)
+                collected_content += delta
+        _latency_trace(f"[AGENT_LOOP] call_sync_done elapsed={time.time()-req_start:.2f}s content_len={len(collected_content)}")
+        return {"content": collected_content, "tool_calls": collected_tool_calls}
 
-    try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream("POST", f"{base}/v1/chat/completions", json=payload, headers=headers) as r:
-                # Retry once on transient "Model reloaded" 400
-                if r.status_code == 400 and "model reloaded" in (await r.aread()).decode("utf-8", errors="ignore").lower():
-                    await asyncio.sleep(1.5)
-                    async with client.stream("POST", f"{base}/v1/chat/completions", json=payload, headers=headers) as r2:
-                        r2.raise_for_status()
-                        await _consume_stream(r2)
-                else:
-                    r.raise_for_status()
-                    await _consume_stream(r)
-    except Exception as exc:
-        if content or tool_calls_acc:
-            return {"content": content, "tool_calls": list(tool_calls_acc.values()), "truncated": True,
-                    "error": str(exc)[:160]}
-        from .llm_gateway import LLMUnavailable
-        code = "timeout" if isinstance(exc, httpx.TimeoutException) else "stream_failed"
-        raise LLMUnavailable(code, provider="lmstudio", detail=str(exc)[:200]) from exc
+    result = await asyncio.to_thread(_call_sync)
+    content = result["content"]
+    tool_calls_acc = result["tool_calls"]
+
+    # Emit the collected answer as a streaming sequence so downstream code
+    # (token accounting, voice TTS, UI progress) works unchanged.
+    if content:
+        # Chunk size tuned for TTS-friendly phrasing while still feeling live.
+        chunk_size = 24
+        for i in range(0, len(content), chunk_size):
+            await on_delta(content[i:i + chunk_size])
+
     final_tool_calls: list[Any] = []
     for slot in tool_calls_acc.values():
         try:
@@ -859,7 +1002,7 @@ async def _openai_chat_raw(model: str, messages: list[dict[str, Any]], tools: li
 
 
 def _is_openai_compatible(provider: str) -> bool:
-    return provider in {"openai", "kimi", "deepseek", "qwen", "lmstudio"}
+    return provider in {"openai", "kimi", "deepseek", "qwen", "lmstudio", "vllm", "sglang", "aphrodite", "koboldcpp"}
 
 
 def _openai_compatible_config(provider: str) -> tuple[str, str, str]:
@@ -886,9 +1029,25 @@ def _openai_compatible_config(provider: str) -> tuple[str, str, str]:
         api_key = (settings.lmstudio_api_key or '').strip()
         base_url = (settings.lmstudio_base_url.rstrip('/') + '/v1')
         default_model = settings.lmstudio_model or 'google/gemma-4-e4b'
+    elif provider == "vllm":
+        api_key = (settings.vllm_api_key or '').strip()
+        base_url = (settings.vllm_base_url.rstrip('/') + '/v1')
+        default_model = settings.vllm_model or 'default'
+    elif provider == "sglang":
+        api_key = (settings.sglang_api_key or '').strip()
+        base_url = (settings.sglang_base_url.rstrip('/') + '/v1')
+        default_model = settings.sglang_model or 'default'
+    elif provider == "aphrodite":
+        api_key = (settings.aphrodite_api_key or '').strip()
+        base_url = (settings.aphrodite_base_url.rstrip('/') + '/v1')
+        default_model = settings.aphrodite_model or 'default'
+    elif provider == "koboldcpp":
+        api_key = (settings.koboldcpp_api_key or '').strip()
+        base_url = (settings.koboldcpp_base_url.rstrip('/') + '/v1')
+        default_model = settings.koboldcpp_model or 'default'
     else:
         raise ValueError(f"Unknown OpenAI-compatible provider: {provider}")
-    if not api_key and provider != "lmstudio":
+    if not api_key and provider not in ("lmstudio", "vllm", "sglang", "aphrodite", "koboldcpp"):
         raise ValueError(f"{provider.upper()} API key not configured")
     return api_key, base_url, default_model
 
@@ -1382,7 +1541,7 @@ async def run_agent_loop(
     message: str,
     messages: list[dict[str, Any]],
     model: str,
-    provider: str = "ollama",
+    provider: str = "native",
     router_model: str | None = None,
     router_provider: str | None = None,
     session_id: str | None,
@@ -1639,6 +1798,17 @@ async def run_agent_loop(
             yield {"type": "token", "content": wave_pending.pop(0)}
 
     for wave in range(1, max_waves + 1):
+        # v3.1: Re-register dynamic skill tools before each wave. A skill created
+        # in an earlier wave (e.g. skill.create_tool) must become callable in the
+        # next wave of the same conversation.
+        try:
+            from .skill_runtime import register_all_skill_tools
+            register_all_skill_tools()
+            specs = agent_tools.tool_specs(tool_names) + [t.spec() for t in extra_tools.values()]
+            valid_names = set(tool_names) | set(extra_tools.keys())
+        except Exception:
+            pass
+
         # Keep context bounded
         managed_messages = ctx.to_messages(system_text=convo[0].get("content", ""))
         convo = managed_messages
@@ -1651,7 +1821,7 @@ async def run_agent_loop(
         # Local providers don't need keepalives on a fast machine; skip them so
         # the UI doesn't flicker with "still planning..." status messages.
         def _heartbeat():
-            if provider in {"lmstudio", "ollama", "local"}:
+            if provider in {"lmstudio", "ollama", "local", "vllm", "sglang", "aphrodite", "koboldcpp"} and not (os.getenv("SHIMS_STREAM_HEARTBEAT_SECONDS") or "").strip():
                 return
             elapsed = int(time.perf_counter() - wave_plan_started)
             wave_events.append({"type": "status", "heartbeat": True,
@@ -1893,6 +2063,14 @@ async def run_agent_loop(
                 # non-streaming cloud path: the user saw nothing until the
                 # entire final answer finished generating.
                 ftask = asyncio.create_task(_lmstudio_chat_stream(model, convo, [], _fin_delta))
+                async for ev in _pump_synthesis(ftask):
+                    yield ev
+                fmsg = await ftask
+                answer = (fmsg.get("content") or "").strip()
+            elif provider in {"vllm", "sglang", "aphrodite", "koboldcpp"}:
+                # Local OpenAI-compatible engines usually stream reliably; use the
+                # generic SSE streamer so the user sees tokens as they arrive.
+                ftask = asyncio.create_task(_openai_compatible_chat_stream(provider, model, convo, [], _fin_delta))
                 async for ev in _pump_synthesis(ftask):
                     yield ev
                 fmsg = await ftask

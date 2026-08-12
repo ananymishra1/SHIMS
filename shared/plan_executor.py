@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from typing import Any
 
@@ -75,12 +76,13 @@ def _model_for_provider(provider: str | None = None) -> str:
     """Pick the default model for the configured (or supplied) provider."""
     provider = provider or settings.ai_provider
     return {
+        "native": os.getenv("SHIMS_NATIVE_MODEL", ""),
         "ollama": settings.ollama_model,
         "openai": settings.openai_model,
         "google": settings.gemini_model,
         "anthropic": settings.anthropic_model,
         "huggingface": settings.huggingface_model,
-    }.get(provider, settings.ollama_model)
+    }.get(provider, os.getenv("SHIMS_NATIVE_MODEL", ""))
 
 
 async def _run_agent_loop_async(description: str, plan: Plan) -> dict[str, Any]:

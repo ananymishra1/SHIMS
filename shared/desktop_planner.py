@@ -16,10 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from .action_ledger import record_action
 from .config import STORAGE_DIR
+from .local_llm import feature_chat
 from .security import new_id
 
 PLANNER_DB = STORAGE_DIR / "state" / "desktop_planner.sqlite3"
@@ -203,7 +202,7 @@ def plan_from_goal(goal: str, *, planner_llm_fn=None, context: dict[str, Any] | 
                 return create_plan(goal, planned["steps"], context)
         except Exception:
             pass
-    # Try LLM planner via local Ollama
+    # Try LLM planner via the native engine
     try:
         steps = _llm_plan_steps(goal)
         if steps:
@@ -246,25 +245,17 @@ def _llm_plan_steps(goal: str) -> list[dict[str, Any]]:
         'Example: [{"step_id":"s1","description":"Search web for latest fluconazole prices","tool_hint":"web.search","depends_on":[]}, {"step_id":"s2","description":"Recall prior supplier knowledge","tool_hint":"memory.search","depends_on":[]}, {"step_id":"s3","description":"Draft procurement memo","tool_hint":"agent.run","depends_on":["s1","s2"]}, {"step_id":"s4","description":"Save memo to long-term memory","tool_hint":"memory.save","depends_on":["s3"]}]'
     )
 
-    model = os.getenv("SHIMS_PLANNER_MODEL", "qwen2.5:7b")
-    host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-    payload = {
-        "model": model,
-        "messages": [
+    model = os.getenv("SHIMS_PLANNER_MODEL") or None  # GGUF id; None = loaded native model
+    raw = feature_chat(
+        [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 1024},
-        "keep_alive": "5m",
-    }
-
-    with httpx.Client(timeout=90.0) as client:
-        r = client.post(f"{host}/api/chat", json=payload)
-        r.raise_for_status()
-        data = r.json()
-
-    raw = (data.get("message") or {}).get("content") or data.get("response") or ""
+        model=model,
+        max_tokens=1024,
+        temperature=0.2,
+        feature="planner",
+    )
     raw = raw.strip()
     if "[" in raw and "]" in raw:
         raw = raw[raw.find("[") : raw.rfind("]") + 1]

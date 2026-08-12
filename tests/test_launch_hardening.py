@@ -57,11 +57,33 @@ def test_rich_docx_styles_and_lists(tmp_path: Path):
     assert len(doc.tables) == 1
 
 
-# ── Gmail send/reply gating (no creds configured in test env) ───────────────
-def test_gmail_send_requires_scope():
+# ── Gmail send is draft-only by default (never a real send) ─────────────────
+# Hermetic: these monkeypatch the token/draft layer so the suite NEVER touches
+# the real Gmail account. (A stored real token once made these tests actually
+# send/draft mail — the source of the "uncalled-for test mails".)
+def test_gmail_send_never_sends_without_token(monkeypatch):
+    monkeypatch.delenv("SHIMS_ALLOW_EMAIL_SEND", raising=False)
+    monkeypatch.setattr("shared.mailbox.get_access_token", lambda *a, **k: None)
     r = client.post("/mailbox/gmail/send", json={"to": "x@example.com", "subject": "Hi", "body": "yo"})
-    assert r.status_code == 428
-    assert r.json()["status"] in {"scope_required", "needs_oauth"}
+    body = r.json()
+    assert body.get("status") != "sent"                      # never a real send
+    assert r.status_code in (400, 428)
+    assert body.get("status") in {"needs_oauth", "scope_required"}
+
+
+def test_gmail_send_creates_draft_not_send_by_default(monkeypatch):
+    import shared.mailbox as mb
+    monkeypatch.delenv("SHIMS_ALLOW_EMAIL_SEND", raising=False)
+    monkeypatch.setattr(mb, "get_access_token", lambda *a, **k: "fake-token")
+    # If the gate ever failed, send_gmail_message would reach the HTTP send; the
+    # gate returns before that, so mocking the draft layer is enough to prove it.
+    monkeypatch.setattr(mb, "create_gmail_draft",
+                        lambda *a, **k: {"ok": True, "status": "draft_saved", "draft_id": "d1"})
+    r = client.post("/mailbox/gmail/send", json={"to": "x@example.com", "subject": "Hi", "body": "yo"})
+    body = r.json()
+    assert r.status_code == 200
+    assert body.get("send_blocked") is True
+    assert body.get("status") == "draft_saved_send_blocked"
 
 
 def test_gmail_reply_missing_message():

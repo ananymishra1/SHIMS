@@ -55,6 +55,8 @@ def save_skill(
     tool_schema: dict[str, Any] | None = None,
     tool_code: str = "",
     tool_name: str = "",
+    previous_version_id: str | None = None,
+    created_from: str | None = None,
 ) -> dict[str, Any]:
     """Create or update a skill. If ``skill_id`` is given, updates in place."""
     name = (name or "").strip() or "Untitled skill"
@@ -83,6 +85,13 @@ def save_skill(
         "created_at": existing.get("created_at", now),
         "updated_at": now,
     }
+    # Lightweight lineage: optional provenance for evolved / imported skills.
+    lineage_prev = previous_version_id or existing.get("previous_version_id")
+    if lineage_prev:
+        skill["previous_version_id"] = lineage_prev
+    skill["created_from"] = (
+        created_from or existing.get("created_from") or source or "user"
+    )
     if runtime:
         skill["runtime"] = runtime
     elif existing.get("runtime"):

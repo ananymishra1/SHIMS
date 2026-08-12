@@ -24,6 +24,7 @@ android_app/.gradle/
 *.apk
 node_modules/
 .pytest_cache/
+.pytest_tmp*/
 *.gguf
 *.bin
 *.onnx

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 REVISION = 'pytest-capability-v1'
-GENERATED_AT = '2026-07-13T18:05:46.570016'
+GENERATED_AT = '2026-08-05T12:55:14.223024'
 
 def backend_probe() -> dict[str, str]:
     return {

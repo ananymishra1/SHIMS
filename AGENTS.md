@@ -102,20 +102,203 @@ User preferences and learned behaviors are stored as JSON sidecars in `storage/s
 
 | Variable | Purpose |
 |----------|---------|
-| `SHIMS_ROUTER_MODEL` | Fast model for wave planning (e.g. `claude-sonnet-4-6`, `qwen2.5:3b`). |
+| `SHIMS_ROUTER_MODEL` | Fast model for wave planning (native GGUF id, or a cloud model name). |
 | `SHIMS_WAVE_ROUTER_SPLIT` | `auto` / `always` / `never`. |
-| `SHIMS_SELF_EVOLUTION_MODEL` | Local model for source rewrites (default `qwen2.5-coder:14b`). |
+| `SHIMS_SELF_EVOLUTION_MODEL` | Local model for source rewrites (native GGUF id; default = loaded model). |
 | `SHIMS_OMNIPOTENT_MODE` | If `true`, gates auto-apply and the agent loop is forced on for every turn; no permission prompts. |
-| `SHIMS_FACTORY_MODEL` | Model used by the App Factory (`claude-sonnet-4-6` default; set `qwen2.5-coder:14b` for local Ollama). |
+| `SHIMS_FACTORY_MODEL` | Model used by the App Factory (`claude-sonnet-4-6` default; set a native GGUF id for local). |
 | `ANTHROPIC_API_KEY` | Cloud routing / rewrite provider key. |
-| `OLLAMA_HOST` / default `127.0.0.1:11434` | Local model host. |
+| `OLLAMA_HOST` / default `127.0.0.1:11434` | **Legacy / Instance B only.** SHIMS Instance A is native-only: Ollama is never probed or routed to by default anywhere (chat, feature models, gateway, fallback chains). See "Native-only routing" below. |
 | `HUGGINGFACE_BASE_URL` / default `http://127.0.0.1:8080` | Local Hugging Face OpenAI-compatible endpoint (TGI / vLLM / llama.cpp server). |
 | `HUGGINGFACE_API_KEY` | Optional bearer token for the HF endpoint. |
 | `HUGGINGFACE_MODEL` | Default model ID, e.g. `meta-llama/Llama-3.1-8B-Instruct`. |
-| `SHIMS_MEMORY_MODEL` | Local model for durable-fact extraction (default: preferred local model). |
-| `SHIMS_PLANNER_MODEL` | Local model for plan DAG generation (default `qwen2.5:7b`). |
-| `SHIMS_MUTATION_MODEL` | Local model for prompt-evolution mutations (default `qwen2.5:7b`). |
+| `SHIMS_MEMORY_MODEL` | Native GGUF id for durable-fact extraction (default: currently loaded native model). |
+| `SHIMS_PLANNER_MODEL` | Native GGUF id for plan DAG generation (default: loaded model). |
+| `SHIMS_MUTATION_MODEL` | Native GGUF id for prompt-evolution mutations (default: loaded model). |
+| `SHIMS_FEATURE_LLM_TIMEOUT_S` | Timeout for `shared/local_llm.feature_chat` feature calls (default 180). |
 | `SHIMS_MAX_PARALLEL_TOOLS` | Max parallel tool calls per wave / across background jobs (default `4`). Lower if cloud providers rate-limit; raise on strong local hardware. |
+| `SHIMS_CHAT_PROVIDER` / `SHIMS_CHAT_MODEL` | Brain-model override saved from Settings → Brain Model; the backend is the source of truth (frontend adopts it on load). Local values resolve to the native engine; cloud providers are honored explicitly. |
+| `KOBOLDCPP_BASE_URL` / `KOBOLDCPP_MODEL` | KoboldCPP OpenAI-compatible endpoint (default `http://127.0.0.1:5001`) and model id. Same pattern for `VLLM_*`, `SGLANG_*`, `APHRODITE_*`. |
+| `SHIMS_NATIVE_*` | Native engine: `SHIMS_NATIVE_MODEL` (GGUF pick), `SHIMS_NATIVE_CTX` (default 16384; explicit pin always wins), `SHIMS_NATIVE_GPU_LAYERS`, `SHIMS_NATIVE_THREADS`, `SHIMS_NATIVE_BACKEND` (`vulkan`/`cuda`/`cpu`), `SHIMS_NATIVE_PORT` (default 5115), `SHIMS_NATIVE_RUNTIME` (exe override), `SHIMS_NATIVE_IDLE_UNLOAD_MIN` (0 = never unload), `SHIMS_NATIVE_PARALLEL` (parallel request slots, default 4), `SHIMS_NATIVE_TIMEOUT` (per-request socket timeout, default 900 — must cover slot-queue waits), `SHIMS_NATIVE_SMARTCACHE` (KV snapshot limit for cross-turn prompt caching, default 8 — kills the per-turn full-prompt re-eval). |
+| `SHIMS_CHAT_CTX` | Constant context length sent to local providers (default 8192) — prevents per-turn model reloads keyed to ctx size. |
+| `SHIMS_CHAT_MAX_TOKENS` | Output cap per chat turn. **Unset (default) = unlimited** (ceiling = full context window; the UI stop button is the kill switch). Set an integer to reinstate a hard cap. `SHIMS_REASONING_TOKEN_RESERVE` (default 0) is legacy headroom for capped setups only. |
+| `SHIMS_KEEP_WARM` | `true` (default): background 4-min heartbeat keeps the active local model loaded. |
+| `SHIMS_RETRIEVAL_BUDGET_S` | Max seconds a chat turn waits for RAG retrieval (default 1.5). |
+| `SHIMS_RAG_STRONG_SCORE` / `SHIMS_VECTOR_STRONG_SIM` / `SHIMS_RAG_COVERAGE_MIN` | Relevance admission for chat RAG: keyword hits need score ≥ 3.0 (default) AND, for multi-token queries, ≥ 2 distinct matched content tokens (exact-phrase matches always pass); vector hits need sim ≥ 0.70. Set the strong vars ≤ the `*_MIN_*` vars (and coverage to 1) to restore lenient behavior. |
+| `SHIMS_NIGHTLY_MODEL` / `SHIMS_NIGHTLY_TIMEOUT_S` | Big native GGUF id for the nightly self-fix reflection (default: loaded model) and its timeout (default 1800 s — 100B-class GGUFs are slow, that's fine at 1 AM). |
+| `SHIMS_NIGHTLY_CRON` / `SHIMS_NIGHTLY_AUTO_APPLY` | Nightly loop schedule (daily "M H * * *", default `0 1 * * *` = 1:00 AM local) and whether low-risk patch proposals auto-apply through validate→approve→apply with rollback (default `true`; riskier proposals wait for morning approval). |
+| `SHIMS_OBSERVER_INTERVAL_MIN` | Minutes between day-observer status snapshots (default 30). |
+| `SHIMS_SECONDARY_PROVIDERS` | How auto-routing may use non-native local backends. `off` (default) never probes them — strictly native + cloud. `auto` probes LM Studio/Ollama/vLLM/SGLang/Aphrodite/KoboldCPP only when the native engine has no model loaded (legacy); `all` or a comma list always allows them. |
+| `SHIMS_MODEL_DOWNLOAD_DIR` | Where GGUF downloads land. Defaults to `~/.lmstudio/models/shims` when an LM Studio library exists, so native and LM Studio share one copy of every model. The `shims/` subdir is what `managed_dirs()` trusts, so SHIMS can delete what it downloaded but never the user's pre-existing LM Studio models. |
+| `SHIMS_REASONING_EFFORT` | `auto` (default) \| `none` \| `low` \| `medium` \| `high`. Under `auto` the lite lane sends `none` and the tool-capable lane omits the field so a thinking model thinks. Set explicitly to force one value on both lanes. `none`/`low` also pass `chat_template_kwargs.enable_thinking=false` to the native engine (verified: kills the reasoning block entirely, so Qwen3.x thinking models reply in seconds instead of starving the output budget). |
+| `SHIMS_LITE_LANE` | `trivial` (default): only greetings/acks take the no-tools fast lane. `broad` restores the old substring blocklist — a latency-triage rollback only; it costs the model its tools on any turn whose wording misses the list. |
+| `SHIMS_RAG_MIN_SCORE` / `SHIMS_VECTOR_MIN_SIM` | Relevance gates for keyword (default 1.5) and vector (default 0.62) retrieval hits. |
+| `SHIMS_APPROVAL_TTL_S` | Pending approvals expire after this many seconds (default 1800) and are session-scoped — a bare "yes" can never execute a stale/cross-session approval. |
+| `SHIMS_IDLE_MIN` / `SHIMS_COMFYUI_RESERVE_GB` / `SHIMS_FISH_IDLE_MIN` / `SHIMS_FISH_RESERVE_GB` | Compute-orchestrator policy: idle threshold (default 5 min) before downtime image drains, ComfyUI reserve (12 GB), fish-speech idle-stop (15 min) and reserve (8 GB). |
+| `SHIMS_CHAT_TEMPERATURE` | Brain Controls: default chat temperature (default 0.2). |
+| `SHIMS_TOOL_SCOPING` | `on` (default): obvious single-domain turns ship only that domain's tool schemas. `off` restores the full set every turn. |
+| `SHIMS_DIGEST_INTERVAL_MIN` | Minutes between scheduled comms digests (default 120). |
+
+---
+
+## Native Engine & Compute Orchestrator
+
+SHIMS has its own GGUF inference engine — no LM Studio/Ollama needed in the default chat path. It embeds the koboldcpp runtime (`tools/koboldcpp/`) as a SHIMS-owned child process with SHIMS-computed flags, auto-tuned from live hardware probing (works on any machine: NVIDIA→CUDA, AMD/unified→Vulkan, else CPU).
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `shared/native_engine/discovery.py` | GGUF discovery (`storage/models/`, `data/models/`, `~/.shims/models`, read-only LM Studio dir) + pure-Python GGUF header parser. |
+| `shared/native_engine/tuning.py` | `compute_launch_plan()` → gpu_layers/ctx/threads/backend/parallel_slots from `hardware_profiler` + psutil free RAM. Slots default to `SHIMS_NATIVE_PARALLEL` (4); total ctx scales to `SHIMS_CHAT_CTX × slots` unless `SHIMS_NATIVE_CTX` is pinned, and slots auto-degrade when the memory budget caps ctx. |
+| `shared/native_engine/runtime.py` | Runtime spawn/health/watchdog/kill; flags derived from the binary's `--help`. Always adds `--jinja_tools` (or `--jinja`) when advertised — without it the server silently drops the `tools` payload and the model can never emit `tool_calls` — and `--parallelrequests N` from the plan's `parallel_slots`. |
+| `shared/native_engine/engine.py` | `NativeEngine` singleton: lifecycle + `chat_raw`/`chat_stream` (OpenAI-compatible loopback, default port 5115). |
+| `shared/native_engine/budget.py` | Memory ledger + idle-unload policy consumed by the orchestrator. |
+| `shared/compute_orchestrator.py` | One authority over whole-machine memory: budget ledger, idle state machine, downtime ComfyUI image queue, fish-speech-2 server lifecycle. |
+
+### Provider `native`
+
+Registered in `shared/agent_loop.py` (`_native_chat_raw`/`_native_chat_stream`, streaming set, dynamic fallback-chain prepend only when healthy), `shared/llm_gateway.py`, `shared/ai.py` (`NativeProvider`), `shared/agent_model_router.py`. Auto-starts at backend lifespan when a GGUF exists; `_resolve_provider_model` prefers it (zero HTTP fan-out). Endpoints: `GET /api/native-engine/status`, `POST /api/native-engine/load`, `POST /api/native-engine/unload`.
+
+### Orchestrator
+
+Ticks every 30 s from the backend lifespan. When idle ≥ `SHIMS_IDLE_MIN` with queued image jobs, it launches/locates ComfyUI and drains the queue; on new chat activity it finishes the in-flight job then suspends. It starts fish-speech-2 on first TTS request and idle-stops it. It never kills servers it didn't start. Endpoints: `GET /api/orchestrator/status`, `POST /api/orchestrator/image-job`, `GET /api/orchestrator/image-job/{id}`. Video generation slots into the same budget/suspend design later.
+
+### Desktop hub & inbound channels
+
+- **Desktop Hub canonical source lives in the repo at `hub/`**
+  (`live_shims_hub.py`, `live.html`, `live-app.js`, `live-style.css`).
+  `scripts/install_hub.bat` deploys it to the Desktop install dir
+  (`~/Desktop/00_SHIMS_DESKTOP_HUB/`) and restarts it. The hub is
+  **stdlib-only** by requirement: the launcher starts it with whatever
+  `python` is on PATH, not the venv — no third-party imports, ever. It owns
+  no state; every panel degrades independently, and it falls back to the next
+  free port rather than exiting on bind failure. Its open-items taskboard
+  prefers SHIMS's live digest (`data/state/taskboard.json`) and falls back to
+  the local static `open-items-data.json` when no digest has run.
+- **Inbound channels** (`shared/channels.py`, `/api/channels/inbound`,
+  `/api/channels/{channel}/recent`) are the landing zone for message bridges.
+  Append-only, bounded retention, `(channel, message_id)` unique so a retried
+  relay or a WhatsApp redelivery is a no-op. Token-gated on `SHIMS_BRIDGE_TOKEN`
+  and **fails closed when unset** — it ingests message content from another
+  process. Inbound only: sending would mean acting as the user toward third
+  parties and needs an explicit approval path, not an HTTP endpoint.
+- **WhatsApp** arrives via `integrations/whatsapp/index.js`, a SHIMS-owned
+  baileys sidecar (no OpenClaw involvement) that posts inbound messages to
+  `/api/channels/inbound`. Sidecar endpoints: `:5116/status`, `/qr`,
+  `/qr/text`, `/logout`. Groups are opt-in via `SHIMS_WHATSAPP_GROUPS=true`.
+  The legacy OpenClaw relay (`integrations/openclaw/shims-channel-bridge`)
+  remains as an alternative but is no longer the default path.
+- **Comms digest & taskboard** (`shared/comms_digest.py`) runs on the
+  scheduler (`comms_digest` action, default every `SHIMS_DIGEST_INTERVAL_MIN`
+  = 120 min) and on demand (`POST /api/taskboard/run`, `comms.digest` tool).
+  It classifies recent Gmail + WhatsApp into Urgent / Needs reply / Waiting /
+  FYI — one scoped native LLM turn, keyword fallback — and writes
+  `data/state/taskboard.json` for the hub and `GET /api/taskboard`. Items
+  carry deep links: Gmail threads (`/u/1/#all/<thread_id>` — the user's
+  second Google account) and WhatsApp DMs (`wa.me/<number>`, digit
+  senders only). Manual pins (`taskboard_pins.json`, `add_pin()`) survive
+  regeneration and float to the top.
+- **Vendor inventory** (`shared/chat_inventory.py`) rides the digest cadence:
+  a vendor-wise index of products/raw materials, equipment, and services
+  offered on WhatsApp + Gmail, with quoted rates (`₹/Rs/USD/lakh` patterns),
+  evidence snippets, and deep links. Endpoints: `GET /api/inventory`,
+  `POST /api/inventory/run`, `GET /api/inventory/export.xlsx` (4-sheet
+  openpyxl workbook); chat tool `inventory.export` returns a downloadable
+  `/media/files/exports/*.xlsx` link. The hub renders it as the Vendor
+  Inventory panel, including a **My Quoted Rates** tab for outbound quotes —
+  the WhatsApp sidecar relays `fromMe` messages (`metadata.is_mine`) and
+  Gmail is scanned with `in:sent`, so rates the user quotes land there.
+  `_llm_enrich` (env `SHIMS_INVENTORY_LLM`, default on) refines item/rate/qty
+  rows per vendor with a native LLM turn when the engine is free.
+- **Gmail** uses the OAuth flow in `shared/mailbox.py`
+  (`/mailbox/oauth/start` → `/mailbox/oauth/callback` → `/mailbox/gmail/sync`).
+  Default scopes are `gmail.readonly` + `gmail.compose` — full read access and
+  draft creation. SHIMS **never sends email directly**; the `mail.draft` chat
+  tool creates drafts the user reviews and sends manually. The `mail.read` tool
+  lists/searches/reads messages, and `mail.attachment` downloads attachments to
+  `data/downloads/`. Override scopes with `SHIMS_GMAIL_SCOPES`. Needs
+  `SHIMS_GMAIL_CLIENT_ID`/`_SECRET` from a Google Cloud OAuth client — the
+  consent step is the user's, never automated.
+
+### Chat-latency architecture notes
+
+- Both chat lanes send a constant `SHIMS_CHAT_CTX` and stream true SSE (no buffered pseudo-stream). Reasoning effort comes from `_reasoning_effort()`, not a hardcoded value: the lite lane suppresses thinking for latency, the full lane omits the field so a thinking model reasons at its own default.
+- System prompts use a **stable prefix** (identity/directives first, byte-constant) with all per-turn content (RAG addendum, lessons, feedback prefs) in a trailing `[Live context]` block — this keeps llama.cpp-family KV prefix caching effective across turns.
+- **Tool-calling contract.** `TOOL_CALLING_PROVIDERS` in `backend/app/main.py` is the single source of truth for "may the brain model call a tool". A provider belongs there only if its `_model_turn_events` branch both forwards `tools` and parses `tool_calls` back out — listing one that does not silently drops every call, and omitting one that does leaves the model with no tools at all. Both failure modes look identical to the user: confident, unsourced answers. The curated schema (`_unified_chat_tools`) covers `web.search`, `web.fetch`, `media.create`, `agent.spawn`, `agent.assign` (background specialists), `desktop.bridge`, `mail.read`, `mail.draft`, `mail.attachment`, `channels.recent` (read-only inbound WhatsApp/channel messages), `comms.digest` (classified taskboard digest), `skill.*`; execution and the trust/ledger envelope live in `_execute_unified_tool`. Chat turns ship only the matched domain's subset (`shared/agent_domains.scoped_tools`); ambiguous turns get the full set. Each call emits `tool_call`/`tool_result` events so the UI renders an inspectable tool card.
+- Retrieval is skipped for simple/tool-intent/search-intent turns; vector scans are `LIMIT`-bounded; `omni_feedback` and pinned core memories never count as RAG evidence; the MEMORY-BACKED trust card requires a genuine non-core hit above threshold.
+- Smoke test: `.venv/Scripts/python scripts/native_engine_smoke.py`; TTFT harness: `.venv/Scripts/python scripts/time_first_token.py`.
+
+### Validation
+
+```bash
+.venv/Scripts/python -m pytest tests/test_native_engine.py tests/test_compute_orchestrator.py tests/test_approval_guard.py tests/test_omni_brain_relevance.py -q --basetemp=.pytest_tmp
+```
+
+---
+
+## Native-only routing & day observer / nightly loop
+
+**Native-only local inference.** SHIMS Instance A routes ALL local LLM work —
+chat, wave planning, auto-memory, planner, prompt mutation, improvement
+reflection — through the native GGUF engine. `_resolve_provider_model`
+(`backend/app/main.py`) maps every local provider alias (`auto`, `local`,
+`ollama`, `lmstudio`, `vllm`, `sglang`, `aphrodite`, `koboldcpp`,
+`huggingface`) to native and never probes secondary backends; explicit cloud
+providers are still honored. `shared/local_llm.feature_chat()` is the single
+helper feature code uses for background LLM calls (native loopback, port
+`SHIMS_NATIVE_PORT`; returns `""` on any failure so heuristic fallbacks fire).
+Ollama-based code remains only for the isolated Instance B (Local Factory).
+The user's Settings → Brain Model pick is the source of truth: the backend
+persists it (`SHIMS_CHAT_PROVIDER`/`SHIMS_CHAT_MODEL`), the frontend adopts it
+on load, and the resolver/engine lock honor it over "whatever GGUF is loaded".
+
+**Day observer** (`shared/day_observer.py`): a scheduler job (`day_observer`
+action, every `SHIMS_OBSERVER_INTERVAL_MIN` = 30 min) appends status snapshots
+to `logs/observer/YYYY-MM-DD.jsonl`; `collect_day_report()` rolls the day's
+episodes, telemetry errors/latency, tool/model-call health, thumbs feedback,
+and ledger state into `logs/observer/YYYY-MM-DD-report.md`.
+
+**Nightly loop** (`shared/nightly_loop.py`): a scheduler cron job
+(`nightly_cycle` action, `SHIMS_NIGHTLY_CRON` = `0 1 * * *`) runs
+`run_nightly_cycle()`: day report → app-doctor pass over `apps/` →
+`run_improvement_cycle(extra_context=…, auto_apply_low_risk=…)`. The
+reflection LLM is the big native GGUF (`SHIMS_NIGHTLY_MODEL`, timeout
+`SHIMS_NIGHTLY_TIMEOUT_S` = 1800 s). With `SHIMS_NIGHTLY_AUTO_APPLY=true`
+(default), low-risk patch proposals auto-apply through the normal
+validate→approve→apply pipeline (auto-rollback on failure); riskier proposals
+wait for morning approval. Endpoints: `POST /api/nightly/run`,
+`GET /api/nightly/runs`, `GET /api/observer/today`. Tests:
+`tests/test_nightly_loop.py`.
+
+---
+
+## Enterprise bridge (SHIMS ↔ SHIMS Enterprise)
+
+SHIMS connects to the standalone SHIMS Enterprise app (ERP/MES/LIMS/QMS/DMS/RIM,
+default `http://127.0.0.1:8020`, code at `C:/d/shims_enterprise_local`) with
+full awareness and record-level CRUD.
+
+- **Client**: `shared/enterprise_bridge.py` — `bridge_command()`,
+  `enterprise_get/post()`, `status()`, `awareness_snapshot()`,
+  `sync_brain_awareness()`. Auth: `X-Bridge-Token` = `SHIMS_BRIDGE_TOKEN`
+  (same value on both sides; `ENTERPRISE_BRIDGE_TOKEN` accepted as fallback).
+  Enable with `SHIMS_ENTERPRISE_PAIRING_ENABLED=true` + `SHIMS_ENTERPRISE_URL`.
+- **Chat tools** (read side): `enterprise.status`, `enterprise.query`
+  (summary/dashboard/records/get/tables/search/overview/export/products),
+  `enterprise.sync_brain`.
+- **Agent tools** (gated writes): `enterprise.create` (typed creates + raw
+  `records.insert`), `enterprise.update`, `enterprise.move`,
+  `enterprise.delete`, `enterprise.ingest` (bulk messages/vendors/tally,
+  document folders, corpus import).
+- **Enterprise side**: `records.*` bridge command family in
+  `shims_enterprise/bridge_control.py` — `records.tables|list|get|insert|
+  update|delete|move`, schema-validated, audited, `users`/`audit_log` writes
+  blocked.
+- **Awareness**: a seeded scheduler job (`tool` action,
+  `enterprise.sync_brain`, every `SHIMS_ENTERPRISE_SYNC_MIN` = 60 min) folds
+  the live enterprise inventory into omni-brain knowledge
+  (`source_type='enterprise'`).
 
 ---
 
@@ -171,7 +354,7 @@ A/B test system-prompt variants against eval cases. Mutations are now generated 
 - `prompt.run_eval`
 - `prompt.promote`
 
-**Config:** set `SHIMS_MUTATION_MODEL` (default `qwen2.5:7b`).
+**Config:** set `SHIMS_MUTATION_MODEL` to a native GGUF id (default: currently loaded native model).
 
 ### B.3 Background Coder Integration
 
@@ -283,7 +466,7 @@ Multi-step plans are persisted in SQLite, executed in dependency-resolved waves,
 - `plan.get`
 - `plan.cancel`
 
-**Config:** set `SHIMS_PLANNER_MODEL` to choose the planner model (default `qwen2.5:7b`).
+**Config:** set `SHIMS_PLANNER_MODEL` to a native GGUF id for the planner model (default: currently loaded native model).
 
 ### C.5 Desktop Automation & Scheduling
 
@@ -406,15 +589,24 @@ ChemDFM query, training fact recording, and journal/learning-gap analysis are ex
 
 ---
 
-## UI Polish Note
+## UI Note — Command Center drawer
 
-The right sidebar was redesigned to avoid crowding after adding Plans and Schedule panels:
+The right sidebar is the `#cmd-dock` drawer (opened from the topbar), with
+collapsible sections: Agent Roster, Telemetry, Plans & Schedule, Units,
+Enterprise Bridge (hidden when disabled), **Brain Controls** (reasoning
+effort / temperature / context / parallel slots → `GET/POST
+/api/settings/llm`, persisted via `_set_env_persistent`), Desktop Controls,
+Event Feed. Thinking renders inline in chat; the old Thinking|Plans|Feed
+tabbed sidebar no longer exists.
 
-- **Compact status strip** at the top: model, route, latency, live stage dots, agent roster popover.
-- **Tabbed content**: Thinking | Plans | Feed.
+Specialist domains (`shared/agent_domains.py`) give the brain three modes:
+inline scoped tool lenses (`SHIMS_TOOL_SCOPING=off` disables), background
+specialist agents (`POST /api/agents/assign`, `agent.assign` tool,
+`specialist_agent` task type surfaced in the Background Tasks list), and the
+scheduled comms digest. Decluttered settings: one model picker (topbar),
+advanced sections collapsed, dead UI removed.
+
 - **CSS/JS**: `frontend/css/shims_omni.css`, `frontend/js/shims_omni.js`, `frontend/shims_omni.html`.
-
-This keeps telemetry visible without overwhelming the user, and scales as more modules are added.
 
 ---
 
@@ -518,7 +710,7 @@ The evaluation-driven improvement loop now uses real prompt-quality eval cases, 
 - New skills via `shared/skills.save_skill`.
 - Prompt-variant mutations via `shared/prompt_evolution.generate_mutations`.
 
-**Config:** set `SHIMS_IMPROVEMENT_MODEL` to override the reflection model (default `qwen2.5:7b`).
+**Config:** set `SHIMS_NIGHTLY_MODEL` (highest precedence) or `SHIMS_IMPROVEMENT_MODEL` to a native GGUF id for the reflection model (default: currently loaded native model); `SHIMS_NIGHTLY_TIMEOUT_S` (default 1800) covers 100B-class GGUFs.
 
 ---
 
@@ -540,7 +732,7 @@ The evaluation-driven improvement loop now uses real prompt-quality eval cases, 
 
 ### Cloud Provider Wiring
 
-`shared/agent_loop.py` now has real `_openai_chat_raw` and `_google_chat_raw` transports, plus a generic `_openai_compatible_chat_raw` / `_openai_compatible_chat_stream` for Kimi, DeepSeek, and Qwen. The fallback chain Anthropic → OpenAI → Google → Kimi/DeepSeek/Qwen → Ollama works end-to-end, and the LLM gateway routes these providers through the same transports.
+`shared/agent_loop.py` now has real `_openai_chat_raw` and `_google_chat_raw` transports, plus a generic `_openai_compatible_chat_raw` / `_openai_compatible_chat_stream` for Kimi, DeepSeek, and Qwen. The fallback chain native (when healthy) → Anthropic → OpenAI → Google works end-to-end (Kimi/DeepSeek/Qwen via the OpenAI-compatible transport; Ollama only when explicitly requested), and the LLM gateway routes these providers through the same transports.
 
 ### Agentic Plan Executor
 
@@ -750,7 +942,7 @@ Default members and their API keys:
 | Gemini | Google | `gemini-2.5-flash` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
 | Claude | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | OpenAI | OpenAI | `gpt-4o-mini` | `OPENAI_API_KEY` |
-| Factory | Ollama | `qwen2.5-coder:14b` | local |
+| Factory | native | loaded native GGUF | local |
 
 Each member can be enabled/disabled and given a custom provider, model, temperature, and system prompt in **Settings → Council Personas**. The default prompts are task-agnostic — the council answers general questions directly and only routes to SHIMS tools when the request clearly involves SHIMS code, files, or desktop/server actions.
 

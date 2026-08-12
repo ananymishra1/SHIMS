@@ -7,7 +7,7 @@ const auth = () => ({'X-Shims-Token': localStorage.shimsAccessToken || ''});
 
 const state = {
   sessionId: localStorage.shimsSessionId || null,
-  provider: localStorage.shimsProvider || 'ollama',
+  provider: localStorage.shimsProvider || 'auto',
   selectedModel: localStorage.shimsModel || '',
   streaming: false,
   voiceOn: localStorage.shimsVoice === 'true',
@@ -39,6 +39,20 @@ state.wakeLatchUntil = 0;
 state.wakeAckTimer = null;
 state.lastWakeAckAt = 0;
 state.serverSttBackoffUntil = 0;
+// Unified TTS controller state — ttsActive covers the ENTIRE speak operation,
+// including browser→server fallbacks. The mic re-arms only after the last
+// queued utterance settles plus a short tail (see ttsEnqueue/ttsSettleTail).
+state.ttsActive = false;
+state.ttsQueue = Promise.resolve();
+state.ttsPending = 0;
+state.ttsGen = 0;               // bumped by cancelTts() so queued utterances skip
+state.spokenLog = [];           // rolling 30s normalized log of spoken text (echo filter)
+state.ttsUpcoming = [];         // normalized queue of text that has been scheduled for TTS but not yet spoken
+state.lastSttFinalAt = 0;       // last time STT produced any result (watchdog)
+state.sttWatchdogTimer = null;
+
+// Open every mic with echo cancellation so SHIMS does not hear its own TTS.
+const MIC_CONSTRAINTS = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
 
 // Frozen voice provider mode: 'cloud' (fastest, requires keys), 'fast' (browser + local fallback), 'local' (local only), 'offline' (no cloud ever).
 const VOICE_MODE = (localStorage.shimsVoiceMode || 'fast').toLowerCase();
@@ -73,7 +87,7 @@ class WakeWordEngine {
     this.onDetected = onDetected;
     this.detecting = true;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AudioCtx({ sampleRate: this.sampleRate });
       let workletReady = false;
@@ -114,6 +128,13 @@ class WakeWordEngine {
 
   _pushSamples(samples) {
     if (!this.detecting) return;
+    // Never listen while SHIMS itself is speaking: the mic would capture the
+    // TTS output and the backend whisper fallback would match wake words
+    // (incl. bare "shims") in SHIMS's own replies, self-triggering the latch.
+    if (state.ttsActive || Date.now() < (state.listeningSuppressedUntil || 0)) {
+      if (this.buffer.length) this.buffer = [];
+      return;
+    }
     this.buffer.push(...samples);
     // Cap buffer to avoid memory growth when sending is back-pressured
     if (this.buffer.length > this.chunkSize * 3) {
@@ -188,7 +209,7 @@ state.wakeEngine = new WakeWordEngine();
 
 function persist(){
   if (state.sessionId) localStorage.shimsSessionId = state.sessionId;
-  localStorage.shimsProvider = state.provider || 'lmstudio';
+  localStorage.shimsProvider = state.provider || 'native';
   localStorage.shimsModel = state.selectedModel || '';
   localStorage.shimsVoiceLang = state.voiceLang || 'en-IN';
   localStorage.shimsVoice = state.voiceOn ? 'true' : 'false';
@@ -230,33 +251,9 @@ function hideStatus(){ const line=$('#status-line'); if(line) line.classList.rem
 function updateModeButtons(){
   const map = [['#mode-converse',state.converseMode],['#mode-web',state.webMode],['#mode-peers',state.peersMode]];
   for(const [sel,on] of map){ const b=$(sel); if(b) b.classList.toggle('on', !!on); }
-  const ps=$('#provider-select'); if(ps) ps.value = state.provider || 'lmstudio';
-  // Update provider pills
-  $$('.provider-pill').forEach(p=>{
-    const on = p.dataset.provider === (state.provider||'lmstudio');
-    p.classList.toggle('on', on);
-    if(on && (p.dataset.provider==='ollama' || p.dataset.provider==='lmstudio' || p.dataset.provider==='huggingface')){
-      const modelSpan = p.querySelector('.pill-model');
-      if(modelSpan) modelSpan.textContent = state.selectedModel ? ' · '+state.selectedModel.slice(0,18) : '';
-    }
-  });
   // Update privacy bar
   $$('.privacy-btn').forEach(b => b.classList.toggle('on', b.dataset.mode === (state.privacyMode || 'balanced')));
 }
-window.setProviderPill = function setProviderPill(btn){
-  const provider = btn.dataset.provider || 'lmstudio';
-  const model = btn.dataset.model || '';
-  state.provider = provider;
-  if(provider === 'ollama'){
-    state.selectedModel = chooseDefaultLocal(state.models);
-  } else if(provider === 'lmstudio'){
-    state.selectedModel = chooseDefaultLmstudio(state.models);
-  } else {
-    state.selectedModel = model;
-  }
-  persist(); updateModeButtons();
-  toast('Provider: ' + provider + (state.selectedModel ? ' / ' + state.selectedModel : ''), 'info');
-};
 
 function setPrivacyMode(mode){
   state.privacyMode = mode || 'balanced';
@@ -284,7 +281,7 @@ function chooseDefaultLmstudio(data=state.models){
 function syncProviderModel(data=state.models){
   const installed=(data.installed||[]).map(m=>m.name);
   // If user has chosen Ollama, never keep a stale Claude/GPT/HF model in telemetry or payload.
-  if((state.provider||'lmstudio') === 'ollama'){
+  if((state.provider||'native') === 'ollama'){
     if(!state.selectedModel || isCloudModelName(state.selectedModel) || (state.selectedModel||'').includes('/') || (installed.length && !installed.includes(state.selectedModel) && !isLocalModelName(state.selectedModel))){
       state.selectedModel = chooseDefaultLocal(data);
     }
@@ -303,7 +300,7 @@ function syncProviderModel(data=state.models){
     }
   }
   persist(); updateModeButtons();
-  setText('#t-model', (state.selectedModel || 'auto').slice(0,22)); setText('#t-route', state.provider || 'lmstudio');
+  setText('#t-model', (state.selectedModel || 'auto').slice(0,22)); setText('#t-route', state.provider || 'native');
 }
 async function forceLocalMode(model){
   state.provider='ollama'; state.selectedModel=model || chooseDefaultLocal(state.models); persist(); updateModeButtons();
@@ -496,10 +493,12 @@ async function loadSandboxSidebar(){
 }
 window.loadSandboxSidebar=loadSandboxSidebar;
 
-async function streamNDJSON(endpoint, body, onChunk){
+async function streamNDJSON(endpoint, body, onChunk, opts){
   if(state.abort){try{state.abort.abort();}catch(e){}}
   const ctrl = new AbortController(); state.abort = ctrl;
-  const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 min idle window for slow local model loads
+  // Voice turns get a short idle window so a dead model never black-holes the
+  // conversation; typed turns keep the long window for slow local model loads.
+  const IDLE_TIMEOUT_MS = (opts && opts.idleMs) || 10 * 60 * 1000;
   let idleTimedOut = false;
   let timer = null;
   const bumpTimer = () => {
@@ -538,10 +537,6 @@ async function streamNDJSON(endpoint, body, onChunk){
 
 async function sendText(text, source='typed'){
   text = String(text || '').trim();
-  if(state.pendingInject){
-    text = (state.pendingInject + '\n\n' + text).trim();
-    state.pendingInject = null;
-  }
   if(!text || state.streaming) return;
   const now = Date.now();
   const lastText = source === 'voice' ? state.lastVoiceSentText : state.lastTypedSentText;
@@ -559,12 +554,15 @@ async function sendText(text, source='typed'){
   clearThoughts();
   startThinkingBlock(bubble);   // inline collapsible "Reasoning" above this answer
   let answer = ''; let mediaResult = null; let lastTrust = null; let meta = {provider:state.provider, model:state.selectedModel, route:'brain'}; const started=performance.now(); let toolCards = {};
+  const voiceTurn = (state.voiceOn || source === 'voice');
+  let ttsBuf = '';            // sentence accumulator for streaming TTS
+  let ttsStreamed = false;    // true once any sentence was spoken from the stream
   saveCrashContext(text);
   try{
     const payload = {
       message:text,
       session_id:state.sessionId,
-      provider:state.provider || 'lmstudio',
+      provider:state.provider || 'native',
       model:state.selectedModel || undefined,
       conversation_mode:state.converseMode,
       web_mode:state.webMode,
@@ -598,6 +596,13 @@ async function sendText(text, source='typed'){
       } else if(ch.type === 'token'){
         if(!answer) collapseThinkingBlock();   // answer started → fold reasoning
         answer += ch.content || ''; setBubble(bubble, answer); setText('#t-tokens', String(Math.ceil(answer.length/4))); setOrbState('speaking');
+        // Streaming sentence TTS: speak each completed sentence as it arrives.
+        // `thought` events are never spoken — only answer tokens land here.
+        if(voiceTurn){
+          ttsBuf += ch.content || '';
+          const parts = splitSentences(ttsBuf); ttsBuf = parts.rest;
+          for(const s of parts.sentences){ ttsStreamed = true; ttsEnqueue(s); }
+        }
       } else if(ch.type === 'media'){
         mediaResult = ch.media_result; if(ch.trust) lastTrust = ch.trust; renderMediaCard(mediaResult, bubble);
       } else if(ch.type === 'search'){
@@ -628,6 +633,9 @@ async function sendText(text, source='typed'){
         loadSandboxSidebar();
       } else if(ch.type === 'ignored'){
         bubble.remove(); feed('ignored duplicate voice phrase', 'warn');
+        // The backend dropped this turn — re-open the mic immediately so voice
+        // mode never black-holes waiting for a stream that will not come.
+        if(voiceTurn && state.voiceOn) rearmMicAfterTts();
       } else if(ch.type === 'error'){
         const emsg = ch.message || 'The AI engine failed.';
         addThoughtLine('agent', emsg);
@@ -642,11 +650,18 @@ async function sendText(text, source='typed'){
         meta.route = ch.route || meta.route; meta.trust_level = lastTrust && lastTrust.trust_level; setBubbleMeta(bubble, meta);
         if(lastTrust) renderTrustCard(lastTrust, bubble);
         if(answer.trim()) addOmniFeedback(bubble, text, answer);
+        // Flush the final partial sentence left in the TTS buffer.
+        if(voiceTurn && ttsBuf.trim()){ ttsStreamed = true; ttsEnqueue(ttsBuf); ttsBuf = ''; }
       }
-    });
+    }, {idleMs: voiceTurn ? 75000 : undefined});
     const latency = Math.round(performance.now()-started); $('#t-latency') && ($('#t-latency').innerHTML = latency+'<span class="unit">ms</span>'); setText('#tb-latency', latency+'ms');
-    if(answer && (state.voiceOn || source === 'voice')) await speakText(answer.replace(/https?:\/\/\S+/g,''));
+    if(answer && voiceTurn && !ttsStreamed) await speakText(answer.replace(/https?:\/\/\S+/g,''));
   }catch(e){
+    if(state.bargeInAbort){
+      // Intentional barge-in abort — keep the partial reply, skip error UI.
+      state.bargeInAbort = false;
+      feed('turn interrupted by barge-in', 'info');
+    }else{
     const raw = e && e.message ? e.message : String(e || 'Unknown stream error');
     const aborted = /BodyStreamBuffer|abort|aborted|AbortError/i.test(raw);
     const msg = aborted
@@ -663,11 +678,15 @@ async function sendText(text, source='typed'){
     if(source === 'voice' || state.voiceOn){
       try{ await speakText('I heard you, but my brain connection failed. Please try again.'); }catch(_e){}
     }
+    }
   }finally{
     bubble.classList.remove('thinking'); state.streaming=false; if(sendBtn) sendBtn.disabled=false; hideStatus(); setOrbState(state.voiceOn?'listening':'standby'); setStage('idle');
-    setThinkStatus('Idle'); setThinkDot(null);
+    setThinkDot(null);
     finishThinkingBlock();
     loadSessionsPane();
+    // Never black-hole voice mode: after any turn (success, timeout or error),
+    // make sure the mic is live again once speech has settled.
+    if(state.voiceOn && !state.ttsActive) rearmMicAfterTts();
   }
 }
 window.sendText = sendText;
@@ -730,16 +749,10 @@ let autoExpandedThinking = false;
 function clearThoughts(){
   thoughtQueue = [];
   autoExpandedThinking = false;
-  const box = $('#think-lines'); if(box) box.innerHTML = '';
-  setThinkStatus('Thinking…');
   setThinkDot(null);
-}
-function setThinkStatus(s){
-  const el = $('#think-status'); if(el) el.textContent = s || 'Idle';
 }
 function setThinkDot(stage){
   ['plan','context','tool','generate'].forEach(s => {
-    const d = $('#think-dot-'+s); if(d) d.classList.toggle('on', s === stage);
     const cd = $('#rp-dot-'+s); if(cd) cd.classList.toggle('on', s === stage);
   });
 }
@@ -819,7 +832,6 @@ function stopThinking(){
   state.streaming = false;
   stopSpeaking(true); // also stop any TTS/audio playback
   const sendBtn = $('#send-btn'); if(sendBtn) sendBtn.disabled = false;
-  setThinkStatus('Stopped by user');
   setOrbState(state.voiceOn?'listening':'standby');
   feed('User stopped thinking stream','warn');
 }
@@ -861,17 +873,6 @@ window.dismissCrashRecovery = function dismissCrashRecovery(btn){
   const bubble = btn && btn.closest('.bubble');
   if(bubble) bubble.remove();
 };
-function injectThinking(){
-  const input = $('#think-inject-input');
-  const text = input ? String(input.value||'').trim() : '';
-  if(!text) return;
-  addThoughtLine('inject', 'User injected: ' + text.slice(0,120));
-  // Store as pending follow-up message
-  state.pendingInject = text;
-  if(input) input.value = '';
-  toast('Context injected. Will append to next turn.','info');
-}
-window.injectThinking = injectThinking;
 function send(){
   const input=$('#input'); const text = input ? String(input.value||'').trim() : '';
   // Slash commands route straight to tools — the chat absorbs every module's power.
@@ -1381,6 +1382,178 @@ async function refreshAgentStrip(){
 }
 window.refreshAgentStrip = refreshAgentStrip;
 
+async function refreshNativeStatus(){
+  const chip=$('#chip-native'); if(!chip) return;
+  try{
+    const d=await (await fetch('/api/native-engine/status')).json();
+    const h=(d&&d.health)||{};
+    state.nativeLoaded = h.ready ? (h.model||'') : '';
+    if(h.ready){
+      const model=(h.model||'model').slice(0,18);
+      let txt='native: '+model+' · ctx '+(h.ctx||'?')+' · '+(h.gpu_layers||0)+'L · '+(h.backend||'?');
+      if(h.tok_s) txt+=' · '+h.tok_s+' tok/s';
+      setText('#tb-native', txt);
+      chip.classList.add('ok'); chip.classList.remove('warn');
+      chip.title='SHIMS native engine — '+(h.model||'')+' ('+(h.backend||'')+', ctx '+(h.ctx||0)+', '+(h.gpu_layers||0)+' GPU layers, up '+Math.round(h.uptime_s||0)+'s)';
+    } else if(h.running || h.state==='loading'){
+      setText('#tb-native','native: loading…');
+      chip.classList.add('warn'); chip.classList.remove('ok');
+    } else {
+      setText('#tb-native','native: off');
+      chip.classList.remove('ok','warn');
+    }
+  }catch(e){
+    setText('#tb-native','native: —');
+    chip.classList.remove('ok','warn');
+  }
+}
+window.refreshNativeStatus=refreshNativeStatus;
+
+/* ============ Model Manager (Settings → Models) ============ */
+let _mmDlTimer=null;
+function _mmGb(b){ b=Number(b)||0; return (b/(1024*1024*1024)).toFixed(2)+' GB'; }
+function _mmSpeed(bps){ bps=Number(bps)||0; return bps>0 ? ' · '+((bps/(1024*1024)).toFixed(1))+' MB/s' : ''; }
+
+async function mmRefreshLocal(){
+  const box=$('#mm-installed'); if(!box) return;
+  box.innerHTML='<div style="color:var(--text-dim)">Loading…</div>';
+  try{
+    const d=await (await fetch('/api/models/local')).json();
+    const models=(d&&d.models)||[];
+    if(!models.length){ box.innerHTML='<div style="color:var(--text-dim)">No GGUF models found. Download one below.</div>'; return; }
+    box.innerHTML=models.map(m=>{
+      const badge=m.managed?'<span class="mm-badge">SHIMS</span>':'<span class="mm-badge dim">LM Studio</span>';
+      const loaded=m.loaded?'<span style="color:#24ff97">● loaded</span>':'';
+      const loadBtn=m.loaded
+        ?'<button class="set-test" data-mm-unload="1">Unload</button>'
+        :'<button class="set-test" data-mm-load="'+escapeHtml(m.id)+'">Load</button>';
+      const delBtn=(m.managed && !m.loaded)?'<button class="set-test" data-mm-del="'+escapeHtml(m.path)+'">Delete</button>':'';
+      return `<div class="v9-chip" style="${m.loaded?'border-color:#24ff97;':''}">
+        <b>${escapeHtml(m.id)}</b> ${badge} ${loaded}
+        <small>${_mmGb(m.size_bytes)}${m.arch?' · '+escapeHtml(m.arch):''}</small>
+        <div class="v9-row" style="margin:6px 0 0">${loadBtn}${delBtn}</div>
+      </div>`;
+    }).join('');
+    $$('[data-mm-load]',box).forEach(b=>b.onclick=()=>mmLoadModel(b.dataset.mmLoad));
+    $$('[data-mm-unload]',box).forEach(b=>b.onclick=()=>mmUnloadModel());
+    $$('[data-mm-del]',box).forEach(b=>b.onclick=()=>mmDeleteModel(b.dataset.mmDel));
+  }catch(e){ box.innerHTML='<div style="color:var(--red)">Unavailable: '+escapeHtml(e.message)+'</div>'; }
+}
+window.mmRefreshLocal=mmRefreshLocal;
+
+async function mmLoadModel(id){
+  toast('Loading '+id+' into native engine…');
+  try{
+    const d=await (await fetch('/api/native-engine/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:id})})).json();
+    toast(d.ok?('Loaded: '+(d.health&&d.health.model||id)):('Load failed: '+(d.error||'?')), d.ok?'info':'err');
+  }catch(e){ toast('Load failed: '+e.message,'err'); }
+  refreshNativeStatus(); mmRefreshLocal();
+}
+window.mmLoadModel=mmLoadModel;
+
+async function mmUnloadModel(){
+  try{ await fetch('/api/native-engine/unload',{method:'POST'}); toast('Model unloaded'); }
+  catch(e){ toast('Unload failed: '+e.message,'err'); }
+  refreshNativeStatus(); mmRefreshLocal();
+}
+window.mmUnloadModel=mmUnloadModel;
+
+async function mmDeleteModel(path){
+  if(!confirm('Delete this model from disk?\n'+path)) return;
+  try{
+    const d=await (await fetch('/api/models/local?path='+encodeURIComponent(path),{method:'DELETE'})).json();
+    toast(d.ok?'Model deleted':('Delete refused: '+(d.error||'?')), d.ok?'info':'err');
+  }catch(e){ toast('Delete failed: '+e.message,'err'); }
+  mmRefreshLocal();
+}
+window.mmDeleteModel=mmDeleteModel;
+
+async function mmSearchHF(){
+  const q=($('#mm-hf-query')||{}).value||'';
+  const box=$('#mm-hf-results'); if(!box) return;
+  if(!q.trim()){ toast('Enter a search query','warn'); return; }
+  box.innerHTML='<div style="color:var(--text-dim)">Searching Hugging Face…</div>';
+  const filesBox=$('#mm-hf-files'); if(filesBox) filesBox.innerHTML='';
+  try{
+    const d=await (await fetch('/api/models/search?q='+encodeURIComponent(q.trim()))).json();
+    const results=(d&&d.results)||[];
+    if(!results.length){ box.innerHTML='<div style="color:var(--text-dim)">No GGUF repos found (or HF unreachable).</div>'; return; }
+    box.innerHTML=results.map(r=>
+      `<div class="v9-chip" data-mm-repo="${escapeHtml(r.repo_id)}" style="cursor:pointer">
+        <b>${escapeHtml(r.repo_id)}</b>
+        <small>↓${(r.downloads||0).toLocaleString()} · ♥${r.likes||0}</small>
+      </div>`).join('');
+    $$('[data-mm-repo]',box).forEach(b=>b.onclick=()=>mmListFiles(b.dataset.mmRepo));
+  }catch(e){ box.innerHTML='<div style="color:var(--red)">Search failed: '+escapeHtml(e.message)+'</div>'; }
+}
+window.mmSearchHF=mmSearchHF;
+
+async function mmListFiles(repo){
+  const box=$('#mm-hf-files'); if(!box) return;
+  box.innerHTML='<div style="color:var(--text-dim)">Listing files in '+escapeHtml(repo)+'…</div>';
+  try{
+    const d=await (await fetch('/api/models/files?repo='+encodeURIComponent(repo))).json();
+    if(!d.ok){ box.innerHTML='<div style="color:var(--red)">'+escapeHtml(d.error||'File listing failed')+'</div>'; return; }
+    let html='<div style="color:var(--text-dim);margin:6px 0 4px">'+escapeHtml(repo)+' — pick a file:</div>';
+    html+=(d.files||[]).map(f=>
+      `<div class="v9-chip"><b style="word-break:break-all">${escapeHtml(f.filename)}</b>
+        <small>${f.size_bytes?_mmGb(f.size_bytes):'size unknown'}</small>
+        <div class="v9-row" style="margin:6px 0 0"><button class="set-test" data-mm-dl="${escapeHtml(f.filename)}">Download</button></div>
+      </div>`).join('')||'<div style="color:var(--text-dim)">No .gguf files in this repo.</div>';
+    (d.projectors||[]).forEach(f=>{
+      html+=`<div class="v9-chip" style="opacity:.6"><b style="word-break:break-all">${escapeHtml(f.filename)}</b><small>vision projector (mmproj) — not downloadable here</small></div>`;
+    });
+    box.innerHTML=html;
+    $$('[data-mm-dl]',box).forEach(b=>b.onclick=()=>mmStartDownload(repo,b.dataset.mmDl));
+  }catch(e){ box.innerHTML='<div style="color:var(--red)">Failed: '+escapeHtml(e.message)+'</div>'; }
+}
+window.mmListFiles=mmListFiles;
+
+async function mmStartDownload(repo,filename){
+  try{
+    const d=await (await fetch('/api/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo_id:repo,filename})})).json();
+    if(!d.ok){ toast('Download failed: '+(d.error||'?'),'err'); return; }
+    toast('Downloading '+filename);
+    mmPollDownloads();
+  }catch(e){ toast('Download failed: '+e.message,'err'); }
+}
+window.mmStartDownload=mmStartDownload;
+
+async function mmCancelDownload(jobId){
+  try{ await fetch('/api/models/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:jobId})}); }
+  catch(e){}
+  mmPollDownloads();
+}
+window.mmCancelDownload=mmCancelDownload;
+
+async function mmPollDownloads(){
+  const box=$('#mm-downloads'); if(!box) return;
+  let jobs=[];
+  try{ jobs=((await (await fetch('/api/models/downloads')).json()).jobs)||[]; }catch(e){ return; }
+  const active=jobs.some(j=>j.state==='queued'||j.state==='downloading');
+  const doneNow=jobs.some(j=>j.state==='done');
+  jobs=jobs.slice(0,5);
+  box.innerHTML=jobs.map(j=>{
+    const pct=Math.min(100,Number(j.pct)||0);
+    const bar=(j.state==='downloading'||j.state==='queued')
+      ?`<div class="mm-progress"><div class="mm-progress-fill" style="width:${pct}%"></div></div>`:'';
+    const stateCol=j.state==='done'?'#24ff97':(j.state==='error'||j.state==='cancelled'?'var(--red)':'var(--cyan)');
+    const cancelBtn=(j.state==='queued'||j.state==='downloading')?`<button class="set-test" data-mm-cancel="${j.job_id}">Cancel</button>`:'';
+    const err=j.error?`<small style="color:var(--red)">${escapeHtml(j.error)}</small>`:'';
+    return `<div class="v9-chip"><b style="word-break:break-all">${escapeHtml(j.filename)}</b>
+      <small><span style="color:${stateCol}">${j.state}</span> · ${pct}%${_mmGb(j.bytes_done)}${j.bytes_total?' / '+_mmGb(j.bytes_total):''}${_mmSpeed(j.speed_bps)}</small>
+      ${bar}${err}
+      ${cancelBtn?'<div class="v9-row" style="margin:6px 0 0">'+cancelBtn+'</div>':''}
+    </div>`;
+  }).join('');
+  $$('[data-mm-cancel]',box).forEach(b=>b.onclick=()=>mmCancelDownload(b.dataset.mmCancel));
+  if(doneNow) mmRefreshLocal();
+  if(active && !_mmDlTimer){ _mmDlTimer=setInterval(mmPollDownloads,2000); }
+  if(!active && _mmDlTimer){ clearInterval(_mmDlTimer); _mmDlTimer=null; }
+}
+window.mmPollDownloads=mmPollDownloads;
+
+
 function toolsPick(kind){
   const menu=document.getElementById('tools-menu'); if(menu) menu.classList.add('hidden');
   if(kind==='help'){ pushBubble('user','/help'); handleSlashCommand('/help'); return; }
@@ -1402,12 +1575,73 @@ function toggleNavMore(){
 }
 window.toggleNavMore = toggleNavMore;
 
-function finishSpeaking(){
-  state.speakBusy=false;
-  state.listeningSuppressedUntil = Date.now() + 650;
-  state.speakingAudio=null;
-  if(state.voiceOn){
-    setTimeout(()=>{ try{ const r=getRecognition(); if(r && !state.speakBusy) r.start(); }catch(e){} }, 700);
+/* ==================== UNIFIED TTS CONTROLLER ====================
+   One ttsActive flag covers the ENTIRE speak operation, including the
+   browser→server fallback chain and every queued sentence. The mic re-arms
+   only after the last queued utterance fully settles + a 500ms tail, so a
+   browser-TTS failure can never re-open the mic while server audio plays.
+   The mic is NOT stopped while speaking (AEC + the echo filter handle the
+   feedback); a confident non-echo transcript barges in via cancelTts(). */
+function normalizeForEcho(s){
+  return String(s||'').toLowerCase().replace(/[^a-z0-9\u0900-\u097f ]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function ttsLogSpoken(text){
+  const t = normalizeForEcho(text); if(!t) return;
+  state.spokenLog.push({text:t, at:Date.now()});
+  const cutoff = Date.now() - 30000;
+  state.spokenLog = state.spokenLog.filter(e => e.at >= cutoff).slice(-40);
+}
+function ttsQueueUpcoming(text){
+  const t = normalizeForEcho(text); if(!t) return;
+  state.ttsUpcoming.push({text:t, at:Date.now()});
+  const cutoff = Date.now() - 30000;
+  state.ttsUpcoming = state.ttsUpcoming.filter(e => e.at >= cutoff);
+}
+function ttsRemoveUpcoming(text){
+  const t = normalizeForEcho(text); if(!t) return;
+  const idx = state.ttsUpcoming.findIndex(e => e.text === t);
+  if(idx >= 0) state.ttsUpcoming.splice(idx, 1);
+}
+function ttsMatchesUpcoming(phrase){
+  const p = normalizeForEcho(phrase); if(!p) return false;
+  const cutoff = Date.now() - 30000;
+  state.ttsUpcoming = state.ttsUpcoming.filter(e => e.at >= cutoff);
+  if(!state.ttsUpcoming.length) return false;
+  let joined = ''; const upcomingWords = new Set();
+  for(const e of state.ttsUpcoming){ joined += ' ' + e.text; e.text.split(' ').forEach(w => upcomingWords.add(w)); }
+  if(joined.includes(p)) return true;
+  const words = p.split(' ').filter(Boolean);
+  if(!words.length) return false;
+  const hits = words.filter(w => upcomingWords.has(w)).length;
+  return hits / words.length >= 0.75;
+}
+function ttsMatchesEcho(phrase){
+  const p = normalizeForEcho(phrase); if(!p) return false;
+  const cutoff = Date.now() - 30000;
+  state.spokenLog = state.spokenLog.filter(e => e.at >= cutoff);
+  if(!state.spokenLog.length) return false;
+  let joined = ''; const spokenWords = new Set();
+  for(const e of state.spokenLog){ joined += ' ' + e.text; e.text.split(' ').forEach(w => spokenWords.add(w)); }
+  if(joined.includes(p)) return true;                       // substring match
+  const words = p.split(' ').filter(Boolean);
+  if(!words.length) return false;
+  const hits = words.filter(w => spokenWords.has(w)).length;
+  return hits / words.length >= 0.7;                        // >=70% token overlap
+}
+function rearmMicAfterTts(){
+  state.speakingAudio = null;
+  state.speakBusy = false;
+  hideStatus();
+  // Re-arm means "speech has settled — listen now". Cap any lingering mute
+  // (e.g. the ~1h TTS-window value) to a short echo tail so the mic can never
+  // stay deaf after a reply.
+  if((state.listeningSuppressedUntil||0) > Date.now() + 1500){
+    state.listeningSuppressedUntil = Date.now() + 800;
+  }
+  if(state.voiceOn && !state.ttsActive){
+    const r = getRecognition();
+    if(r){ try{ r.start(); }catch(e){} }
+    else if(!state.serverVoiceLoop) startServerVoiceFallback();
     if(!state.recognition && state.serverVoiceShouldResume){
       state.serverVoiceShouldResume = false;
       setTimeout(()=>startServerVoiceFallback(), 800);
@@ -1415,12 +1649,81 @@ function finishSpeaking(){
   }
   setOrbState(state.voiceOn ? 'listening' : 'standby');
 }
-function stopSpeaking(cancelSynth=true){
-  if(state.speakingAudio){ try{state.speakingAudio.pause(); state.speakingAudio.src='';}catch(e){} state.speakingAudio=null; }
-  if(cancelSynth && window.speechSynthesis){ try{speechSynthesis.cancel();}catch(e){} }
-  state.speakBusy=false;
-  state.listeningSuppressedUntil = Date.now() + 500;
+function ttsEnqueue(text){
+  text = cleanTextForTTS(text); if(!text) return Promise.resolve(false);
+  ttsQueueUpcoming(text);
+  const gen = state.ttsGen;
+  // Remember whether the server-STT loop was running so rearmMicAfterTts can
+  // resume it after speech (browser STT users are unaffected).
+  state.serverVoiceShouldResume = Boolean(state.voiceOn && !state.recognition && state.serverVoiceLoop);
+  state.ttsActive = true; state.speakBusy = true;
+  // Mute the mic for the whole speech window — the transcript of SHIMS's own
+  // voice must never become a user turn. Cleared to a short echo tail below.
+  state.listeningSuppressedUntil = Date.now() + 3600000;
+  state.ttsPending++;
+  setOrbState('speaking'); showStatus('Speaking...');
+  const run = state.ttsQueue.then(() => (gen === state.ttsGen) ? ttsSpeakNow(text) : false);
+  const tracked = run.then(ok => ok, () => false).then(ok => {
+    ttsRemoveUpcoming(text);
+    if(gen !== state.ttsGen) return false;   // cancelled — cancelTts already settled state
+    state.ttsPending--;
+    if(state.ttsPending <= 0){
+      state.ttsPending = 0;
+      // 500ms tail after the last utterance before the mic re-arms.
+      return new Promise(res => setTimeout(() => {
+        if(gen === state.ttsGen && state.ttsPending <= 0){
+          state.ttsActive = false;
+          // Brief echo tail: keep dropping speaker-audio bleed for a moment,
+          // then the mic is live again.
+          state.listeningSuppressedUntil = Date.now() + 800;
+          rearmMicAfterTts();
+        }
+        res(ok);
+      }, 500));
+    }
+    return ok;
+  });
+  state.ttsQueue = tracked.then(() => {}, () => {});
+  return tracked;
 }
+async function ttsSpeakNow(text){
+  ttsLogSpoken(text);
+  // Browser TTS first (fast, offline). The server fallback may ONLY speak when
+  // the browser never started — once the browser voice began, re-speaking the
+  // same text via the server is the "two voices" bug (browser voice + pyttsx3
+  // reading the same sentence over each other).
+  try{ await speakViaBrowser(text); return true; }
+  catch(e){
+    if(e && e.started){
+      feed('browser TTS started but did not finish cleanly — not re-speaking via server', 'warn');
+      return true;
+    }
+    feed('browser TTS failed, trying server fallback: '+e.message, 'warn');
+    // Make sure the browser engine is fully silent before the server voice
+    // starts so the two engines can never overlap audibly.
+    try{ speechSynthesis.cancel(); }catch(_e){}
+    await new Promise(r => setTimeout(r, 200));
+    try{ await speakViaServerFile(text); return true; }
+    catch(e2){ feed('server TTS fallback also failed: '+e2.message, 'err'); return false; }
+  }
+}
+function cancelTts(){
+  state.ttsGen++;
+  state.ttsPending = 0;
+  state.ttsActive = false; state.speakBusy = false;
+  // Short echo tail so the cut-off speaker audio still ringing in the room
+  // isn't transcribed as the next command.
+  state.listeningSuppressedUntil = Date.now() + 400;
+  state.ttsQueue = Promise.resolve();
+  state.ttsUpcoming = [];
+  if(state.speakingAudio){ try{state.speakingAudio.pause(); state.speakingAudio.src='';}catch(e){} state.speakingAudio=null; }
+  if(window.speechSynthesis){ try{speechSynthesis.cancel();}catch(e){} }
+  hideStatus();
+}
+// Kept for existing call sites: stopSpeaking = cancel speech now;
+// finishSpeaking = re-open the mic after speech has settled.
+function stopSpeaking(cancelSynth=true){ cancelTts(); }
+function finishSpeaking(){ rearmMicAfterTts(); }
 function estimateSpeechMs(text, minMs=2800, maxMs=90000){
   const words = String(text||'').trim().split(/\s+/).filter(Boolean).length;
   return Math.max(minMs, Math.min(maxMs, words * 480 + 1800));
@@ -1447,23 +1750,53 @@ async function speakViaBrowser(text){
     };
     chooseVoice().then(() => {
       let settled = false;
+      let started = false;
+      let graceUsed = false;
+      const fail = (msg) => { const err = new Error(msg); err.started = started; settle(false, err); };
       const settle = (ok, err) => {
         if(settled) return;
         settled = true;
         clearTimeout(startTimer); clearTimeout(doneTimer); clearInterval(resumeTimer);
         if(!ok){ try{ speechSynthesis.cancel(); }catch(e){} }
-        finishSpeaking();
+        // NOTE: no mic re-arm here — the unified TTS controller (ttsEnqueue)
+        // owns ttsActive and re-arms only after all fallbacks settle + tail.
         ok ? resolve(true) : reject(err || new Error('speech synthesis failed'));
       };
+      // Cold voice loads can exceed the old 800ms window; 1500ms is still fast
+      // enough to fall back when speech genuinely never starts.
       const startTimer = setTimeout(()=>{
         try{
-          if(!speechSynthesis.speaking && !speechSynthesis.pending) settle(false, new Error('browser speech did not start'));
+          if(!started && !speechSynthesis.speaking && !speechSynthesis.pending) fail('browser speech did not start');
         }catch(e){}
-      }, 800);
-      const doneTimer = setTimeout(()=>settle(false, new Error('browser speech timed out')), estimateSpeechMs(text));
+      }, 1500);
+      // Watchdog only: once speech has started we NEVER declare failure — that
+      // path re-spoke the same text via the server voice (double audio). If the
+      // utterance overruns its estimate, extend once; after the grace window
+      // settle success (the user already heard it) instead of re-speaking.
+      const onDoneDeadline = () => {
+        if(settled) return;
+        try{
+          if(started && speechSynthesis.speaking && !graceUsed){
+            graceUsed = true;
+            doneTimer = setTimeout(onDoneDeadline, Math.ceil(estimateSpeechMs(text) * 1.5));
+            return;
+          }
+        }catch(e){}
+        started ? settle(true) : fail('browser speech timed out');
+      };
+      let doneTimer = setTimeout(onDoneDeadline, estimateSpeechMs(text));
       const resumeTimer = setInterval(()=>{ try{ if(!settled && speechSynthesis.paused) speechSynthesis.resume(); }catch(e){} }, 2000);
+      u.onstart = () => { started = true; };
       u.onend = () => settle(true);
-      u.onerror = (ev) => settle(false, new Error(ev && ev.error ? ev.error : 'speech synthesis error'));
+      u.onerror = (ev) => {
+        // 'interrupted'/'canceled' after speech started means our own cancel()
+        // or a barge-in cut it off — the user heard the audio, so this is not
+        // a failure worth a server re-speak.
+        const kind = ev && ev.error ? String(ev.error) : '';
+        if(started && /interrupted|canceled|cancelled/.test(kind)) return settle(true);
+        const err = new Error(kind || 'speech synthesis error'); err.started = started;
+        settle(false, err);
+      };
       try{
         speechSynthesis.speak(u);
         // Chrome can occasionally pause synthesis after starting; one gentle resume keeps it alive.
@@ -1480,7 +1813,7 @@ async function speakViaServerFile(text){
   let data = {};
   try{ data = raw ? JSON.parse(raw) : {}; }catch(e){ throw new Error('server TTS returned invalid JSON: '+raw.slice(0,120)); }
   if(!r.ok || (data && data.ok === false)) throw new Error((data && (data.detail || data.error || data.reason || data.tts_error)) || ('HTTP '+r.status));
-  if(data && data.spoken === true && !data.file_url){ finishSpeaking(); return true; }
+  if(data && data.spoken === true && !data.file_url){ return true; }
   if(!(data && data.file_url)) throw new Error('server TTS did not return audio');
   return new Promise((resolve, reject)=>{
     const a = new Audio(data.file_url); state.speakingAudio = a;
@@ -1490,7 +1823,7 @@ async function speakViaServerFile(text){
       if(settled) return;
       settled = true;
       clearTimeout(timer);
-      finishSpeaking();
+      // No mic re-arm here either — ttsEnqueue handles it after the tail.
       ok ? resolve(true) : reject(err || new Error('audio playback failed'));
     };
     a.onloadedmetadata=()=>{
@@ -1521,32 +1854,31 @@ function cleanTextForTTS(text){
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
-async function speakText(text){
-  text = cleanTextForTTS(text); if(!text) return false;
-  stopSpeaking(true);
-  state.speakBusy = true;
-  state.listeningSuppressedUntil = Date.now() + 999999;
-  try{ if(state.recognition) state.recognition.stop(); }catch(e){}
-  state.serverVoiceShouldResume = Boolean(state.voiceOn && !state.recognition && state.serverVoiceLoop);
-  stopServerVoiceFallback();
-  setOrbState('speaking'); showStatus('Speaking...');
-  // Try browser TTS first (fast, offline, matches selected language). If it fails,
-  // fall back to server TTS so voice output still works in headless or restricted browsers.
-  try{
-    await speakViaBrowser(text);
-    return true;
-  }catch(e){
-    feed('browser TTS failed, trying server fallback: '+e.message, 'warn');
-    try{
-      await speakViaServerFile(text);
-      return true;
-    }catch(e2){
-      feed('server TTS fallback also failed: '+e2.message, 'err');
-      finishSpeaking();
-      showSttBanner('SHIMS heard you, but speech playback failed: '+e2.message);
-      return false;
+function splitSentences(buf){
+  // Split a streaming token buffer into complete sentences (. ! ? newline
+  // boundaries) plus the unfinished remainder.
+  const sentences=[]; let start=0;
+  for(let i=0;i<buf.length;i++){
+    const c=buf[i];
+    if(c==='\n'){
+      const s=buf.slice(start,i).trim(); if(s) sentences.push(s); start=i+1;
+    } else if(c==='.'||c==='!'||c==='?'){
+      // Allow closing quotes/parens between the punctuation and the boundary.
+      let j=i+1; while(j<buf.length && /["'”’)\]]/.test(buf[j])) j++;
+      const nxt=buf[j];
+      if(nxt===undefined || /\s/.test(nxt)){
+        const s=buf.slice(start,j).trim(); if(s) sentences.push(s);
+        start=j; i=j-1;
+      }
     }
   }
+  return {sentences, rest:buf.slice(start)};
+}
+async function speakText(text){
+  text = cleanTextForTTS(text); if(!text) return false;
+  const ok = await ttsEnqueue(text);
+  if(!ok && state.voiceOn) showSttBanner('SHIMS heard you, but speech playback failed.');
+  return ok;
 }
 window.speakText = speakText;
 
@@ -1581,14 +1913,41 @@ function queueWakeAck(delay=1400){
   cancelWakeAck();
   state.wakeAckTimer = setTimeout(()=>{
     state.wakeAckTimer = null;
-    if(state.voiceOn && !state.streaming && !state.speakBusy) speakWakeAck();
+    if(state.voiceOn && !state.streaming && !state.ttsActive) speakWakeAck();
   }, delay);
 }
 async function handleVoicePhrase(phrase){
   phrase = String(phrase||'').trim();
   if(!phrase) return;
-  if(state.speakBusy || Date.now() < (state.listeningSuppressedUntil||0)) return;
-  stopSpeaking(true);
+  if(Date.now() < (state.listeningSuppressedUntil||0)){
+    // Mic is muted while SHIMS speaks (self-echo guard — SHIMS must never
+    // answer its own voice). Only an explicit wake phrase (barge-in) or a
+    // command inside an armed wake-latch window breaks through; every other
+    // transcript in the window is dropped.
+    if(!getWakeRegex().test(phrase) && !wakeLatchActive()) return;
+    state.listeningSuppressedUntil = 0;
+  }
+  state.lastSttFinalAt = Date.now();
+  // Echo filter: drop transcripts that match what SHIMS itself said or is
+  // about to say. The predictive upcoming buffer knows the text queued for
+  // TTS before it is audible, so SHIMS ignores its own voice even on fast
+  // hardware where playback and STT overlap.
+  if(ttsMatchesUpcoming(phrase)){ feed('upcoming echo filtered: '+phrase.slice(0,40), 'info'); return; }
+  if(ttsMatchesEcho(phrase)){ feed('echo filtered: '+phrase.slice(0,40), 'info'); return; }
+  if(state.ttsActive || state.streaming){
+    // Barge-in: the user spoke over SHIMS — cancel speech and take this turn.
+    cancelTts();
+    feed('barge-in: '+phrase.slice(0,40), 'info');
+    if(state.streaming){
+      // A turn is still streaming: abort it quietly (bargeInAbort suppresses
+      // the error UI in sendText's catch) and submit once it settles.
+      state.bargeInAbort = true;
+      try{ if(state.abort) state.abort.abort(); }catch(e){}
+      const cmd = phrase;
+      setTimeout(()=>{ state.streaming = false; handleVoicePhrase(cmd); }, 180);
+      return;
+    }
+  }
   const wake = getWakeRegex();
   let command = phrase;
   if(state.wakeArmed){
@@ -1627,7 +1986,7 @@ async function startServerVoiceFallback(){
   if(state.serverVoiceLoop) return;
   state.serverVoiceLoop = true;
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    const stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
     state.serverVoiceStream = stream;
     setOrbState('listening');
     showStatus(state.wakeArmed ? 'Server STT armed. Say Hey SHIMS...' : 'Server STT conversation ready.');
@@ -1635,7 +1994,7 @@ async function startServerVoiceFallback(){
     const loop = async () => {
       if(!state.voiceOn || state.recognition || !state.serverVoiceLoop) return;
       if(Date.now() < (state.serverSttBackoffUntil || 0)){ setTimeout(loop, Math.max(700, state.serverSttBackoffUntil - Date.now())); return; }
-      if(state.speakBusy || Date.now() < (state.listeningSuppressedUntil||0)){ setTimeout(loop, 700); return; }
+      if(Date.now() < (state.listeningSuppressedUntil||0)){ setTimeout(loop, 700); return; }
       let rec;
       try{ rec = new MediaRecorder(stream); }catch(e){ showSttBanner('MediaRecorder unavailable: '+e.message); state.serverVoiceLoop=false; return; }
       const chunks=[];
@@ -1670,7 +2029,7 @@ async function startServerVoiceFallback(){
             }
           }
         }catch(e){ feed('server STT error: '+e.message, 'warn'); }
-        if(state.voiceOn && !state.recognition && state.serverVoiceLoop) setTimeout(loop, state.speakBusy ? 900 : 650);
+        if(state.voiceOn && !state.recognition && state.serverVoiceLoop) setTimeout(loop, 650);
       };
       try{ rec.start(); setTimeout(()=>{ try{ if(rec.state !== 'inactive') rec.stop(); }catch(e){} }, SERVER_STT_CHUNK_MS); }catch(e){ feed('server STT start failed: '+e.message, 'err'); state.serverVoiceLoop=false; }
     };
@@ -1689,7 +2048,8 @@ function getRecognition(){
   const r = new SR();
   r.continuous = true; r.interimResults = true; r.maxAlternatives = 3; r.lang = state.voiceLang || 'en-IN';
   r.onresult = ev => {
-    if(state.speakBusy || Date.now() < (state.listeningSuppressedUntil||0)) return;
+    if(Date.now() < (state.listeningSuppressedUntil||0)) return;
+    state.lastSttFinalAt = Date.now();
     let interim='', final='';
     for(let i=ev.resultIndex;i<ev.results.length;i++){
       const t = ev.results[i][0].transcript;
@@ -1719,8 +2079,52 @@ function getRecognition(){
   };
   r.onend = () => {
     if(state.browserSttFailed) return;  // never restart a recognizer that hit a network/service failure
-    if(state.voiceOn && !state.speakBusy){ const delay=Math.max(500, (state.listeningSuppressedUntil||0)-Date.now()+50); setTimeout(()=>{ try{ if(!state.speakBusy){ r.lang = state.voiceLang || 'en-IN'; r.start(); } }catch(e){} }, delay); } };
+    // Keep listening even while ttsActive — AEC + the echo filter handle the
+    // speaker output, and an open mic is what makes barge-in possible.
+    // Restart the recognizer promptly — NEVER tie this delay to
+    // listeningSuppressedUntil. That window can be ~1h during TTS, and coupling
+    // it here left the mic dead after the first reply. Echo suppression is
+    // enforced independently in onresult, so a live-but-muted recognizer is safe
+    // and is what enables barge-in.
+    if(state.voiceOn){ setTimeout(()=>{ try{ r.lang = state.voiceLang || 'en-IN'; r.start(); }catch(e){} }, 500); } };
   state.recognition = r; return r;
+}
+function startSttWatchdog(){
+  // If browser recognition yields no results at all for ~20s while voice is on
+  // (without firing an error event), assume it is dead and switch to the
+  // server-whisper fallback.
+  if(state.sttWatchdogTimer) return;
+  state.lastSttFinalAt = Date.now();
+  state.sttWatchdogTimer = setInterval(()=>{
+    if(!state.voiceOn) return;
+    // SELF-HEAL: the #1 cause of "voice dies after turn 1/2" is TTS state getting
+    // stuck (ttsActive left true, or the 1h mute never cleared) when a speech
+    // completion path didn't fire — rearmMicAfterTts is then gated off forever.
+    // If voice is on but NOTHING is actually being spoken, force-clear the stuck
+    // state and re-open the mic. Safe: only acts when no audio is playing.
+    const actuallySpeaking = (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending)) || !!state.speakingAudio;
+    const muteStuck = (state.listeningSuppressedUntil||0) > Date.now() + 2500;
+    if(!state.streaming && !actuallySpeaking && (state.ttsActive || state.speakBusy || muteStuck)){
+      state.ttsActive = false; state.speakBusy = false; state.ttsPending = 0;
+      state.listeningSuppressedUntil = Date.now() + 300;
+      feed('voice self-heal: re-opening mic (speech state was stuck)', 'info');
+      try{ rearmMicAfterTts(); }catch(e){}
+      state.lastSttFinalAt = Date.now();
+      return;
+    }
+    if(!state.recognition || state.browserSttFailed) return;
+    if(state.ttsActive || state.streaming){ state.lastSttFinalAt = Date.now(); return; }
+    if(Date.now() - (state.lastSttFinalAt||0) > 20000){
+      state.browserSttFailed = true;
+      try{ const r=state.recognition; state.recognition=null; if(r) (r.abort ? r.abort() : r.stop()); }catch(e){}
+      feed('Browser STT silent for 20s — switching to server STT fallback.', 'warn');
+      showSttBanner('Browser speech recognition went silent. Switched to local server STT (faster-whisper).');
+      startServerVoiceFallback();
+    }
+  }, 5000);
+}
+function stopSttWatchdog(){
+  if(state.sttWatchdogTimer){ clearInterval(state.sttWatchdogTimer); state.sttWatchdogTimer = null; }
 }
 async function toggleVoice(){
   state.voiceOn = !state.voiceOn; persist();
@@ -1754,11 +2158,13 @@ async function toggleVoice(){
       setOrbState('listening'); showStatus(state.wakeArmed ? 'Voice armed. Say Hey SHIMS...' : 'Voice conversation ready.'); feed('voice armed '+state.voiceLang, 'info');
       return;
     }
-    try{ await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ toast('Microphone permission blocked', 'err'); }
-    if(r){ try{ r.start(); }catch(e){} }
+    try{ await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS); }catch(e){ toast('Microphone permission blocked', 'err'); }
+    if(r){ try{ r.start(); state.lastSttFinalAt = Date.now(); }catch(e){} }
+    startSttWatchdog();
     setOrbState('listening'); showStatus(state.wakeArmed ? 'Voice armed. Say Hey SHIMS...' : 'Voice conversation ready.'); feed('voice armed '+state.voiceLang, 'info');
   }else{
     state.wakeEngine.stop();
+    stopSttWatchdog();
     try{ state.recognition && state.recognition.stop(); }catch(e){}
     stopServerVoiceFallback();
     stopSpeaking(true); setOrbState('standby'); hideStatus(); feed('voice off', 'info');
@@ -1791,6 +2197,36 @@ async function setSttModel(id){
   }catch(e){ if(st) st.textContent='Switch failed: '+e.message; toast('Switch failed: '+e.message,'err'); }
 }
 window.setSttModel=setSttModel;
+// ── Voice output (TTS) engine: show + control which voice SHIMS speaks with ──
+async function loadTtsEngine(){
+  const sel=document.getElementById('set-tts-engine'); const st=document.getElementById('tts-engine-status');
+  if(!sel) return;
+  try{
+    const d=await (await fetch('/api/settings/tts')).json();
+    if(!d.ok) throw new Error('unavailable');
+    sel.innerHTML=(d.engines||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.label)}</option>`).join('');
+    sel.value=d.engine||'auto';
+    if(st){
+      const fish = d.fish_running ? 'Fish server: running ✓' : 'Fish server: stopped (starts on first use)';
+      const oai = d.openai_key ? '' : ' · OpenAI needs API key';
+      st.textContent = `Now using: ${sel.options[sel.selectedIndex]?.text||d.engine}. ${fish}${oai}`;
+    }
+  }catch(e){ if(st) st.textContent='Voice engine settings unavailable.'; }
+}
+window.loadTtsEngine=loadTtsEngine;
+async function setTtsEngine(engine){
+  if(!engine) return;
+  const st=document.getElementById('tts-engine-status');
+  if(st) st.textContent='Switching voice engine…';
+  try{
+    const d=await (await fetch('/api/settings/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engine})})).json();
+    if(!d.ok) throw new Error(d.detail||'failed');
+    toast('Voice engine: '+engine);
+    if(engine.startsWith('fish') && !d.fish_running && !d.fish_started){ if(st) st.textContent='Fish selected — the voice server is starting (first reply may take longer).'; }
+    else { await loadTtsEngine(); }
+  }catch(e){ if(st) st.textContent='Switch failed: '+e.message; toast('Voice engine switch failed','err'); }
+}
+window.setTtsEngine=setTtsEngine;
 async function resetSttCache(){
   const st=document.getElementById('stt-model-status');
   try{
@@ -1812,7 +2248,7 @@ window.saveVoiceConfig = saveVoiceConfig;
 async function loadModelList(){
   const menu=$('#model-menu'); if(menu) menu.innerHTML='<div class="model-card"><div class="m-name">Loading models...</div></div>';
   try{
-    const r=await fetch('/chat/models'); const data=await r.json(); state.models = data; syncProviderModel(data); renderModelMenu(data); renderModelManager(data); populateProviderModelSelects(data);
+    const r=await fetch('/chat/models'); const data=await r.json(); state.models = data; syncProviderModel(data); renderModelMenu(data); populateProviderModelSelects(data);
     const installed=(data.installed||[]).map(m=>m.name);
     setText('#chip-llm', installed.length ? 'LLM '+installed.length : 'LLM offline'); setText('#t-model', (state.selectedModel||data.default||'auto').slice(0,22));
   }catch(e){ if(menu) menu.innerHTML='<div class="model-card"><div class="m-name">Model list unavailable</div><div class="m-meta">'+escapeHtml(e.message)+'</div></div>'; feed('models unavailable: '+e.message, 'err'); }
@@ -1823,26 +2259,19 @@ function renderModelMenu(data=state.models){
   const installed=data.installed||[]; const rec=data.recommended||[]; const cloud=data.all_cloud||data.cloud||[];
   const toolBadge = (m) => m.tool_capable ? ' <span title="Tool-capable" style="color:#74ffb9;font-size:10px">🛠</span>' : '';
   let html='';
-  // LM Studio models (GPU-accelerated local) — shown first since it's the fast path
-  const lmModels = installed.filter(m=>m.provider==='lmstudio');
-  if(lmModels.length){
-    html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">⚡ LM Studio (GPU)</div>';
-    html += lmModels.map(m=>{
-      const loadedBadge = m.loaded ? ' <span title="Loaded — instant response" style="color:#74ffb9;font-size:10px">●</span>' : '';
-      const tc = m.tool_capable ? toolBadge(m) : '';
-      return `<button class="model-card" data-provider="lmstudio" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}${tc}${loadedBadge}</div><div class="m-meta">${escapeHtml([m.parameters,m.family,m.quantization].filter(Boolean).join(' · ')||'local model')}</div></button>`;
-    }).join('');
+  // SHIMS native engine — the primary path. Show the loaded model first,
+  // then any installed GGUFs the /chat/models list advertises as native.
+  const nativeModels = installed.filter(m=>m.provider==='native');
+  const loadedNative = state.nativeLoaded || (nativeModels.find(m=>m.loaded)||{}).name || '';
+  html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">🧠 SHIMS Native (built-in)</div>';
+  if(loadedNative){
+    html += `<button class="model-card" data-provider="native" data-model="${escapeHtml(loadedNative)}"><div class="m-name">${escapeHtml(loadedNative)}${toolBadge({tool_capable:true})} <span title="Loaded — instant response" style="color:#74ffb9;font-size:10px">●</span></div><div class="m-meta">native engine · loaded</div></button>`;
   }
-  // Installed models
-  html += '<div style="font-size:10px;color:#9eb6c1;margin:4px 0 8px">📦 Installed</div>';
-  if(installed.length){
-    html += installed.filter(m=>m.provider==='ollama'||!m.provider).map(m=>{
-      const recMeta = rec.find(r=>r.name===m.name);
-      const tc = recMeta ? toolBadge(recMeta) : '';
-      return `<button class="model-card" data-provider="ollama" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}${tc}</div><div class="m-meta">${escapeHtml([m.parameters,m.family,m.quantization].filter(Boolean).join(' · ')||'local model')}</div></button>`;
-    }).join('');
-  } else {
-    html += '<div class="model-card"><div class="m-name">No local models running</div><div class="m-meta">Pick a cloud model, or start LM Studio / Ollama</div></div>';
+  html += nativeModels.filter(m=>m.name!==loadedNative).map(m=>{
+    return `<button class="model-card" data-provider="native" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}</div><div class="m-meta">native engine · GGUF</div></button>`;
+  }).join('');
+  if(!loadedNative && !nativeModels.length){
+    html += '<div class="model-card"><div class="m-name">Native engine: no model loaded</div><div class="m-meta">Load a GGUF in Settings → Native Models</div></div>';
   }
   // Suggested models (not installed yet) - HIDDEN: user wants only installed models
   // const notInstalled = rec.filter(m=>m.provider==='ollama' && !m.installed);
@@ -1861,7 +2290,15 @@ function renderModelMenu(data=state.models){
   html += '<div style="font-size:10px;color:#9eb6c1;margin:10px 0 8px">☁️ Cloud quick picks</div>';
   html += topCloud.map(m=>`<button class="model-card" data-provider="${escapeHtml(m.provider)}" data-model="${escapeHtml(m.name)}"><div class="m-name">${escapeHtml(m.name)}</div><div class="m-meta">${escapeHtml(m.role)} · requires API key</div></button>`).join('');
   menu.innerHTML=html;
-  $$('.model-card[data-model]', menu).forEach(btn=>btn.onclick=()=>{ state.provider=btn.dataset.provider||'lmstudio'; state.selectedModel=btn.dataset.model||''; persist(); updateModeButtons(); setText('#t-model', state.selectedModel.slice(0,22)); setText('#t-route', state.provider || 'lmstudio'); menu.classList.remove('open'); const parent=document.getElementById('model-dropdown'); if(parent) parent.classList.remove('open'); toast('Model: '+state.provider+' / '+state.selectedModel); });
+  $$('.model-card[data-model]', menu).forEach(btn=>btn.onclick=()=>{ state.provider=btn.dataset.provider||'native'; state.selectedModel=btn.dataset.model||''; persist(); updateModeButtons(); pushBrainModel(state.provider, state.selectedModel); renderActiveBrainModel(null); setText('#t-model', state.selectedModel.slice(0,22)); setText('#t-route', state.provider || 'native'); menu.classList.remove('open'); const parent=document.getElementById('model-dropdown'); if(parent) parent.classList.remove('open'); toast('Model: '+state.provider+' / '+state.selectedModel);
+    // Native pick = lock + switch: load the chosen GGUF now when it differs.
+    if(state.provider==='native' && state.selectedModel && state.selectedModel!==state.nativeLoaded){
+      toast('Switching native model — engine reloading (~40s)…');
+      fetch('/api/native-engine/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.selectedModel})})
+        .then(r=>r.json()).then(d=>{ toast(d.ok?('Native model locked: '+state.selectedModel):('Switch failed: '+(d.error||'?')), d.ok?'info':'err'); refreshNativeStatus(); })
+        .catch(e=>toast('Switch failed: '+e.message,'err'));
+    }
+  });
 }
 window.renderModelMenu = renderModelMenu;
 
@@ -1876,17 +2313,10 @@ function populateProviderModelSelects(data=state.models){
     qwen: ['qwen-max'],
     huggingface: ['meta-llama/Llama-3.1-8B-Instruct','Qwen/Qwen2.5-7B-Instruct']
   };
-  for(const pid of ['openai','anthropic','gemini','kimi','deepseek','qwen','huggingface']){
+  for(const pid of ['openai','anthropic','gemini','kimi','deepseek','qwen']){
     const sel=$('#model-'+pid); if(!sel) continue;
     const opts=bestModels[pid]||[];
     sel.innerHTML = '<option value="">Default / auto</option>' + opts.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
-  }
-  // LM Studio is whatever the user has actually downloaded — list real installed
-  // models (loaded ones first) instead of a fixed/guessed catalog.
-  const lmSel=$('#model-lmstudio');
-  if(lmSel){
-    const lmModels=(data.installed||[]).filter(m=>m.provider==='lmstudio').slice().sort((a,b)=>(b.loaded?1:0)-(a.loaded?1:0));
-    lmSel.innerHTML = '<option value="">Default / auto</option>' + lmModels.map(m=>`<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${m.loaded?' (loaded)':''}</option>`).join('');
   }
   populateAgentModelSelects(data);
 }
@@ -1900,14 +2330,6 @@ function populateAgentModelSelects(data=state.models){
   });
 }
 window.populateAgentModelSelects=populateAgentModelSelects;
-function renderModelManager(data=state.models){
-  const box=$('#v9-model-list'); if(!box) return;
-  const rec=data.recommended||[];
-  let html = rec.map(m=>`<div class="v9-chip"><b>${escapeHtml(m.name)}</b> <span class="${m.installed?'v9-ok':'v9-warn'}">${m.installed?'installed':'not installed'}</span><small>${escapeHtml(m.role||'')} · ${escapeHtml(m.notes||'')}</small>${m.provider==='ollama'?`<button class="v9-btn" data-pull="${escapeHtml(m.name)}" style="margin-top:7px">Pull / Update</button>`:''}</div>`).join('');
-  html += `<div class="v9-chip" style="opacity:.85"><b>ChemDFM</b> <span class="v9-warn">not Ollama</span><small>Chemistry model uses its own endpoint/HuggingFace. Use /chemdfm command, not Pull.</small></div>`;
-  box.innerHTML = html;
-  $$('[data-pull]', box).forEach(b=>b.onclick=()=>pullModel(b.dataset.pull));
-}
 
 async function saveMediaSettings(){
   const backend=$('#v11-image-backend')?.value || 'auto';
@@ -1973,42 +2395,11 @@ async function loadMediaSettings(){
 window.loadMediaSettings = loadMediaSettings;
 async function startOllama(){ try{ const r=await fetch('/ollama/start',{method:'POST'}); const d=await r.json(); toast(d.ok?'Ollama started/online':(d.detail||'Ollama not started'), d.ok?'info':'err'); await loadModelList(); }catch(e){toast(e.message,'err');} }
 window.startOllama = startOllama;
-async function pullModel(model){
-  model = model || ($('#v9-pull-model') ? $('#v9-pull-model').value.trim() : ''); if(!model) return toast('Enter model name','warn');
-  const log=$('#v9-pull-log'); if(log) log.textContent='Starting pull '+model+'...';
-  let hadError = false;
-  try{
-    const r=await fetch('/ollama/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:true})});
-    const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
-    while(true){ const {done,value}=await reader.read(); if(done) break; buf += dec.decode(value,{stream:true}); const lines=buf.split(/\r?\n/); buf=lines.pop()||''; for(const line of lines){ if(!line.trim()) continue; let obj={}; try{obj=JSON.parse(line)}catch(e){} if(obj.type==='error' || obj.error || obj.detail){ hadError=true; } if(log) log.textContent = (obj.status || obj.detail || obj.error || JSON.stringify(obj)).slice(0,500); } }
-    if(hadError){ toast('Pull failed for '+model+' — see log','err'); return; }
-    state.provider='ollama'; state.selectedModel=model; persist(); toast('Pull finished and selected: '+model); await loadModelList();
-  }catch(e){ if(log) log.textContent='Pull failed: '+e.message; toast('Pull failed: '+e.message,'err'); }
-}
-window.pullModel = pullModel;
 
-
-async function saveWebSettings(){
-  const searx=$('#v14-searxng-url')?.value || ''; const tav=$('#v14-tavily-key')?.value || ''; const brave=$('#v14-brave-key')?.value || '';
-  try{ const d=await (await fetch('/web/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({searxng_url:searx,tavily_key:tav,brave_key:brave,duckduckgo_fallback:true})})).json(); toast(d.ok?'Search settings saved':'Search settings failed', d.ok?'info':'warn'); }catch(e){ toast('Search settings failed: '+e.message,'err'); }
-}
-window.saveWebSettings=saveWebSettings;
 async function testWebSearch(){
   try{ const d=await (await fetch('/web/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'SHIMS realtime voice agent test',max_results:3})})).json(); toast(d.ok?'Search works via '+d.provider:'Search needs configuration/internet', d.ok?'info':'warn'); feed('search '+(d.ok?'ok':'failed')+': '+(d.provider||d.message), d.ok?'info':'warn'); }catch(e){ toast('Search test failed: '+e.message,'err'); }
 }
 window.testWebSearch=testWebSearch;
-async function loadVoiceProfiles(){
-  const box=$('#v14-voice-profiles'); if(!box) return; try{ const d=await (await fetch('/voice/profiles')).json(); box.innerHTML=(d.profiles||[]).map(p=>`<div class="v9-chip"><b>${escapeHtml(p.name)} ${d.selected===p.id?'✓':''}</b><small>${escapeHtml((p.voiceprint_sha256||'').slice(0,20))}... · ${escapeHtml(p.engine||'profile-vault')}</small><button class="v9-btn" onclick="selectVoiceProfile('${escapeHtml(p.id)}')">Select</button></div>`).join('') || '<div class="empty-pane">No voice profiles yet. Enroll only voices you are authorized to use.</div>'; }catch(e){box.textContent=e.message;}
-}
-window.loadVoiceProfiles=loadVoiceProfiles;
-async function selectVoiceProfile(id){ const d=await (await fetch('/voice/profiles/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile_id:id})})).json(); toast(d.ok?'Voice profile selected':'Profile select failed', d.ok?'info':'warn'); loadVoiceProfiles(); }
-window.selectVoiceProfile=selectVoiceProfile;
-async function enrollVoiceProfile(){
-  const name=$('#v14-voice-name')?.value || 'owner'; const f=$('#v14-voice-file')?.files?.[0]; if(!f) return toast('Choose an authorized voice recording first','warn');
-  const fd=new FormData(); fd.append('file',f); fd.append('name',name); fd.append('consent_phrase','I authorize SHIMS to use this voice profile');
-  try{ const d=await (await fetch('/voice/profiles/enroll',{method:'POST',body:fd})).json(); toast(d.ok?'Voice profile enrolled':'Enrollment failed', d.ok?'info':'warn'); loadVoiceProfiles(); }catch(e){ toast('Enrollment failed: '+e.message,'err'); }
-}
-window.enrollVoiceProfile=enrollVoiceProfile;
 
 function ensureSettingsEnhancements(){
   const body=$('#pane-settings .pane-body'); if(!body || $('#v9-settings-card')) return;
@@ -2036,7 +2427,7 @@ function ensureSettingsEnhancements(){
 
 function openPane(name){
   closePane(); const pane=$('#pane-'+name); if(pane) pane.classList.add('open');
-  if(name==='memory') loadMemoryPane(); if(name==='skills') loadSkillsPane(); if(name==='behavior') loadBehaviorPane(); if(name==='cortex') loadCortexPane(); if(name==='agents') loadAgentsPane(); if(name==='docs') loadDocsPane(); if(name==='media') loadMediaPane(); if(name==='self'||name==='forge') loadSelfPane(); if(name==='files') loadFilesPane(); if(name==='mailbox') loadMailboxPane(); if(name==='operator') loadOperatorPane(); if(name==='settings'){ ensureSettingsEnhancements(); ensureMailboxSettingsCard(); ensureOmnipotentToggle(); loadModelList(); loadVoiceProfiles(); loadMailboxSettings(); loadSttModels(); loadMediaSettings(); } if(name==='rd') loadRdPane(); if(name==='scanner') loadScannerPane();
+  if(name==='memory') loadMemoryPane(); if(name==='skills') loadSkillsPane(); if(name==='behavior') loadBehaviorPane(); if(name==='cortex') loadCortexPane(); if(name==='agents') loadAgentsPane(); if(name==='docs') loadDocsPane(); if(name==='media') loadMediaPane(); if(name==='self'||name==='forge') loadSelfPane(); if(name==='files') loadFilesPane(); if(name==='mailbox') loadMailboxPane(); if(name==='operator') loadOperatorPane(); if(name==='settings'){ ensureSettingsEnhancements(); ensureMailboxSettingsCard(); ensureOmnipotentToggle(); loadModelList(); loadMailboxSettings(); loadSttModels(); loadMediaSettings(); mmRefreshLocal(); mmPollDownloads(); } if(name==='rd') loadRdPane(); if(name==='scanner') loadScannerPane();
 }
 function closePane(){ $$('.pane-overlay').forEach(p=>p.classList.remove('open')); }
 window.openPane=openPane; window.closePane=closePane;
@@ -2367,6 +2758,51 @@ async function desktopAction(action){
 }
 window.desktopAction=desktopAction;
 
+// ── Brain Controls (right sidebar) ─────────────────────────────────────
+async function loadLlmControls(){
+  try{
+    const d=await (await fetch('/api/settings/llm')).json();
+    if(!d.ok) return;
+    const r=$('#bc-reasoning'); if(r) r.value=d.reasoning_effort||'auto';
+    const t=$('#bc-temperature'); if(t){ t.value=d.temperature??0.2; const tv=$('#bc-temperature-val'); if(tv) tv.textContent=t.value; }
+    const c=$('#bc-ctx'); if(c) c.value=String(d.chat_ctx||8192);
+    const s=$('#bc-slots'); if(s) s.value=String(d.parallel_slots||4);
+  }catch(e){ /* backend down — leave defaults */ }
+}
+window.loadLlmControls=loadLlmControls;
+
+async function saveLlmControls(){
+  const st=$('#bc-status'); if(st) st.textContent='Saving…';
+  try{
+    const body={
+      reasoning_effort: $('#bc-reasoning')?.value,
+      temperature: parseFloat($('#bc-temperature')?.value||'0.2'),
+      chat_ctx: parseInt($('#bc-ctx')?.value||'8192',10),
+      parallel_slots: parseInt($('#bc-slots')?.value||'4',10),
+    };
+    const d=await (await fetch('/api/settings/llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!d.ok){ if(st) st.textContent='Error: '+(d.error||'save failed'); return; }
+    if(st) st.textContent='Saved ('+(d.saved||[]).length+' setting(s))';
+    const reload=$('#bc-reload');
+    if(reload) reload.classList.toggle('hidden', !d.needs_engine_reload);
+    if(d.needs_engine_reload && st) st.textContent='Saved — engine reload needed for new slot count';
+    toast('Brain controls saved');
+  }catch(e){ if(st) st.textContent='Error: '+e.message; }
+}
+window.saveLlmControls=saveLlmControls;
+
+async function reloadNativeEngine(){
+  const st=$('#bc-status'); if(st) st.textContent='Reloading engine (~40s)…';
+  try{
+    toast('Reloading native engine…');
+    const d=await (await fetch('/api/native-engine/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).json();
+    if(st) st.textContent=d.ok?'Engine reloaded with new settings':'Reload failed: '+(d.error||'');
+    const reload=$('#bc-reload'); if(reload && d.ok) reload.classList.add('hidden');
+    refreshNativeStatus();
+  }catch(e){ if(st) st.textContent='Reload error: '+e.message; }
+}
+window.reloadNativeEngine=reloadNativeEngine;
+
 async function checkBridgeStatus(){
   const info=$('#desktop-info'); if(info) info.textContent='Checking bridge…';
   try{
@@ -2453,6 +2889,16 @@ async function loadEnterpriseStatus(){
 window.loadEnterpriseStatus=loadEnterpriseStatus;
 
 let _enterpriseWs = null;
+let _enterpriseWsFailures = 0;
+// Circuit breaker: without this, a permanently-down enterprise backend (or one
+// that's merely offline for a minute) made the browser hammer /ws/enterprise
+// every 5s FOREVER while the tab stayed open — observed flooding the backend
+// log with hundreds of connect/disconnect cycles. Backoff grows with
+// consecutive failures and gives up after a cap; connectEnterpriseEvents()
+// (called again on next page load, or manually) resets the counter.
+const _ENTERPRISE_WS_MAX_BACKOFF_MS = 60000;
+const _ENTERPRISE_WS_GIVE_UP_AFTER = 8;
+
 function connectEnterpriseEvents(){
   if(_enterpriseWs && (_enterpriseWs.readyState===WebSocket.OPEN || _enterpriseWs.readyState===WebSocket.CONNECTING)) return;
   const proto = location.protocol==='https:'?'wss:':'ws:';
@@ -2460,7 +2906,7 @@ function connectEnterpriseEvents(){
   const status=$('#enterprise-ws-status');
   try{
     _enterpriseWs = new WebSocket(url);
-    _enterpriseWs.onopen = ()=>{ if(status) status.textContent='live'; };
+    _enterpriseWs.onopen = ()=>{ _enterpriseWsFailures=0; if(status) status.textContent='live'; };
     _enterpriseWs.onmessage = (ev)=>{
       let msg={}; try{ msg=JSON.parse(ev.data); }catch(e){}
       if(msg.type==='pong' || msg.type==='ack') return;
@@ -2473,11 +2919,141 @@ function connectEnterpriseEvents(){
       box.insertBefore(tile, box.firstChild);
       while(box.children.length>20) box.removeChild(box.lastChild);
     };
-    _enterpriseWs.onclose = ()=>{ if(status) status.textContent='reconnecting…'; setTimeout(connectEnterpriseEvents, 5000); };
+    _enterpriseWs.onclose = ()=>{
+      _enterpriseWsFailures++;
+      if(_enterpriseWsFailures >= _ENTERPRISE_WS_GIVE_UP_AFTER){
+        if(status) status.textContent='offline (giving up — reload page to retry)';
+        return;
+      }
+      if(status) status.textContent='reconnecting…';
+      const backoff = Math.min(_ENTERPRISE_WS_MAX_BACKOFF_MS, 5000 * Math.pow(2, _enterpriseWsFailures - 1));
+      setTimeout(connectEnterpriseEvents, backoff);
+    };
     _enterpriseWs.onerror = ()=>{ if(status) status.textContent='error'; };
   }catch(e){ if(status) status.textContent='unsupported'; }
 }
 window.connectEnterpriseEvents=connectEnterpriseEvents;
+
+// ── Native Engine panel: live heartbeat + direct control ────────────────────
+let _nativeBusy = false;
+async function loadNativePanel(){
+  const stateEl=$('#native-state'); if(!stateEl) return;
+  try{
+    // Pin state (from Settings — /api/settings/brain-model persists to .env).
+    let pinned='';
+    try{ const pd=await (await fetch('/api/settings/brain-model')).json(); pinned=(pd&&pd.model)||''; }catch(e){}
+    const pinEl=$('#native-pin-name');
+    const pinBox=$('#native-pin-status');
+    if(pinEl){
+      if(pinned){ pinEl.textContent=pinned; pinEl.style.color='#74ffb9'; }
+      else { pinEl.textContent='(none — using engine default)'; pinEl.style.color='var(--text-dim)'; }
+    }
+    // Loud mismatch banner: pin set but a DIFFERENT model is loaded/serving.
+    // This is exactly the "why is chat using Llama-8B when I pinned 40B" case.
+    let loadedNow='';
+    try{ const s=await (await fetch('/api/native-engine/status')).json(); loadedNow=((s.health||{}).model)||''; }catch(e){}
+    if(pinBox){
+      if(pinned && loadedNow && loadedNow !== pinned){
+        pinBox.style.background='rgba(255,90,122,.10)';
+        pinBox.style.borderLeftColor='#ff5a7a';
+        pinBox.innerHTML='<span style="color:#ff5a7a;font-weight:600">⚠ Pin mismatch:</span> pinned <b>'+pinned+'</b> but engine is serving <b>'+loadedNow+'</b>. Click <b>📌 Set as brain</b> again to force reload.';
+      } else {
+        pinBox.style.background='rgba(116,255,185,.08)';
+        pinBox.style.borderLeftColor='#74ffb9';
+        pinBox.innerHTML='<span style="color:#74ffb9;font-weight:600">📌 Pinned:</span> <span id="native-pin-name" style="color:'+(pinned?'#74ffb9':'var(--text-dim)')+'">'+(pinned||'(none — using engine default)')+'</span>';
+      }
+    }
+    const d=await (await fetch('/api/native-engine/status')).json();
+    const h=d.health||{}; const b=d.budget||{};
+    const dot=$('#native-dot');
+    const ready=h.state==='ready';
+    if(dot) dot.style.color = ready?'#74ffb9':(h.state==='loading'?'#ffb86c':'#ff5a7a');
+    stateEl.textContent = _nativeBusy ? 'working…' : (h.state||'unknown') + (h.restarts?` · ${h.restarts} restart(s)`:'');
+    const up=$('#native-uptime');
+    if(up) up.textContent = ready&&h.uptime_s ? `up ${h.uptime_s>3600?Math.floor(h.uptime_s/3600)+'h '+Math.floor(h.uptime_s%3600/60)+'m':Math.floor(h.uptime_s/60)+'m '+Math.floor(h.uptime_s%60)+'s'}` : '';
+    const modelEl=$('#native-model');
+    if(modelEl) modelEl.textContent = h.model || '(no model loaded)';
+    const stats=$('#native-stats');
+    if(stats){
+      const gb=x=>x?(x/1073741824).toFixed(1)+'G':'—';
+      stats.innerHTML =
+        `<span>backend: ${h.backend||'—'}</span><span>ctx: ${h.ctx||'—'}</span>`+
+        `<span>gpu layers: ${h.gpu_layers??'—'}</span><span>threads: ${h.threads||'—'}</span>`+
+        `<span>weights: ${gb(b.weights_bytes)}</span><span>free RAM: ${gb(b.available_bytes)}</span>`;
+    }
+    // Measured speed of the loaded model (the perf ledger feeding back).
+    const loadedM=(d.models||[]).find(m=>m.loaded);
+    if(stats && loadedM && loadedM.measured){
+      const mm=loadedM.measured;
+      stats.innerHTML += `<span>speed: ${mm.gen_tps||'?'} tok/s</span><span>prompt: ${mm.prompt_tps||'?'} tok/s</span>`;
+    }
+    const sel=$('#native-model-select');
+    if(sel && (d.models||[]).length && sel.options.length !== d.models.length){
+      const cur=sel.value;
+      const badge={fast:'⚡',ok:'✓',slow:'🐌',oversized:'⛔'};
+      sel.innerHTML='';
+      for(const m of d.models){
+        const o=document.createElement('option');
+        const tps=(m.measured||{}).gen_tps;
+        o.value=m.id;
+        o.textContent=(m.loaded?'● ':'')+(badge[m.rating]||'')+' '+m.id+(tps?` (${tps} t/s)`:'');
+        o.title=m.advice||'';
+        sel.appendChild(o);
+      }
+      if(cur) sel.value=cur;
+      else { const loaded=(d.models.find(m=>m.loaded)||{}).id; if(loaded) sel.value=loaded; }
+    }
+  }catch(e){
+    stateEl.textContent='backend unreachable';
+    const dot=$('#native-dot'); if(dot) dot.style.color='#ff5a7a';
+  }
+}
+async function nativeLoadSelected(){
+  const sel=$('#native-model-select'); const note=$('#native-action-note');
+  if(!sel||!sel.value) return;
+  _nativeBusy=true;
+  if(note) note.textContent='Loading '+sel.value+' — large models can take several minutes…';
+  try{
+    const d=await (await fetch('/api/native-engine/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value})})).json();
+    if(note) note.textContent = d.ok ? 'Loaded: '+((d.health||{}).model||sel.value) : 'Load failed: '+(d.error||'unknown');
+  }catch(e){ if(note) note.textContent='Load failed: '+e.message; }
+  _nativeBusy=false;
+  loadNativePanel();
+}
+async function nativeUnload(){
+  const note=$('#native-action-note');
+  _nativeBusy=true;
+  if(note) note.textContent='Unloading…';
+  try{ await fetch('/api/native-engine/unload',{method:'POST'}); if(note) note.textContent='Model unloaded — RAM freed.'; }
+  catch(e){ if(note) note.textContent='Unload failed: '+e.message; }
+  _nativeBusy=false;
+  loadNativePanel();
+}
+async function nativePinSelected(){
+  // Persist as SHIMS_CHAT_MODEL (via /api/settings/brain-model) AND load — this
+  // makes the selection the ONLY model the chat uses, across restarts.
+  const sel=$('#native-model-select'); const note=$('#native-action-note');
+  if(!sel||!sel.value) return;
+  _nativeBusy=true;
+  if(note) note.textContent='📌 Pinning '+sel.value+' as brain model (persists to .env)…';
+  try{
+    const pinRes=await (await fetch('/api/settings/brain-model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'native',model:sel.value})})).json();
+    if(!pinRes.ok){ if(note) note.textContent='Pin failed: '+(pinRes.error||'unknown'); _nativeBusy=false; return; }
+    if(note) note.textContent='Pinned. Loading '+sel.value+' — large models can take several minutes…';
+    const loadRes=await (await fetch('/api/native-engine/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value})})).json();
+    if(note) note.textContent = loadRes.ok
+      ? '✅ '+sel.value+' is now the brain model — every chat lane uses it.'
+      : 'Pinned but load failed: '+(loadRes.error||'unknown');
+  }catch(e){ if(note) note.textContent='Pin failed: '+e.message; }
+  _nativeBusy=false;
+  loadNativePanel();
+}
+window.loadNativePanel=loadNativePanel;
+window.nativeLoadSelected=nativeLoadSelected;
+window.nativeUnload=nativeUnload;
+window.nativePinSelected=nativePinSelected;
+setTimeout(loadNativePanel, 800);
+setInterval(loadNativePanel, 5000);
 
 async function enterpriseAction(cmd){
   const b=pushBubble('user','/enterprise '+cmd);
@@ -2647,64 +3223,6 @@ async function saveProviderKeys(){
 }
 window.saveProviderKeys=saveProviderKeys;
 
-async function saveLmstudioSettings(){
-  const url=$('#lmstudio-url'); const model=$('#model-lmstudio');
-  if(!url && !model) return;
-  const payload={};
-  if(url && url.value.trim()) payload.lmstudio_base_url=url.value.trim();
-  if(model && model.value.trim() && !/Auto-populate|Default/.test(model.value)) payload.lmstudio_model=model.value.trim();
-  if(!Object.keys(payload).length) return;
-  try{
-    const r=await fetch('/system/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    const d=await r.json();
-    if(d.ok) toast('LM Studio settings saved');
-    else toast('LM Studio settings failed','warn');
-  }catch(e){ toast('LM Studio settings failed: '+e.message,'err'); }
-}
-
-async function saveOllamaSettings(){
-  const url=$('#ollama-url');
-  if(!url || !url.value.trim()) return;
-  try{
-    const r=await fetch('/system/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ollama_base_url:url.value.trim()})});
-    const d=await r.json();
-    if(d.ok) toast('Ollama settings saved');
-    else toast('Ollama settings failed','warn');
-  }catch(e){ toast('Ollama settings failed: '+e.message,'err'); }
-}
-
-async function pullLmstudioModel(){
-  const input=$('#lmstudio-pull-name');
-  const model = input ? input.value.trim() : '';
-  if(!model) return toast('Enter a model name or HuggingFace URL','warn');
-  const log=$('#lmstudio-pull-log'); if(log) log.textContent='Resolving '+model+'...';
-  let hadError = false;
-  try{
-    const r=await fetch('/lmstudio/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model})});
-    const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
-    while(true){ const {done,value}=await reader.read(); if(done) break; buf += dec.decode(value,{stream:true}); const lines=buf.split(/\r?\n/); buf=lines.pop()||''; for(const line of lines){ if(!line.trim()) continue; let obj={}; try{obj=JSON.parse(line)}catch(e){} if(obj.type==='error' || obj.error || obj.detail && obj.type==='error'){ hadError=true; } if(log) log.textContent = (obj.status || obj.detail || obj.error || JSON.stringify(obj)).slice(0,500); } }
-    if(hadError){ toast('Download failed for '+model+' — see log','err'); return; }
-    state.provider='lmstudio'; state.selectedModel=model; persist(); toast('Download finished and selected: '+model); await loadModelList();
-  }catch(e){ if(log) log.textContent='Download failed: '+e.message; toast('Download failed: '+e.message,'err'); }
-}
-window.pullLmstudioModel = pullLmstudioModel;
-
-async function saveHfSettings(){
-  const url=$('#hf-url'); const key=$('#key-huggingface'); const model=$('#model-huggingface');
-  if(!url && !key && !model) return;
-  const payload={};
-  if(url && url.value.trim()) payload.huggingface_base_url=url.value.trim();
-  if(key && key.value.trim()) payload.huggingface_api_key=key.value.trim();
-  if(model && model.value.trim() && !/Auto-populate|Default/.test(model.value)) payload.huggingface_model=model.value.trim();
-  if(!Object.keys(payload).length) return;
-  try{
-    const r=await fetch('/system/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    const d=await r.json();
-    if(d.ok){ if(key) key.value=''; toast('HuggingFace settings saved'); }
-    else toast('HuggingFace settings failed','warn');
-  }catch(e){ toast('HuggingFace settings failed: '+e.message,'err'); }
-}
-
 async function saveAgentModels(){
   const payload={};
   $$('.agent-model-select').forEach(sel=>{
@@ -2721,25 +3239,58 @@ async function saveAgentModels(){
   }catch(e){ toast('Agent models failed: '+e.message,'err'); }
 }
 
+/* ==================== BRAIN-MODEL SYNC ====================
+   Mirror the selected brain model to the backend. The endpoint is new and
+   may not exist on older backends — 404/network failures are ignored. */
+async function pushBrainModel(provider, model){
+  try{
+    const r = await fetch('/api/settings/brain-model', {method:'POST', headers:{'Content-Type':'application/json', ...auth()}, body:JSON.stringify({provider:provider||'', model:model||''})});
+    return r.ok;
+  }catch(e){ return false; }
+}
+function renderActiveBrainModel(d){
+  const el = $('#set-brain-model-active'); if(!el) return;
+  const p = (d && d.provider) || state.provider || 'auto';
+  const m = (d && d.model) || state.selectedModel || 'auto';
+  el.textContent = 'Active brain model: ' + p + ' / ' + m;
+}
+async function loadBrainModel(){
+  try{
+    const r = await fetch('/api/settings/brain-model', {headers:{...auth()}});
+    if(!r.ok) return;                                  // 404 → endpoint absent, skip
+    const d = await r.json();
+    if(!d || d.ok === false) return;
+    // The backend (.env via Settings → Brain Model) is the source of truth:
+    // every deliberate UI pick is pushed there via pushBrainModel(), so on
+    // load we adopt whatever it holds and drop any stale localStorage value.
+    if(d.model || d.provider){
+      state.provider = d.provider || state.provider;
+      state.selectedModel = d.model || state.selectedModel;
+      persist(); updateModeButtons();
+      setText('#t-model', (state.selectedModel||'auto').slice(0,22));
+    }
+    renderActiveBrainModel(d);
+  }catch(e){}
+}
+window.loadBrainModel = loadBrainModel;
+
 async function saveSettings(){
   const providerSel=$('#set-provider');
   const modelSel=$('#set-model');
   const voiceSel=$('#set-voice-lang');
   const privacyMode=$('#set-privacy-mode');
-  const privacySimple=$('#set-privacy-simple');
-  if(providerSel) state.provider = providerSel.value || 'ollama';
+  if(providerSel) state.provider = providerSel.value || 'auto';
   if(modelSel) state.selectedModel = modelSel.value === 'auto' ? '' : (modelSel.value || '');
   if(voiceSel) state.voiceLang = voiceSel.value || 'en-IN';
-  const privacyValue = (privacyMode && privacyMode.value) || (privacySimple && privacySimple.value) || '';
+  const privacyValue = (privacyMode && privacyMode.value) || '';
   if(privacyValue) state.privacyMode = privacyValue;
   const v9VoiceLang = $('#v9-voice-lang');
   if(v9VoiceLang) v9VoiceLang.value = state.voiceLang;
   persist();
   updateModeButtons();
+  pushBrainModel(state.provider, state.selectedModel);
+  renderActiveBrainModel(null);
   await saveProviderKeys();
-  await saveHfSettings();
-  await saveLmstudioSettings();
-  await saveOllamaSettings();
   await saveAgentModels();
   await saveMediaSettings();
   const token=$('#key-token'); if(token && token.value.trim()) localStorage.shimsAccessToken = token.value.trim();
@@ -2749,12 +3300,9 @@ async function saveSettings(){
 }
 window.saveSettings=saveSettings;
 function resetSettings(){
-  state.provider='ollama'; state.selectedModel='llama3.2:latest'; state.voiceLang='en-IN'; state.converseMode=true; state.webMode=false; state.peersMode=false; persist(); updateModeButtons(); toast('Settings reset to local defaults');
+  state.provider='native'; state.selectedModel=''; state.voiceLang='en-IN'; state.converseMode=true; state.webMode=false; state.peersMode=false; persist(); updateModeButtons(); toast('Settings reset to local defaults');
 }
 window.resetSettings=resetSettings;
-
-function setThemePreview(theme){ document.body.dataset.theme=theme; $$('.theme-chip').forEach(c=>c.classList.toggle('on', c.dataset.theme===theme)); }
-window.setThemePreview=setThemePreview;
 
 function bindUI(){
   $('#send-btn') && ($('#send-btn').onclick = send);
@@ -2774,7 +3322,6 @@ function bindUI(){
   const themeBtn=$('#btn-theme');
   if(themeBtn){ themeBtn.onclick=()=>{ themeBtn.classList.remove('flash'); void themeBtn.offsetWidth; themeBtn.classList.add('flash'); cycleTheme(); }; }
   $('#btn-model') && ($('#btn-model').onclick = ()=>{ const m=$('#model-menu'); if(m){ const parent=document.getElementById('model-dropdown'); if(parent) parent.classList.toggle('open'); m.classList.toggle('open'); loadModelList(); } });
-  $('#provider-select') && ($('#provider-select').onchange = e=>{ state.provider=e.target.value||'ollama'; if(state.provider==='ollama'){ state.selectedModel=chooseDefaultLocal(state.models); } else { const cloud=(state.models.cloud||[]).find(m=>m.provider===state.provider); state.selectedModel=cloud ? cloud.name : ''; } syncProviderModel(state.models); toast('Provider: '+state.provider+' / '+state.selectedModel); });
   $('#set-provider') && ($('#set-provider').onchange = e=>{ state.provider=e.target.value||'auto'; state.selectedModel=''; loadSettings(); });
   $('#mode-converse') && ($('#mode-converse').onclick=()=>{state.converseMode=!state.converseMode;persist();updateModeButtons();toast(state.converseMode?'Conversation history on':'Conversation history off');});
   $('#mode-web') && ($('#mode-web').onclick=()=>{state.webMode=!state.webMode;persist();updateModeButtons();});
@@ -2815,19 +3362,42 @@ async function loadSession(sessionId){
   }catch(e){ toast('Could not load chat: '+e.message,'err'); }
 }
 window.loadSession=loadSession;
+// Quiet restore on boot: render the saved transcript without a toast/feed line.
+async function restoreSession(sessionId){
+  if(!sessionId) return;
+  try{
+    const d=await (await fetch('/sessions/'+encodeURIComponent(sessionId))).json();
+    if(d && d.ok && Array.isArray(d.messages) && d.messages.length){ renderTranscript(d.messages); }
+  }catch(e){ /* fresh/empty session — leave the standby screen */ }
+}
+window.restoreSession=restoreSession;
+async function deleteSession(sessionId){
+  if(!sessionId) return;
+  if(!confirm('Delete this conversation permanently?')) return;
+  try{
+    const d=await (await fetch('/sessions/'+encodeURIComponent(sessionId),{method:'DELETE'})).json();
+    if(!d.ok && !d.deleted) throw new Error(d.detail || 'Delete failed');
+    if(sessionId===state.sessionId){ state.sessionId=null; persist(); renderTranscript([]); }
+    await loadSessionsPane(); toast('Conversation deleted');
+  }catch(e){ toast('Could not delete: '+e.message,'err'); }
+}
+window.deleteSession=deleteSession;
 async function loadSessionsPane(){
   const box=$('#sessions-list'); if(!box) return;
   try{
     const d=await (await fetch('/sessions')).json();
     const sessions=Array.isArray(d) ? d : (d.sessions || []);
     const newButton='<button type="button" class="v9-btn session-new" data-new-chat="1">New Chat</button>';
-    const rows=sessions.map(s=>`<div class="v9-chip session-chip ${s.id===state.sessionId?'active':''}" role="button" tabindex="0" data-session-id="${escapeHtml(s.id)}"><b>${escapeHtml(s.title || 'New chat')}</b><small>${Number(s.message_count||0)} messages</small></div>`).join('');
+    const rows=sessions.map(s=>`<div class="v9-chip session-chip ${s.id===state.sessionId?'active':''}" role="button" tabindex="0" data-session-id="${escapeHtml(s.id)}"><span class="session-open"><b>${escapeHtml(s.title || 'New chat')}</b><small>${Number(s.message_count||0)} messages</small></span><button type="button" class="session-del" title="Delete conversation" data-del-session="${escapeHtml(s.id)}" aria-label="Delete conversation">✕</button></div>`).join('');
     box.innerHTML=newButton+(rows || '<div class="empty-pane compact">No saved chats yet.</div>');
     const nb=box.querySelector('[data-new-chat]'); if(nb) nb.onclick=newChat;
     box.querySelectorAll('[data-session-id]').forEach(el=>{
       const open=()=>loadSession(el.dataset.sessionId);
       el.onclick=open;
       el.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); open(); } };
+    });
+    box.querySelectorAll('[data-del-session]').forEach(btn=>{
+      btn.onclick=e=>{ e.stopPropagation(); deleteSession(btn.dataset.delSession); };
     });
   }catch(e){
     box.innerHTML='<div class="empty-pane compact">Sessions unavailable.</div>';
@@ -2989,17 +3559,18 @@ async function loadSettings(){
     if(!d.ok) return;
     const providerSel=$('#set-provider');
     const modelSel=$('#set-model');
-    const privSel=$('#set-privacy-mode') || $('#set-privacy-simple'); if(privSel) privSel.value=state.privacyMode||'balanced';
-    if(providerSel) providerSel.value=state.provider||'lmstudio';
-    const providerKey = providerSel ? (providerSel.value || 'auto') : (state.provider || 'lmstudio');
+    const privSel=$('#set-privacy-mode'); if(privSel) privSel.value=state.privacyMode||'balanced';
+    if(providerSel) providerSel.value=state.provider||'native';
+    const providerKey = providerSel ? (providerSel.value || 'auto') : (state.provider || 'native');
     if(modelSel){
       modelSel.innerHTML='<option value="auto">Auto</option>';
-      const models=d.models[providerKey]||d.models.lmstudio||d.models.auto||[];
+      const models=d.models[providerKey]||d.models.native||d.models.auto||[];
       models.forEach(m=>{ const o=document.createElement('option'); o.value=m.id||m.name||m; o.textContent=m.name||m.id||m; modelSel.appendChild(o); });
       modelSel.value=state.selectedModel||'auto';
     }
     const voiceSel=$('#set-voice-lang');
     if(voiceSel) voiceSel.value=state.voiceLang||'en-IN';
+    renderActiveBrainModel(null);
   }catch(e){ console.warn('loadSettings failed',e); }
 }
 // ───────── Analytics (privacy-respecting, opt-in) ─────────
@@ -3076,7 +3647,10 @@ function boot(){
   const clock=()=>setText('#clock', new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})); clock(); setInterval(clock,30000);
   const boot=$('#boot'); const enter=$('#boot-enter'); if(enter) enter.onclick=()=>boot&&boot.remove(); setTimeout(()=>{ if(boot) boot.classList.add('ready'); }, 500); setTimeout(()=>{ if(boot) boot.remove(); }, 1600);
   try{ const c=$('#bg'); if(c){ const ctx=c.getContext('2d'); function resize(){ c.width=innerWidth*devicePixelRatio; c.height=innerHeight*devicePixelRatio; c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; } resize(); window.addEventListener('resize',resize); let t=0; (function draw(){ t+=0.01; ctx.clearRect(0,0,c.width,c.height); ctx.strokeStyle='rgba(124,240,255,.08)'; for(let x=0;x<c.width;x+=70){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x+Math.sin(t+x)*80,c.height); ctx.stroke(); } requestAnimationFrame(draw); })(); } }catch(e){}
-  bindUI(); updateModeButtons(); ensureSettingsEnhancements(); loadVoiceConfig(); loadModelList(); loadSessionsPane(); loadAgents(); setInterval(loadAgents,30000); refreshAgentStrip(); setInterval(refreshAgentStrip,20000); loadSettings(); loadEnterpriseStatus(); setInterval(loadEnterpriseStatus,30000); checkOnboarding(); feed('SHIMS v16 Omni core online', 'info');
+  bindUI(); updateModeButtons(); ensureSettingsEnhancements(); loadVoiceConfig(); loadTtsEngine(); loadModelList(); loadSessionsPane(); loadAgents(); setInterval(loadAgents,30000); refreshAgentStrip(); setInterval(refreshAgentStrip,20000); refreshNativeStatus(); setInterval(refreshNativeStatus,10000); loadSettings(); loadBrainModel(); loadLlmControls(); loadEnterpriseStatus(); setInterval(loadEnterpriseStatus,30000); checkOnboarding(); feed('SHIMS v16 Omni core online', 'info');
+  // Restore the last active conversation so a reload continues where you left off
+  // (history is now persisted on the server across restarts).
+  if(state.sessionId){ restoreSession(state.sessionId); }
   if(state.voiceOn){ state.voiceOn=false; setTimeout(()=>toggleVoice(), 300); }
   trackEvent('app_boot');
 }

@@ -19,9 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from .config import STORAGE_DIR
+from .local_llm import feature_chat
 from .eval_harness import run_reliability_evals
 from .prompt_evolution import (
     PromptVariant,
@@ -45,11 +44,19 @@ except Exception:  # pragma: no cover
 IMPROVEMENT_DIR = STORAGE_DIR / "improvement_loop"
 IMPROVEMENT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Model used for root-cause reflection. Defaults to the mutation model so the
-# improvement loop can run entirely on local infrastructure.
-_IMPROVEMENT_REFLECTION_MODEL = os.getenv(
-    "SHIMS_IMPROVEMENT_MODEL", os.getenv("SHIMS_MUTATION_MODEL", "qwen2.5:7b")
+# Model used for root-cause reflection. Values are native-engine GGUF ids
+# (not Ollama tags); None means "whatever model the native engine has loaded".
+_IMPROVEMENT_REFLECTION_MODEL = (
+    os.getenv("SHIMS_NIGHTLY_MODEL") or os.getenv("SHIMS_IMPROVEMENT_MODEL") or None
 )
+
+
+def _reflection_timeout() -> float:
+    """Nightly reflection targets 100B-class GGUFs — allow long generations."""
+    try:
+        return float(os.getenv("SHIMS_NIGHTLY_TIMEOUT_S", "1800"))
+    except ValueError:
+        return 1800.0
 
 
 def _now() -> str:
@@ -122,30 +129,24 @@ def _call_reflection_llm(prompt: str, eval_summary: dict[str, Any]) -> dict[str,
       ]
     }
     """
-    host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     system_prompt = (
         "You are SHIMS's self-improvement auditor. Given eval results, produce a short root-cause "
         "reflection and concrete, safe improvement proposals. Return ONLY valid JSON matching the "
         "requested schema. Do not auto-apply anything; only propose."
     )
-    payload = {
-        "model": _IMPROVEMENT_REFLECTION_MODEL,
-        "messages": [
+    raw = feature_chat(
+        [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
-        "stream": False,
-        "options": {"temperature": 0.4, "num_predict": 2048},
-        "keep_alive": "5m",
-    }
-    try:
-        with httpx.Client(timeout=60.0) as client:
-            r = client.post(f"{host}/api/chat", json=payload)
-            r.raise_for_status()
-            data = r.json()
-    except Exception:
+        model=_IMPROVEMENT_REFLECTION_MODEL,
+        max_tokens=4096,
+        temperature=0.4,
+        timeout=_reflection_timeout(),
+        feature="improvement_reflection",
+    )
+    if not raw:
         return {}
-    raw = (data.get("message") or {}).get("content") or data.get("response") or ""
     return _parse_reflection_json(raw)
 
 
@@ -153,6 +154,7 @@ def _build_reflection_prompt(
     reliability: dict[str, Any],
     wave: dict[str, Any],
     prompt_run: dict[str, Any],
+    extra_context: str = "",
 ) -> str:
     schema = {
         "reflection": "<1-2 sentence root-cause summary>",
@@ -226,6 +228,14 @@ def _build_reflection_prompt(
         "## Prompt-quality evals",
         json.dumps(prompt_run, indent=2, default=str),
         "",
+    ]
+    if extra_context:
+        parts += [
+            "## Observed production activity (day report)",
+            extra_context[:12000],
+            "",
+        ]
+    parts += [
         "Analyze the failures and produce a JSON object with this exact schema:",
         json.dumps(schema, indent=2),
         "",
@@ -303,6 +313,7 @@ def _propose_skill(
         body=body,
         tags=tags or ["auto", "improvement-loop"],
         source="improvement_loop",
+        created_from="improvement_loop",
     )
 
 
@@ -316,8 +327,52 @@ def _propose_prompt_variant(parent: PromptVariant, prompt_text: str, reason: str
     return [{"type": "prompt_variant", "variant_id": v.id, "reason": reason} for v in variants]
 
 
-def _apply_proposal_item(item: dict[str, Any], control: PromptVariant) -> dict[str, Any] | None:
-    """Turn one reflection proposal into a concrete artifact. Never auto-applies code."""
+def _nightly_auto_apply_eligible(relative_path: str, patch: dict[str, Any]) -> bool:
+    """Which patch proposals the nightly loop may apply without a human.
+
+    self_evolver.classify_risk only returns "low" for whitelisted scopes, so
+    code patches practically always land on medium+. The nightly bar is
+    therefore: classified low, OR a low-blast-radius target (tests/, docs/)
+    with a small diff. Everything else waits for morning approval.
+    """
+    if patch.get("risk") == "low":
+        return True
+    rel = (relative_path or "").replace("\\", "/")
+    return rel.startswith(("tests/", "docs/")) and int(patch.get("size") or 0) <= 4000
+
+
+def _try_nightly_auto_apply(patch: dict[str, Any]) -> dict[str, Any]:
+    """validate → approve → apply one proposal; annotate and never raise."""
+    from .self_evolver import apply_proposal, approve_proposal, validate_proposal
+
+    proposal_id = patch.get("proposal_id") or patch.get("id") or ""
+    if not proposal_id:
+        patch["auto_applied"] = False
+        return patch
+    try:
+        v = validate_proposal(proposal_id)
+        patch["validation_status"] = v.status
+        if v.status != "validated":
+            patch["auto_applied"] = False
+            return patch
+        a = approve_proposal(proposal_id, approved_by="nightly_loop", note="Nightly low-risk auto-apply")
+        if a.status != "approved":
+            patch["auto_applied"] = False
+            patch["apply_status"] = a.status
+            return patch
+        r = apply_proposal(proposal_id, approved_by="nightly_loop")
+        patch["apply_status"] = r.status
+        patch["auto_applied"] = r.status == "applied"
+    except Exception as exc:  # pragma: no cover - defensive
+        patch["auto_applied"] = False
+        patch["apply_error"] = str(exc)[:200]
+    return patch
+
+
+def _apply_proposal_item(item: dict[str, Any], control: PromptVariant, *, auto_apply_low_risk: bool = False) -> dict[str, Any] | None:
+    """Turn one reflection proposal into a concrete artifact. Never auto-applies
+    code unless auto_apply_low_risk is set (nightly loop) and the proposal
+    clears _nightly_auto_apply_eligible."""
     ptype = item.get("type")
     meta = {
         "title": item.get("title", "").strip() or item.get("reason", "").strip()[:80],
@@ -341,6 +396,8 @@ def _apply_proposal_item(item: dict[str, Any], control: PromptVariant) -> dict[s
         patch = _propose_patch_safe(rel, content, reason)
         patch["meta"] = meta
         patch["affected_files"] = item.get("affected_files", [rel])
+        if auto_apply_low_risk and patch.get("ok") and _nightly_auto_apply_eligible(rel, patch):
+            patch = _try_nightly_auto_apply(patch)
         return {"type": "patch", **patch}
     if ptype == "skill":
         name = item.get("name", "").strip()
@@ -409,8 +466,19 @@ def _heuristic_fallback_proposals(
     return proposals
 
 
-def run_improvement_cycle(system_prompt_text: str = "") -> dict[str, Any]:
-    """Run one full eval → reflect → propose cycle."""
+def run_improvement_cycle(
+    system_prompt_text: str = "",
+    *,
+    extra_context: str | None = None,
+    auto_apply_low_risk: bool = False,
+) -> dict[str, Any]:
+    """Run one full eval → reflect → propose cycle.
+
+    ``extra_context`` (e.g. the nightly day report) is folded into the
+    reflection prompt so the model reasons over real activity, not just
+    synthetic evals. ``auto_apply_low_risk`` lets the nightly loop apply
+    eligible patch proposals through the validate→approve→apply pipeline.
+    """
     run_id = new_id("imp")
     started = time.time()
 
@@ -434,7 +502,7 @@ def run_improvement_cycle(system_prompt_text: str = "") -> dict[str, Any]:
     reflection_payload: dict[str, Any] = {}
     proposals: list[dict[str, Any]] = []
     try:
-        prompt = _build_reflection_prompt(reliability, wave_summary, prompt_run)
+        prompt = _build_reflection_prompt(reliability, wave_summary, prompt_run, extra_context=extra_context or "")
         eval_summary = {
             "failed_reliability": failed_rel,
             "wave_ok": wave_summary.get("ok", False),
@@ -449,7 +517,7 @@ def run_improvement_cycle(system_prompt_text: str = "") -> dict[str, Any]:
     if isinstance(reflection_payload, dict) and reflection_payload.get("proposals"):
         for item in reflection_payload.get("proposals", []):
             try:
-                applied = _apply_proposal_item(item, control)
+                applied = _apply_proposal_item(item, control, auto_apply_low_risk=auto_apply_low_risk)
                 if applied:
                     proposals.append(applied)
             except Exception as exc:

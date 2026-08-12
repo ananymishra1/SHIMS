@@ -9,6 +9,7 @@ Can use:
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 import time
 from typing import Any, Optional
@@ -16,11 +17,28 @@ from typing import Any, Optional
 from shared.personal.voice_state import can_accept_voice, mark_speaking, mark_speech_done
 
 
+def _whisper_config() -> tuple[str, str, str]:
+    """Return (model_size, device, compute_type) from env with sane defaults.
+
+    On AMD unified-memory systems faster-whisper has no DirectML path, so we
+    keep the default on CPU/int8 for stability and let power users override.
+    """
+    model = (os.getenv("SHIMS_WHISPER_MODEL") or "small").strip() or "small"
+    device = (os.getenv("SHIMS_WHISPER_DEVICE") or "cpu").strip() or "cpu"
+    compute = (os.getenv("SHIMS_WHISPER_COMPUTE") or "int8").strip() or "int8"
+    # ``auto`` device is allowed by faster-whisper but may pick CUDA on NVIDIA
+    # boxes; map it to a concrete value when it would otherwise be empty.
+    if device.lower() == "auto":
+        device = "cpu"
+    return model, device, compute
+
+
 def transcribe_audio_local(audio_bytes: bytes, lang: str = "en") -> str:
     """Transcribe audio using faster-whisper if available."""
     try:
         from faster_whisper import WhisperModel  # type: ignore
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        model_size, device, compute_type = _whisper_config()
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(audio_bytes)
             tmp = f.name
@@ -34,7 +52,7 @@ def speak_text(text: str, lang: str = "en-IN") -> dict[str, Any]:
     """Generate TTS audio. Returns file path or error."""
     try:
         from shared.ai import _create_audio  # type: ignore
-        result = _create_audio(text[:500])
+        result = _create_audio(text[:500], lang=lang)
         return {"ok": True, "file_url": result.get("file_url"), "engine": result.get("engine", "tone-fallback")}
     except Exception as e:
         return {"ok": False, "error": str(e)}

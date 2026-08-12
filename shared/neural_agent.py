@@ -51,17 +51,15 @@ def get_model_status() -> dict[str, Any]:
     from .neural_governor.hardware_profiler import quick_profile
     hw = quick_profile()
 
-    # Check if model is available in Ollama
+    # Check if a suitable model is available on the native engine
     available = False
     try:
-        import httpx
-        r = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=8)
-        if r.status_code == 200:
-            models = r.json().get("models", [])
-            available = any(m.get("name", "").startswith(model.split(":")[0]) for m in models)
-            if not available:
-                # Check exact match
-                available = any(m.get("name", "") == model for m in models)
+        from .native_engine import discovery
+        names = [m.get("id", "") for m in discovery.discover_models()]
+        if model:
+            available = any(n.startswith(model.split(":")[0]) or n == model for n in names)
+        else:
+            available = bool(names)
     except Exception:
         pass
 
@@ -346,14 +344,14 @@ def generate_proposal(intent: str, file_path: str = "", instructions: str = "") 
     from .agent_tools import _run_sync
     from .coder import _prefer_coder_model, _parse_spec
 
-    model = settings.self_evolution_model or _prefer_coder_model("ollama", None)
+    model = _prefer_coder_model("native", os.getenv("SHIMS_SELF_EVOLUTION_MODEL", ""))
 
     # If no file path given, ask the model to suggest one
     if not file_path:
         system = "You are SHIMS Neural Agent. Return STRICT JSON: {\"file_path\": \"relative/path.py\", \"reasoning\": \"why this file\"}."
         prompt = f"INTENT: {intent}\n\nWhich file in the SHIMS codebase should be modified? Suggest a relative path."
         try:
-            result = _run_sync(ask_ai(prompt, system=system, provider="ollama", model=model))
+            result = _run_sync(ask_ai(prompt, system=system, provider="native", model=model))
             spec = _parse_spec(result.text)
             file_path = spec.get("file_path", "")
         except Exception:
@@ -378,7 +376,7 @@ def generate_proposal(intent: str, file_path: str = "", instructions: str = "") 
     prompt = f"INTENT: {intent}\n\nFILE: {file_path}\n\nCURRENT CONTENT:\n```\n{current}\n```\n\nINSTRUCTIONS: {instructions}\n"
 
     try:
-        result = _run_sync(ask_ai(prompt, system=system, provider="ollama", model=model))
+        result = _run_sync(ask_ai(prompt, system=system, provider="native", model=model))
         spec = _parse_spec(result.text)
         files = spec.get("files", {})
         intent_text = spec.get("intent", intent)

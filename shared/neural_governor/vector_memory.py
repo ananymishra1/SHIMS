@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -130,6 +131,20 @@ def store_embedding(
     return True
 
 
+def _min_similarity() -> float:
+    try:
+        return float(os.getenv("SHIMS_VECTOR_MIN_SIM", "0.62"))
+    except Exception:
+        return 0.62
+
+
+def _scan_limit() -> int:
+    try:
+        return max(100, int(os.getenv("SHIMS_VECTOR_SCAN_LIMIT", "20000")))
+    except Exception:
+        return 20000
+
+
 def search_vectors(query: str, limit: int = 8) -> list[dict[str, Any]]:
     """Semantic search across stored embeddings (vectorized for speed)."""
     query_vec = embed_text(query)
@@ -137,7 +152,12 @@ def search_vectors(query: str, limit: int = 8) -> list[dict[str, Any]]:
         return []
 
     with _connect() as con:
-        rows = con.execute("SELECT id, source_type, source_id, embedding, text_content, metadata_json FROM vector_embeddings").fetchall()
+        # Bounded most-recent-first scan — an unbounded full-table SELECT makes
+        # every chat turn slower as the store grows.
+        rows = con.execute(
+            "SELECT id, source_type, source_id, embedding, text_content, metadata_json FROM vector_embeddings ORDER BY rowid DESC LIMIT ?",
+            (_scan_limit(),),
+        ).fetchall()
 
     if not rows:
         return []
@@ -155,7 +175,7 @@ def search_vectors(query: str, limit: int = 8) -> list[dict[str, Any]]:
         similarities = np.dot(embeddings, query_vec) / (norms * query_norm)
     similarities = np.nan_to_num(similarities, nan=0.0)
 
-    threshold = 0.5
+    threshold = _min_similarity()
     candidates = np.where(similarities > threshold)[0]
     if candidates.size == 0:
         return []

@@ -125,10 +125,9 @@ def test_v16_brain_stream_exceptions_end_as_ndjson_error(monkeypatch):
         yield omni._jsonl({"type": "meta", "session_id": "stream-test"})
         raise RuntimeError("simulated stream break")
 
-    monkeypatch.setattr(omni, "_brain_stream", broken_stream)
-    # Disable the fast direct-LLM lane so the request actually exercises the
-    # (broken) full brain stream and its error handling.
-    monkeypatch.setattr(omni, "_fast_chat_eligible", lambda req: False)
+    # The unified pipeline is the single dispatch path for all turns; breaking
+    # it mid-stream must still end the NDJSON response with an error envelope.
+    monkeypatch.setattr(omni, "_unified_chat_stream", broken_stream)
     client = TestClient(omni.app)
 
     with client.stream("POST", "/brain/turn", json={"message": "hello"}) as response:

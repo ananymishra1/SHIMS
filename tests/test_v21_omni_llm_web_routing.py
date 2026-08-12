@@ -11,28 +11,23 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_chat_search_uses_llm_focused_query_then_synthesizes_answer(monkeypatch):
-    calls = {"search_queries": [], "llm_prompts": []}
+def _tool_calling_stream(tool_name: str, tool_args: dict, answer: str):
+    """Fake brain-model streamer: calls the given tool on the first turn
+    (when tools are offered and no tool results are in the conversation yet),
+    then streams the synthesized answer on the follow-up turn."""
 
-    async def ready(provider, model):
-        return True
+    async def fake_stream(model, messages, tools, on_delta, **_):
+        if tools and not any("Tool results" in str(msg.get("content", "")) for msg in messages):
+            return {"content": "", "tool_calls": [{"function": {"name": tool_name, "arguments": tool_args}}]}
+        if on_delta:
+            await on_delta(answer)
+        return {"content": answer, "tool_calls": []}
 
-    async def fake_llm(provider, model, messages, allow_provider_web_search=False):
-        calls["llm_prompts"].append(messages[0]["content"])
-        if "web-search planner" in messages[0]["content"]:
-            return (
-                json.dumps(
-                    {
-                        "should_search": True,
-                        "primary_query": "GST e invoice India rules 2026",
-                        "queries": ["GST e invoice India rules 2026", "GST e invoice official India"],
-                        "intent": "regulatory",
-                        "user_task": "Explain the current GST e-invoice rule in India.",
-                    }
-                ),
-                "fixture-planner",
-            )
-        return ("Current GST e-invoice requirements depend on turnover and official CBIC/GSTN updates [1].", "fixture-answer")
+    return fake_stream
+
+
+def test_chat_search_uses_model_tool_call_then_synthesizes_answer(monkeypatch):
+    calls = {"search_queries": []}
 
     async def fake_search(query, max_results=6, provider=None, planned_query=None):
         calls["search_queries"].append(query)
@@ -45,9 +40,17 @@ def test_chat_search_uses_llm_focused_query_then_synthesizes_answer(monkeypatch)
             "query_plan": planned_query or {"primary_query": query, "variants": [query]},
         }
 
-    monkeypatch.setattr(main, "_provider_ready_for_llm", ready)
-    monkeypatch.setattr(main, "_run_llm", fake_llm)
     monkeypatch.setattr(main, "_web_search", fake_search)
+    # Native-only routing: provider=ollama resolves to the native engine.
+    monkeypatch.setattr(main, "_kick_native_load", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "shared.agent_loop._native_chat_stream",
+        _tool_calling_stream(
+            "web.search",
+            {"query": "GST e invoice India rules 2026"},
+            "Current GST e-invoice requirements depend on turnover and official CBIC/GSTN updates [1].",
+        ),
+    )
 
     c = TestClient(app)
     raw = "hey shims can you search the internet for what is the latest GST e invoice rule in India today"
@@ -56,9 +59,8 @@ def test_chat_search_uses_llm_focused_query_then_synthesizes_answer(monkeypatch)
 
     assert calls["search_queries"] == ["GST e invoice India rules 2026"]
     assert raw not in calls["search_queries"]
-    assert "fixture-answer" in body
+    assert "Current GST e-invoice requirements" in body
     assert "GST e invoice India rules 2026" in body
-    assert "web-search-synthesized" in body
 
 
 def test_llm_search_planner_can_veto_heuristic_latest_trigger(monkeypatch):
@@ -90,25 +92,6 @@ def test_llm_search_planner_can_veto_heuristic_latest_trigger(monkeypatch):
 def test_legacy_api_chat_uses_same_search_router(monkeypatch):
     calls = {"search_queries": []}
 
-    async def ready(provider, model):
-        return True
-
-    async def fake_llm(provider, model, messages, allow_provider_web_search=False):
-        if "web-search planner" in messages[0]["content"]:
-            return (
-                json.dumps(
-                    {
-                        "should_search": True,
-                        "primary_query": "fluconazole API India price",
-                        "queries": ["fluconazole API India price"],
-                        "intent": "market",
-                        "user_task": "Summarize current fluconazole API price evidence for India.",
-                    }
-                ),
-                "fixture-planner",
-            )
-        return ("Fluconazole API pricing needs supplier/date verification; the source below is only evidence [1].", "fixture-answer")
-
     async def fake_search(query, max_results=6, provider=None, planned_query=None):
         calls["search_queries"].append(query)
         return {
@@ -119,13 +102,21 @@ def test_legacy_api_chat_uses_same_search_router(monkeypatch):
             "query_plan": planned_query or {"primary_query": query, "variants": [query]},
         }
 
-    monkeypatch.setattr(main, "_provider_ready_for_llm", ready)
-    monkeypatch.setattr(main, "_run_llm", fake_llm)
     monkeypatch.setattr(main, "_web_search", fake_search)
+    # Native-only routing: provider=ollama resolves to the native engine.
+    monkeypatch.setattr(main, "_kick_native_load", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "shared.agent_loop._native_chat_stream",
+        _tool_calling_stream(
+            "web.search",
+            {"query": "fluconazole API India price"},
+            "Fluconazole API pricing needs supplier/date verification; the source below is only evidence [1].",
+        ),
+    )
 
     c = TestClient(app)
     data = c.post("/api/chat", json={"message": "search the web for latest fluconazole API price India", "web_mode": True, "provider": "ollama"}).json()
 
-    assert data["route"].startswith("web-search-synthesized")
     assert calls["search_queries"] == ["fluconazole API India price"]
     assert "Fluconazole API pricing" in data["answer"]
+    assert data["route"].endswith("-unified")

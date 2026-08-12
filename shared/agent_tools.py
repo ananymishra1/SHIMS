@@ -817,7 +817,8 @@ def _run_skill_learn(args: dict[str, Any]) -> dict[str, Any]:
     if not name or not instructions:
         return {"ok": False, "error": "skill.learn needs 'name' and 'instructions'"}
     sk = save_skill(name, instructions, body=str(args.get("body") or ""),
-                    tags=(args.get("tags") or ["learned"]), source="agent_loop")
+                    tags=(args.get("tags") or ["learned"]), source="agent_loop",
+                    created_from="agent_loop")
     return {"ok": True, "skill": {"id": sk["id"], "name": sk["name"]}}
 
 
@@ -841,6 +842,7 @@ def _run_skill_create_tool(args: dict[str, Any]) -> dict[str, Any]:
         tool_code=code,
         tags=(args.get("tags") or ["dynamic_tool", "learned"]),
         source="agent_loop",
+        created_from="agent_loop",
     )
     reg = register_all_skill_tools()
     return {"ok": True, "skill": {"id": sk["id"], "name": sk["name"]}, "registered": reg}
@@ -1581,12 +1583,12 @@ def _llm_rewrite_file(rel: str, current: str, instructions: str) -> str:
         except Exception:
             pass
 
-    # Fallback to local Ollama self-evolution model.
+    # Fallback to the native engine self-evolution model.
     from .ai import ask_ai
     from .coder import _prefer_coder_model
-    model = settings.self_evolution_model or _prefer_coder_model("ollama", None)
+    model = _prefer_coder_model("native", os.getenv("SHIMS_SELF_EVOLUTION_MODEL", ""))
     try:
-        result = _run_sync(ask_ai(prompt, system=system, provider="ollama", model=model))
+        result = _run_sync(ask_ai(prompt, system=system, provider="native", model=model))
         spec = _parse_spec(result.text)
         files = spec.get("files") or {}
         for _, content in files.items():
@@ -3766,3 +3768,224 @@ _register(Tool("amd.gpu_status", "Check AMD GPU acceleration status — DirectML
                _schema({}, []), _run_amd_gpu_status))
 _register(Tool("amd.optimize_model", "Suggest an AMD-optimized variant of a model for DirectML GPU inference.",
                _schema({"model": _S}, ["model"]), _run_amd_optimize_model))
+
+
+# --------------------------------------------------------------------------- #
+# Enterprise bridge tools — full awareness + CRUD over the SHIMS Enterprise
+# (ERP/MES/LIMS/QMS/DMS/RIM at SHIMS_ENTERPRISE_URL, X-Bridge-Token auth).
+# --------------------------------------------------------------------------- #
+
+def _run_enterprise_status(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import status
+    return status()
+
+
+def _run_enterprise_query(args: dict[str, Any]) -> dict[str, Any]:
+    """Awareness reads: dashboards, records, search, exports."""
+    from .enterprise_bridge import bridge_command, enterprise_get
+    what = str(args.get("what") or "summary").strip().lower()
+    if what == "summary":
+        return bridge_command("summary", {})
+    if what == "dashboard":
+        department = str(args.get("department") or "").strip()
+        if not department:
+            return {"ok": False, "error": "department required (executive|rd|qc|warehouse|production|procurement)"}
+        return bridge_command("list_dashboard", {"department": department})
+    if what == "records":
+        payload: dict[str, Any] = {"table": args.get("table", "")}
+        if args.get("where"):
+            payload["where"] = args["where"]
+        if args.get("limit"):
+            payload["limit"] = int(args["limit"])
+        if args.get("order_by"):
+            payload["order_by"] = args["order_by"]
+        return bridge_command("records.list", payload)
+    if what == "get":
+        return bridge_command("records.get", {"table": args.get("table", ""), "id": args.get("id")})
+    if what == "tables":
+        return bridge_command("records.tables", {})
+    if what == "search":
+        return bridge_command("corpus.search", {"query": args.get("query", ""), "limit": int(args.get("limit") or 10)})
+    if what == "overview":
+        return enterprise_get("/api/operating-system/overview")
+    if what == "export":
+        module = str(args.get("module") or "").strip()
+        if not module:
+            return {"ok": False, "error": "module required (see /api/export/modules on the enterprise)"}
+        return enterprise_get(f"/api/export/{module}/xlsx")
+    if what == "products":
+        return enterprise_get("/api/products")
+    return {"ok": False, "error": f"unknown query type '{what}' — use summary|dashboard|records|get|tables|search|overview|export|products"}
+
+
+def _run_enterprise_ingest(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import bridge_command, enterprise_post
+    mode = str(args.get("mode") or "bulk").strip().lower()
+    if mode == "bulk":
+        payload = args.get("payload")
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "payload object required for bulk ingest (source_system, messages/inventory/tally)"}
+        return enterprise_post("/api/enterprise/bulk-ingest", payload, timeout=300)
+    if mode == "folder":
+        folder = str(args.get("folder_path") or "").strip()
+        if not folder:
+            return {"ok": False, "error": "folder_path required for folder ingest"}
+        return bridge_command("ingest_documents", {
+            "folder_path": folder,
+            "target_module": args.get("target_module", ""),
+            "formatting_rules": args.get("formatting_rules", ""),
+        }, timeout=600)
+    if mode == "corpus":
+        folder = str(args.get("folder_path") or "").strip()
+        if not folder:
+            return {"ok": False, "error": "folder_path required for corpus import"}
+        return bridge_command("corpus.import_folder", {"folder": folder, "limit": int(args.get("limit") or 200)}, timeout=600)
+    return {"ok": False, "error": f"unknown ingest mode '{mode}' — use bulk|folder|corpus"}
+
+
+_CREATE_COMMANDS = {
+    "experiment": "create_experiment",
+    "procurement_request": "create_procurement_request",
+    "gst_invoice": "create_gst_invoice",
+    "ewaybill": "create_ewaybill",
+    "qms_record": "create_qms_record",
+    "deviation": "deviation",
+    "capa": "capa",
+    "change_control": "change_control",
+    "lims_sample": "create_lims_sample",
+    "ebr_step": "create_ebr_step",
+    "document": "create_document",
+    "quotation": "quotation",
+    "purchase_order": "purchase_order",
+    "vendor_registration": "vendor_registration",
+    "lab_notebook": "lab_notebook",
+    "sop": "sop",
+    "template": "create_template",
+    "rd_experiment_full": "rd.ingest_experiment",
+}
+
+
+def _run_enterprise_create(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import bridge_command
+    kind = str(args.get("kind") or "").strip()
+    if kind == "record":
+        return bridge_command("records.insert", {"table": args.get("table", ""), "fields": args.get("fields") or {}})
+    command = _CREATE_COMMANDS.get(kind)
+    if not command:
+        return {"ok": False, "error": f"unknown kind '{kind}' — use record or one of {sorted(_CREATE_COMMANDS)}"}
+    fields = args.get("fields")
+    if not isinstance(fields, dict):
+        return {"ok": False, "error": "fields object required"}
+    return bridge_command(command, fields)
+
+
+def _run_enterprise_update(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import bridge_command
+    table = str(args.get("table") or "").strip()
+    if not table:
+        return {"ok": False, "error": "table required"}
+    fields = args.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return {"ok": False, "error": "fields object required"}
+    return bridge_command("records.update", {"table": table, "id": args.get("id"), "fields": fields})
+
+
+def _run_enterprise_move(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import bridge_command
+    table = str(args.get("table") or "").strip()
+    if not table:
+        return {"ok": False, "error": "table required"}
+    fields = args.get("set_fields") or args.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return {"ok": False, "error": "set_fields object required (e.g. {\"location\": \"WH-2\"} or {\"status\": \"approved\"})"}
+    return bridge_command("records.move", {"table": table, "id": args.get("id"), "set_fields": fields})
+
+
+def _run_enterprise_delete(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import bridge_command
+    table = str(args.get("table") or "").strip()
+    if not table:
+        return {"ok": False, "error": "table required"}
+    return bridge_command("records.delete", {"table": table, "id": args.get("id")})
+
+
+def _run_enterprise_sync_brain(args: dict[str, Any]) -> dict[str, Any]:
+    from .enterprise_bridge import sync_brain_awareness
+    return sync_brain_awareness()
+
+
+def _enterprise_gated(args: dict[str, Any]) -> str:
+    return "gated"  # writes to the enterprise always go through the approval gate
+
+
+_register(Tool("enterprise.status", "Enterprise bridge status: health, paired state, and the live capability summary (low stock, blocked batches, open procurement, pending COA, active experiments) of the SHIMS Enterprise.",
+               _schema({}, []), _run_enterprise_status))
+_register(Tool("enterprise.query", "Read anything from the enterprise. what=summary|dashboard(department)|records(table,where,limit)|get(table,id)|tables|search(query)|overview|export(module)|products.",
+               _schema({"what": _S, "department": _S, "table": _S, "id": _I, "where": _O, "limit": _I, "order_by": _S, "query": _S, "module": _S}, ["what"]),
+               _run_enterprise_query))
+_register(Tool("enterprise.ingest", "Ingest lots of data into the enterprise. mode=bulk (messages/vendors/tally payload), folder (extract a folder of documents into a module), corpus (BMR/SOP/monograph folder → chemistry corpus).",
+               _schema({"mode": _S, "payload": _O, "folder_path": _S, "target_module": _S, "formatting_rules": _S, "limit": _I}, ["mode"]),
+               _run_enterprise_ingest, _enterprise_gated))
+_register(Tool("enterprise.create", "Create enterprise records: experiments, procurement requests, GST invoices, ewaybills, QMS records (deviation/CAPA/change control), LIMS samples, eBR steps, business documents (quotation/PO/vendor registration/SOP/lab notebook), templates, full R&D experiments, or raw record insert (kind=record with table+fields).",
+               _schema({"kind": _S, "fields": _O, "table": _S}, ["kind"]),
+               _run_enterprise_create, _enterprise_gated))
+_register(Tool("enterprise.update", "Update any enterprise record: table + id + fields (validated against the table schema).",
+               _schema({"table": _S, "id": _I, "fields": _O}, ["table", "id", "fields"]),
+               _run_enterprise_update, _enterprise_gated))
+_register(Tool("enterprise.move", "Move/reassign an enterprise record (stock to another location, record to another status/department): table + id + set_fields.",
+               _schema({"table": _S, "id": _I, "set_fields": _O, "fields": _O}, ["table", "id"]),
+               _run_enterprise_move, _enterprise_gated))
+_register(Tool("enterprise.delete", "Delete an enterprise record: table + id. Audited on the enterprise side; users and audit_log are never deletable.",
+               _schema({"table": _S, "id": _I}, ["table", "id"]),
+               _run_enterprise_delete, _enterprise_gated))
+_register(Tool("enterprise.sync_brain", "Refresh SHIMS's awareness of the enterprise: pulls the live summary/overview/connector state into omni-brain knowledge so chat answers know what the enterprise holds.",
+               _schema({}, []), _run_enterprise_sync_brain))
+
+
+# --------------------------------------------------------------------------- #
+# Enterprise + Director Cockpit process control
+# (start/stop the standalone Enterprise app, open/refresh the Director Cockpit).
+# --------------------------------------------------------------------------- #
+
+def _run_enterprise_start(args: dict[str, Any]) -> dict[str, Any]:
+    from .shims_enterprise import start
+    return start(wait=True)
+
+
+def _run_enterprise_stop(args: dict[str, Any]) -> dict[str, Any]:
+    from .shims_enterprise import stop
+    return stop(wait=True)
+
+
+def _run_enterprise_restart(args: dict[str, Any]) -> dict[str, Any]:
+    from .shims_enterprise import restart
+    return restart(wait=True)
+
+
+def _run_director_status(args: dict[str, Any]) -> dict[str, Any]:
+    from .director_cockpit import status
+    return status()
+
+
+def _run_director_open(args: dict[str, Any]) -> dict[str, Any]:
+    from .director_cockpit import open_cockpit
+    return open_cockpit()
+
+
+def _run_director_refresh(args: dict[str, Any]) -> dict[str, Any]:
+    from .director_cockpit import refresh_snapshot
+    return refresh_snapshot()
+
+
+_register(Tool("enterprise.start", "Start the paired SHIMS Enterprise app process (ERP/MES/LIMS/QMS/DMS/RIM on 127.0.0.1:8020). No-op if it is already running.",
+               _schema({}, []), _run_enterprise_start, _enterprise_gated))
+_register(Tool("enterprise.stop", "Stop the paired SHIMS Enterprise app process.",
+               _schema({}, []), _run_enterprise_stop, _enterprise_gated))
+_register(Tool("enterprise.restart", "Restart the paired SHIMS Enterprise app process.",
+               _schema({}, []), _run_enterprise_restart, _enterprise_gated))
+_register(Tool("director.status", "Check the Director Cockpit snapshot state: whether snapshot.json exists, how stale it is, and the cockpit root path.",
+               _schema({}, []), _run_director_status))
+_register(Tool("director.open", "Open the Director Cockpit dashboard in the default browser.",
+               _schema({}, []), _run_director_open))
+_register(Tool("director.refresh", "Regenerate the Director Cockpit snapshot.json by running its refresh_snapshot.py script.",
+               _schema({}, []), _run_director_refresh, _enterprise_gated))

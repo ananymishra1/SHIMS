@@ -162,15 +162,27 @@ def _system_info() -> dict[str, Any]:
     }
 
 
-def _find_file(name: str, root: str = "C:\\\\") -> dict[str, Any]:
-    system = platform.system()
+def _find_file(name: str, root: str = "C:\\") -> dict[str, Any]:
     try:
-        if system == "Windows":
-            cmd = f'where /r "{root}" {name}'
+        root_path = Path(root).expanduser().resolve()
+        if not root_path.exists():
+            return {"ok": False, "error": f"Root path does not exist: {root}"}
+        # Convert simple wildcards to glob syntax; exact names match too.
+        pattern = name.replace("\\", "/").replace("?", "?").replace("*", "*")
+        matches: list[str] = []
+        limit = 50
+        if "*" in pattern or "?" in pattern:
+            for p in root_path.rglob(pattern):
+                matches.append(str(p))
+                if len(matches) >= limit:
+                    break
         else:
-            cmd = f'find "{root}" -name "{name}" 2>/dev/null | head -20'
-        result = _run_shell(cmd, timeout=120)
-        return {"ok": True, "matches": [line for line in (result.get("stdout") or "").splitlines() if line.strip()]}
+            for p in root_path.rglob("*"):
+                if p.name.lower() == pattern.lower():
+                    matches.append(str(p))
+                    if len(matches) >= limit:
+                        break
+        return {"ok": True, "matches": matches}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -190,7 +202,7 @@ async def _handle_command(cmd: dict[str, Any]) -> dict[str, Any]:
     if t == "system_info":
         return {"ok": True, "type": "system_info_result", "result": _system_info()}
     if t == "find_file":
-        return {"ok": True, "type": "find_file_result", "result": _find_file(cmd.get("name", ""), cmd.get("root", "C:\\\\"))}
+        return {"ok": True, "type": "find_file_result", "result": _find_file(cmd.get("name", ""), cmd.get("root", "C:\\"))}
     return {"ok": False, "error": f"Unknown command type: {t}"}
 
 
@@ -226,7 +238,8 @@ def main() -> None:
     bound_handler = lambda ws: _bridge_handler(ws, args.token)  # noqa: E731
 
     async def run_server() -> None:
-        async with websockets.serve(bound_handler, args.host, args.port):  # type: ignore[no-untyped-call]
+        # Screenshots and file reads can exceed the default 1 MiB frame limit.
+        async with websockets.serve(bound_handler, args.host, args.port, max_size=16 * 1024 * 1024):  # type: ignore[no-untyped-call]
             print(f"[bridge] SHIMS Desktop Bridge listening on ws://{args.host}:{args.port}")
             print(f"[bridge] Token: {'*' * len(args.token)}")
             await asyncio.Future()  # run forever

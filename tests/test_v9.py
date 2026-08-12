@@ -28,9 +28,26 @@ def test_media_route_creates_real_file():
     assert data['type'] == 'pdf'
     assert data['url'].endswith('.pdf')
 
-def test_chat_tool_first_route():
+def test_chat_tool_first_route(monkeypatch):
+    """Media requests are routed by the brain model itself: it calls the
+    media.create tool and the artifact comes back as a media_result event."""
+    async def fake_tool_stream(model, messages, tools, on_delta, **kw):
+        # First turn (tools offered, no tool results yet): call media.create.
+        if tools and not any("Tool results" in str(m.get("content", "")) for m in messages):
+            return {"content": "", "tool_calls": [
+                {"function": {"name": "media.create", "arguments": {"kind": "image", "prompt": "a panda relaxing"}}}
+            ]}
+        # Synthesis turn after the tool result.
+        if on_delta:
+            await on_delta("Here is your image of a panda relaxing.")
+        return {"content": "Here is your image of a panda relaxing.", "tool_calls": []}
+
+    # Native-only routing: provider=ollama resolves to the native engine.
+    monkeypatch.setattr("shared.agent_loop._native_chat_stream", fake_tool_stream)
+    import backend.app.main as m
+    monkeypatch.setattr(m, "_kick_native_load", lambda *a, **k: None)
     with client.stream('POST', '/brain/turn', json={'message': 'create an image of a panda relaxing', 'provider': 'ollama', 'model': 'missing:model'}) as r:
         assert r.status_code == 200
         body = ''.join(r.iter_text())
-    assert 'tool:image' in body
+    assert 'media.create' in body
     assert 'media_result' in body

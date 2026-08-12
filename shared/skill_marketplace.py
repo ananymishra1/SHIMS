@@ -156,6 +156,7 @@ def install(slug: str) -> dict[str, Any]:
         body=item.get("body", ""),
         tags=item.get("tags", []) + ["marketplace"],
         source="marketplace",
+        created_from="marketplace",
     )
     return {"ok": True, "skill": saved}
 
@@ -197,6 +198,7 @@ def import_pack(pack: dict[str, Any], overwrite: bool = False) -> dict[str, Any]
             tags=(s.get("tags") or []) + ["imported"],
             pinned=bool(s.get("pinned", False)),
             source="import",
+            created_from="import",
         )
         count += 1
     return {"ok": True, "imported": count}

@@ -91,6 +91,7 @@ def plan_to_skill(plan_id: str) -> dict[str, Any]:
         body=body,
         tags=["plan", "learned"] + keywords[:5],
         source="plan_learning",
+        created_from="plan_learning",
         pinned=False,
         weight=1.0,
     )

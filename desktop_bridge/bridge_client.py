@@ -38,7 +38,8 @@ class DesktopBridge:
 
     async def _send(self, cmd: dict[str, Any]) -> dict[str, Any]:
         try:
-            async with websockets.connect(self.uri, open_timeout=self.timeout) as ws:  # type: ignore[no-untyped-call]
+            # Allow large screenshots/file payloads (default 1 MiB is too small).
+            async with websockets.connect(self.uri, open_timeout=self.timeout, max_size=16 * 1024 * 1024) as ws:  # type: ignore[no-untyped-call]
                 cmd["token"] = self.token
                 await ws.send(json.dumps(cmd))
                 raw = await asyncio.wait_for(ws.recv(), timeout=self.timeout)

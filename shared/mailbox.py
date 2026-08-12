@@ -20,7 +20,10 @@ from .trust_contract import build_trust, evidence_from_mailbox_digest
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MAILBOX_DB = Path(os.getenv("SHIMS_MAILBOX_DB", ROOT_DIR / "data" / "state" / "shims_mailbox.sqlite3")).resolve()
-DEFAULT_GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.metadata"]
+DEFAULT_GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
 HEADER_NAMES = ["From", "To", "Cc", "Subject", "Date"]
 
 
@@ -204,6 +207,16 @@ def gmail_send_enabled() -> bool:
     return bool(set(gmail_scopes()) & GMAIL_SEND_SCOPES)
 
 
+def email_direct_send_allowed() -> bool:
+    """Whether SHIMS may send email directly instead of creating a draft.
+
+    OFF by default. Per mailbox_policy(), SHIMS creates drafts for the user to
+    review and send manually — this is what prevents autonomous agent loops from
+    firing off uncalled-for mail. Set ``SHIMS_ALLOW_EMAIL_SEND=1`` only for a
+    deliberate, user-initiated send (e.g. an explicit "Send" button)."""
+    return (os.getenv("SHIMS_ALLOW_EMAIL_SEND", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _store_token(payload: dict[str, Any], account: str = "me") -> None:
     """Persist an OAuth token response. Refresh tokens are kept across refreshes."""
     expires_in = int(payload.get("expires_in", 0) or 0)
@@ -325,6 +338,26 @@ def send_gmail_message(
     import base64
     from email.message import EmailMessage
 
+    # Safety chokepoint: every send path (mailbox.send / mail.compose /
+    # mail.assist.compose tools, reply_to_gmail_message, and the HTTP send
+    # endpoint) funnels through here. Unless direct send is explicitly enabled,
+    # create a draft instead so nothing leaves the account without review.
+    if not email_direct_send_allowed():
+        draft = create_gmail_draft(
+            to=to, subject=subject, body=body, cc=cc,
+            thread_id=thread_id, in_reply_to=in_reply_to, account=account,
+        )
+        if draft.get("ok"):
+            draft["status"] = "draft_saved_send_blocked"
+            draft["send_blocked"] = True
+            draft["message"] = (
+                "SHIMS is in draft-only mode: a Gmail draft was created for you to "
+                "review and send manually. Set SHIMS_ALLOW_EMAIL_SEND=1 to permit direct send."
+            )
+            log_event("gmail_send_blocked_draft", route="mailbox:gmail_send", provider="gmail",
+                      ok=True, message=subject, metadata={"to": to, "draft_id": draft.get("draft_id")})
+        return draft
+
     if not gmail_send_enabled():
         return {"ok": False, "status": "scope_required",
                 "message": "Configure SHIMS_GMAIL_SCOPES to include gmail.send or gmail.compose to send mail.",
@@ -384,17 +417,197 @@ def reply_to_gmail_message(message_id: str, body: str, account: str = "me") -> d
     )
 
 
+def gmail_read_message(message_id: str, account: str = "me") -> dict[str, Any]:
+    """Fetch full message content (headers + body) from the Gmail API."""
+    token = get_access_token(account)
+    if not token:
+        return {"ok": False, "status": "needs_oauth", "auth": gmail_auth_url(),
+                "message": "No Gmail access token. Complete OAuth consent first."}
+    try:
+        with httpx.Client(timeout=20) as client:
+            resp = client.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params=[("format", "full")],
+            )
+        if resp.status_code != 200:
+            return {"ok": False, "status": "read_error", "http_status": resp.status_code,
+                    "message": resp.text[:500]}
+        data = resp.json()
+    except Exception as exc:
+        return {"ok": False, "status": "exception", "message": str(exc)}
+    hd = _headers_to_dict(data.get("payload") or {})
+    body = _extract_body(data.get("payload") or {})
+    attachments = _extract_attachments(data.get("payload") or {})
+    return {
+        "ok": True,
+        "id": data.get("id"),
+        "thread_id": data.get("threadId"),
+        "labels": data.get("labelIds") or [],
+        "snippet": data.get("snippet") or "",
+        "from": hd.get("from", ""),
+        "to": hd.get("to", ""),
+        "cc": hd.get("cc", ""),
+        "subject": hd.get("subject", ""),
+        "date": hd.get("date", ""),
+        "body": body[:8000],
+        "attachments": attachments,
+    }
+
+
+def _extract_body(payload: dict[str, Any]) -> str:
+    """Recursively extract the plaintext body from a Gmail message payload."""
+    import base64
+    mime = (payload.get("mimeType") or "").lower()
+    if mime == "text/plain":
+        b64 = (payload.get("body") or {}).get("data") or ""
+        if b64:
+            try:
+                return base64.urlsafe_b64decode(b64 + "==").decode("utf-8", errors="replace")
+            except Exception:
+                return ""
+    for part in payload.get("parts") or []:
+        text = _extract_body(part)
+        if text:
+            return text
+    return ""
+
+
+def _extract_attachments(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract attachment metadata from a Gmail message payload."""
+    attachments: list[dict[str, str]] = []
+    for part in payload.get("parts") or []:
+        filename = part.get("filename") or ""
+        body = part.get("body") or {}
+        att_id = body.get("attachmentId") or ""
+        if filename and att_id:
+            attachments.append({
+                "filename": filename,
+                "attachment_id": att_id,
+                "mime_type": part.get("mimeType") or "",
+                "size": str(body.get("size") or 0),
+            })
+        nested = _extract_attachments(part)
+        attachments.extend(nested)
+    return attachments
+
+
+def download_gmail_attachment(
+    message_id: str,
+    attachment_id: str,
+    filename: str,
+    account: str = "me",
+) -> dict[str, Any]:
+    """Download a Gmail attachment and save it to the SHIMS downloads folder."""
+    import base64
+
+    token = get_access_token(account)
+    if not token:
+        return {"ok": False, "status": "needs_oauth", "auth": gmail_auth_url(),
+                "message": "No Gmail access token. Complete OAuth consent first."}
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/attachments/{attachment_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code != 200:
+            return {"ok": False, "status": "download_error", "http_status": resp.status_code,
+                    "message": resp.text[:500]}
+        data = resp.json()
+    except Exception as exc:
+        return {"ok": False, "status": "exception", "message": str(exc)}
+    b64_data = data.get("data") or ""
+    if not b64_data:
+        return {"ok": False, "status": "empty", "message": "Attachment data is empty."}
+    try:
+        content = base64.urlsafe_b64decode(b64_data + "==")
+    except Exception as exc:
+        return {"ok": False, "status": "decode_error", "message": str(exc)}
+    downloads_dir = ROOT_DIR / "data" / "downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = "".join(c if c.isalnum() or c in ".-_ " else "_" for c in filename)[:200] or "attachment"
+    save_path = downloads_dir / safe_name
+    counter = 1
+    while save_path.exists():
+        stem = save_path.stem
+        suffix = save_path.suffix
+        save_path = downloads_dir / f"{stem}_{counter}{suffix}"
+        counter += 1
+    save_path.write_bytes(content)
+    log_event("gmail_attachment_downloaded", route="mailbox:attachment", provider="gmail", ok=True,
+              message=filename, metadata={"message_id": message_id, "size": len(content), "path": str(save_path)})
+    return {"ok": True, "status": "downloaded", "filename": safe_name, "path": str(save_path),
+            "size": len(content)}
+
+
+def create_gmail_draft(
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    cc: str = "",
+    thread_id: str | None = None,
+    in_reply_to: str | None = None,
+    account: str = "me",
+) -> dict[str, Any]:
+    """Create a Gmail draft without sending. The user reviews and sends manually."""
+    import base64
+    from email.message import EmailMessage
+
+    token = get_access_token(account)
+    if not token:
+        return {"ok": False, "status": "needs_oauth", "auth": gmail_auth_url(),
+                "message": "No Gmail access token. Complete OAuth consent first."}
+    if not (to and (subject or body)):
+        return {"ok": False, "status": "invalid", "message": "Recipient and subject/body are required."}
+
+    msg = EmailMessage()
+    msg["To"] = to
+    if cc:
+        msg["Cc"] = cc
+    msg["Subject"] = subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    msg.set_content(body)
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+    draft_payload: dict[str, Any] = {"message": {"raw": raw}}
+    if thread_id:
+        draft_payload["message"]["threadId"] = thread_id
+    try:
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(
+                "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+                headers={"Authorization": f"Bearer {token}"},
+                json=draft_payload,
+            )
+        if resp.status_code not in (200, 201):
+            return {"ok": False, "status": "draft_error", "http_status": resp.status_code,
+                    "message": resp.text[:500]}
+        result = resp.json()
+    except Exception as exc:
+        return {"ok": False, "status": "exception", "message": str(exc)}
+    log_event("gmail_draft_created", route="mailbox:gmail_draft", provider="gmail", ok=True,
+              message=subject, metadata={"to": to, "draft_id": result.get("id"), "thread_id": thread_id})
+    return {"ok": True, "status": "draft_saved", "draft_id": result.get("id"),
+            "message_id": result.get("message", {}).get("id"),
+            "thread_id": result.get("message", {}).get("threadId")}
+
+
 def mailbox_policy() -> dict[str, Any]:
     return {
         "ok": True,
         "product_positioning": "SHIMS mailbox is a user-facing productivity assistant for triage, summaries, tasks, and enterprise follow-up.",
         "gmail_access": "No hidden Gmail access. The user must explicitly authorize OAuth scopes before sync.",
-        "default_scope": DEFAULT_GMAIL_SCOPES[0],
+        "send_policy": "SHIMS never sends email directly. The mail.draft tool creates drafts for the user to review and send manually.",
+        "default_scopes": DEFAULT_GMAIL_SCOPES,
         "limited_use": [
             "Use Gmail-derived data only for visible mailbox, task, memory, and user-requested assistant features.",
             "Do not sell, transfer, or use Gmail data for advertising.",
             "Do not train a shared model on Gmail data; keep retrieval local/user-specific.",
             "Expose delete/export paths for mailbox and capture data.",
+            "Attachments are downloaded to data/downloads/ locally; never forwarded externally.",
         ],
         "play_store_data_safety": {
             "email_subject_sender_headers": "Emails / app functionality / optional",
@@ -552,7 +765,9 @@ def get_mail_message(message_id: str) -> dict[str, Any] | None:
 
 
 def list_mail_messages(limit: int = 50, provider: str | None = None) -> list[dict[str, Any]]:
-    limit = max(1, min(int(limit or 50), 200))
+    # Cap raised from 200: default callers pass small limits anyway, but the
+    # vendor inventory mines the full local history for commercial mail.
+    limit = max(1, min(int(limit or 50), 5000))
     with _connect() as con:
         if provider:
             rows = con.execute("SELECT * FROM mailbox_messages WHERE provider=? ORDER BY COALESCE(received_at, created_at) DESC LIMIT ?", (_clean(provider, 80), limit)).fetchall()
@@ -622,38 +837,53 @@ def sync_gmail_metadata(*, access_token: str | None = None, query: str = "", max
     token = (access_token or get_access_token() or "").strip()
     if not token:
         return {"ok": False, "status": "needs_oauth", "auth": gmail_auth_url(), "message": "No Gmail access token configured."}
-    max_results = max(1, min(int(max_results or 10), 25))
+    # Paginate: the messages list endpoint caps at 100 per page; callers like
+    # the vendor inventory need real history windows (25 was a hard clamp).
+    max_results = max(1, min(int(max_results or 10), 500))
     headers = {"Authorization": f"Bearer {token}"}
-    params: list[tuple[str, str]] = [("maxResults", str(max_results))]
-    if query.strip():
-        params.append(("q", query.strip()))
     stored: list[dict[str, Any]] = []
+    page_token: str | None = None
     with httpx.Client(timeout=20) as client:
-        listed = client.get("https://gmail.googleapis.com/gmail/v1/users/me/messages", headers=headers, params=params)
-        listed.raise_for_status()
-        for item in (listed.json().get("messages") or [])[:max_results]:
-            message_id = item.get("id")
-            if not message_id:
-                continue
-            detail_params: list[tuple[str, str]] = [("format", "metadata")]
-            detail_params += [("metadataHeaders", h) for h in HEADER_NAMES]
-            detail = client.get(f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}", headers=headers, params=detail_params)
-            detail.raise_for_status()
-            data = detail.json()
-            hd = _headers_to_dict(data.get("payload") or {})
-            saved = save_mail_message(
-                provider="gmail",
-                external_id=data.get("id") or message_id,
-                thread_id=data.get("threadId") or "",
-                sender=hd.get("from", ""),
-                recipients=", ".join(x for x in [hd.get("to", ""), hd.get("cc", "")] if x),
-                subject=hd.get("subject", "(no subject)"),
-                snippet=data.get("snippet") or "",
-                body="",
-                labels=data.get("labelIds") or [],
-                received_at=_date_to_iso(hd.get("date", "")),
-                source_url=f"https://mail.google.com/mail/u/0/#inbox/{data.get('id') or message_id}",
-                metadata={"historyId": data.get("historyId"), "sizeEstimate": data.get("sizeEstimate")},
-            )
-            stored.append(saved["message"])
+        while len(stored) < max_results:
+            params: list[tuple[str, str]] = [("maxResults", str(min(100, max_results - len(stored))))]
+            if query.strip():
+                params.append(("q", query.strip()))
+            if page_token:
+                params.append(("pageToken", page_token))
+            listed = client.get("https://gmail.googleapis.com/gmail/v1/users/me/messages", headers=headers, params=params)
+            listed.raise_for_status()
+            payload = listed.json()
+            batch = payload.get("messages") or []
+            if not batch:
+                break
+            for item in batch:
+                if len(stored) >= max_results:
+                    break
+                message_id = item.get("id")
+                if not message_id:
+                    continue
+                detail_params: list[tuple[str, str]] = [("format", "metadata")]
+                detail_params += [("metadataHeaders", h) for h in HEADER_NAMES]
+                detail = client.get(f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}", headers=headers, params=detail_params)
+                detail.raise_for_status()
+                data = detail.json()
+                hd = _headers_to_dict(data.get("payload") or {})
+                saved = save_mail_message(
+                    provider="gmail",
+                    external_id=data.get("id") or message_id,
+                    thread_id=data.get("threadId") or "",
+                    sender=hd.get("from", ""),
+                    recipients=", ".join(x for x in [hd.get("to", ""), hd.get("cc", "")] if x),
+                    subject=hd.get("subject", "(no subject)"),
+                    snippet=data.get("snippet") or "",
+                    body="",
+                    labels=data.get("labelIds") or [],
+                    received_at=_date_to_iso(hd.get("date", "")),
+                    source_url=f"https://mail.google.com/mail/u/1/#all/{data.get('threadId') or data.get('id') or message_id}",
+                    metadata={"historyId": data.get("historyId"), "sizeEstimate": data.get("sizeEstimate")},
+                )
+                stored.append(saved["message"])
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                break
     return {"ok": True, "provider": "gmail", "stored": len(stored), "messages": stored, "query": query}

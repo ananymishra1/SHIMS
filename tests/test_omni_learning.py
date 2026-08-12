@@ -22,7 +22,7 @@ def test_ai_health_endpoint():
     r = client.get("/api/ai/health")
     assert r.status_code == 200
     data = r.json()
-    assert "providers" in data and "ollama" in data["providers"]
+    assert "providers" in data and "native" in data["providers"]
     assert isinstance(data.get("ok"), bool)
 
 

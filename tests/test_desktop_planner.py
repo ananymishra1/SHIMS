@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from shared.desktop_planner import _fallback_plan, _llm_plan_steps, plan_from_goal
 
@@ -21,22 +21,12 @@ def test_fallback_plan_single_goal():
 
 
 def test_llm_plan_steps_parses_and_filters_steps():
-    fake_response = MagicMock()
-    fake_response.json.return_value = {
-        "message": {
-            "content": json.dumps([
-                {"step_id": "s1", "description": "Search web", "tool_hint": "web.search", "depends_on": []},
-                {"step_id": "s2", "description": "Summarize", "tool_hint": "agent.run", "depends_on": ["s1"]},
-                {"description": "Bad tool", "tool_hint": "invalid.tool", "depends_on": []},
-            ])
-        }
-    }
-    fake_client = MagicMock()
-    fake_client.__enter__ = MagicMock(return_value=fake_client)
-    fake_client.__exit__ = MagicMock(return_value=False)
-    fake_client.post.return_value = fake_response
-
-    with patch("shared.desktop_planner.httpx.Client", return_value=fake_client):
+    llm_json = json.dumps([
+        {"step_id": "s1", "description": "Search web", "tool_hint": "web.search", "depends_on": []},
+        {"step_id": "s2", "description": "Summarize", "tool_hint": "agent.run", "depends_on": ["s1"]},
+        {"description": "Bad tool", "tool_hint": "invalid.tool", "depends_on": []},
+    ])
+    with patch("shared.desktop_planner.feature_chat", return_value=llm_json):
         steps = _llm_plan_steps("research a topic and summarize")
 
     assert len(steps) == 3
@@ -45,9 +35,8 @@ def test_llm_plan_steps_parses_and_filters_steps():
     assert steps[2]["tool_hint"] == "agent.run"  # invalid normalized to default
 
 
-def test_llm_plan_steps_returns_empty_on_connection_error():
-    with patch("shared.desktop_planner.httpx.Client") as mock_cls:
-        mock_cls.side_effect = Exception("connection refused")
+def test_llm_plan_steps_returns_empty_on_engine_failure():
+    with patch("shared.desktop_planner.feature_chat", return_value=""):
         steps = _llm_plan_steps("some goal")
     assert steps == []
 

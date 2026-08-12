@@ -4,7 +4,7 @@ export const shimsOmniEvolutionProbe = Object.freeze({
   capability: 'self-evolution can add or update frontend code through the guarded pipeline',
   feature: 'self-evolution',
   revision: "pytest-capability-v1",
-  generatedAt: "2026-07-13T18:05:46.570016"
+  generatedAt: "2026-08-05T12:55:14.223024"
 });
 
 if (typeof window !== 'undefined') {

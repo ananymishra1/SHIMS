@@ -110,6 +110,28 @@ SERVICES = {
 }
 
 
+def _service_available(name: str) -> bool:
+    """Whether a service's target actually exists on this machine.
+
+    Prevents the monitor loop from crash-restarting services every tick when
+    their target is absent: the enterprise app was folded into omni (no
+    ``shims_enterprise`` package), Ollama isn't used in native-only mode, and
+    the second factory instance only runs when ``.env.local`` is present.
+    """
+    if name == "ollama":
+        return OLLAMA_EXE.exists()
+    if name == "enterprise_a":
+        return (ROOT / "shims_enterprise").is_dir()
+    if name == "factory_b":
+        return (ROOT / ".env.local").exists()
+    return True
+
+
+# Only manage services that are installed here. omni_a (the SHIMS backend) is
+# always kept; the rest self-enable when their target reappears.
+SERVICES = {name: cfg for name, cfg in SERVICES.items() if _service_available(name)}
+
+
 def _load_state() -> dict[str, int | None]:
     if STATE_FILE.exists():
         try:

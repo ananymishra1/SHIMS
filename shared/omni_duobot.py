@@ -9,7 +9,6 @@ Storage:
 from __future__ import annotations
 
 import asyncio
-import httpx
 import json
 import os
 import time
@@ -68,7 +67,7 @@ COUNCIL_PERSONAS: dict[str, dict[str, Any]] = {
     },
     "local": {
         "name": "Factory",
-        "provider": "ollama",
+        "provider": "native",
         "model": "",
         "description": "The offline Local Factory — privacy-first, cost-aware, CPU/GPU local. Keeps answers grounded in what can run without cloud access.",
     },
@@ -275,8 +274,8 @@ def _now() -> float:
 
 
 def _default_settings() -> dict[str, Any]:
-    """Default AI settings for DuoBot. Primary uses global cloud provider; local uses Ollama default."""
-    provider = settings.ai_provider or "ollama"
+    """Default AI settings for DuoBot. Primary uses global cloud provider; local uses the native engine."""
+    provider = settings.ai_provider or "native"
     model = ""
     if provider == "kimi":
         from .kimi_model_helper import normalize_kimi_model
@@ -290,7 +289,7 @@ def _default_settings() -> dict[str, Any]:
     return {
         "primary_provider": provider,
         "primary_model": model,
-        "local_model": os.getenv("SHIMS_FACTORY_DEFAULT_MODEL", "qwen2.5:3b"),
+        "local_model": os.getenv("SHIMS_FACTORY_DEFAULT_MODEL", ""),
         "local_temperature": 0.6,
         "council_auto_execute": os.getenv("SHIMS_DUOBOT_COUNCIL_AUTO_EXECUTE", "false").lower() in {"1", "true", "yes", "on"},
         "council_members": ["primary", "gemini", "anthropic", "openai", "local"],
@@ -499,7 +498,7 @@ async def check_capabilities() -> dict[str, Any]:
     started = time.perf_counter()
     primary_model = (
         settings.kimi_model if (settings.ai_provider or "").lower() == "kimi"
-        else settings.ollama_model
+        else _native_loaded_model() or "native"
     )
     primary: dict[str, Any] = {
         "ok": True,
@@ -613,19 +612,26 @@ def _build_history(conv: dict[str, Any], speaker: str) -> list[dict[str, Any]]:
     return history
 
 
-def _call_ollama_chat_sync(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    """Direct Ollama chat call for the local-fallback path."""
-    host = os.getenv("OLLAMA_BASE_URL", str(settings.ollama_base_url)).rstrip("/")
-    url = f"{host}/api/chat"
-    payload = {"model": model, "messages": messages, "stream": False, "options": {"temperature": 0.6}}
+def _native_loaded_model() -> str:
+    """Currently loaded native-engine GGUF id, or "" if the engine is down."""
     try:
-        with httpx.Client(timeout=120.0) as client:
-            r = client.post(url, json=payload)
-            r.raise_for_status()
-            data = r.json()
-            return {"ok": True, "content": (data.get("message") or {}).get("content", "") or data.get("response", "")}
+        from .native_engine import get_engine
+        return get_engine().loaded_model_id()
+    except Exception:
+        return ""
+
+
+def _call_native_chat_sync(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Direct native-engine chat call for the local-fallback path."""
+    from .local_llm import feature_chat
+    try:
+        content = feature_chat(messages, model=model or None, max_tokens=1024,
+                               temperature=0.6, feature="duobot")
+        if content:
+            return {"ok": True, "content": content}
+        return {"ok": False, "content": "", "error": "native engine unavailable"}
     except Exception as exc:
-        return {"ok": False, "content": f"Ollama error: {exc}", "error": str(exc)}
+        return {"ok": False, "content": f"Native engine error: {exc}", "error": str(exc)}
 
 
 def _build_primary_prompt(conv: dict[str, Any]) -> tuple[str, str]:
@@ -652,7 +658,7 @@ async def _primary_say(conv: dict[str, Any]) -> dict[str, Any]:
     mode = conv.get("mode", "free")
     system, prompt = _build_primary_prompt(conv)
     duo_settings = load_settings()
-    provider = duo_settings.get("primary_provider") or settings.ai_provider or "ollama"
+    provider = duo_settings.get("primary_provider") or settings.ai_provider or "native"
     model = duo_settings.get("primary_model", "")
     if provider == "kimi" and not model:
         from .kimi_model_helper import normalize_kimi_model
@@ -675,17 +681,17 @@ async def _primary_say(conv: dict[str, Any]) -> dict[str, Any]:
             used_provider = f"{provider}:error"
             used_model = str(exc)[:80]
 
-    # Fallback to local Ollama if cloud did not produce usable text.
+    # Fallback to the native engine if cloud did not produce usable text.
     if not content.strip():
-        fallback_model = os.getenv("SHIMS_DUOBOT_FALLBACK_MODEL", "qwen2.5:3b")
+        fallback_model = os.getenv("SHIMS_DUOBOT_FALLBACK_MODEL", "")
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ]
-        fb = await asyncio.to_thread(_call_ollama_chat_sync, fallback_model, messages)
+        fb = await asyncio.to_thread(_call_native_chat_sync, fallback_model, messages)
         content = fb.get("content") or ""
-        used_provider = "ollama"
-        used_model = fallback_model
+        used_provider = "native"
+        used_model = fallback_model or _native_loaded_model()
 
     if not content.strip():
         content = "I'm not sure what to add; let's keep chatting." if mode == "free" else "I don't have a concrete proposal right now; let's keep monitoring."
@@ -860,15 +866,17 @@ def _resolve_member_model(member: dict[str, Any]) -> tuple[str, str]:
 
     if mid == "primary":
         duo = load_settings()
-        provider = override_provider or duo.get("primary_provider") or settings.ai_provider or "ollama"
+        provider = override_provider or duo.get("primary_provider") or settings.ai_provider or "native"
         model = override_model or duo.get("primary_model", "")
         if provider == "kimi" and not model:
             from .kimi_model_helper import normalize_kimi_model
             model = normalize_kimi_model(settings.kimi_model)
         return provider, model
     if mid == "local":
-        provider = override_provider or "ollama"
-        model = override_model or load_settings().get("local_model") or os.getenv("SHIMS_FACTORY_DEFAULT_MODEL", "qwen2.5:3b")
+        # Factory member defaults to the native engine; an explicitly
+        # user-configured provider/model in settings is always honored.
+        provider = override_provider or "native"
+        model = override_model or _raw_settings().get("local_model") or ""
         return provider, model
 
     provider = override_provider or member.get("provider", "openai")
@@ -916,21 +924,21 @@ async def _member_say(member: dict[str, Any], conv: dict[str, Any]) -> dict[str,
             error = str(exc)[:200]
             used_provider = f"{provider}:error"
 
-    # Only the local/Factory member falls back to Ollama. Falling every cloud member
-    # back to the same local model creates a long Ollama queue and kills latency.
-    if not content.strip() and provider in {"ollama", "local"}:
-        fallback_model = os.getenv("SHIMS_DUOBOT_FALLBACK_MODEL", "qwen2.5:3b")
+    # Only the local/Factory member falls back to the native engine. Falling every
+    # cloud member back to the same local model creates a long queue and kills latency.
+    if not content.strip() and provider in {"native", "local"}:
+        fallback_model = os.getenv("SHIMS_DUOBOT_FALLBACK_MODEL", "")
         try:
             fb = await asyncio.wait_for(
-                asyncio.to_thread(_call_ollama_chat_sync, fallback_model, [
+                asyncio.to_thread(_call_native_chat_sync, fallback_model, [
                     {"role": "system", "content": system},
                     {"role": "user", "content": (messages[-1]["content"] if messages else "Share your view.")},
                 ]),
                 timeout=member_timeout,
             )
             content = fb.get("content") or ""
-            used_provider = "ollama"
-            used_model = fallback_model
+            used_provider = "native"
+            used_model = fallback_model or _native_loaded_model()
         except Exception as exc:
             error = str(exc)[:200]
 
@@ -1256,7 +1264,7 @@ async def finalize_conversation(conv_id: str) -> dict[str, Any]:
     system = _system_prompt("primary", conv.get("mode", "free"), domain=_domain_profile(conv), capabilities=conv.get("capabilities"))
     content = ""
     duo_settings = load_settings()
-    provider = duo_settings.get("primary_provider") or settings.ai_provider or "ollama"
+    provider = duo_settings.get("primary_provider") or settings.ai_provider or "native"
     model = duo_settings.get("primary_model", "")
     if provider == "kimi" and not model:
         from .kimi_model_helper import normalize_kimi_model
@@ -1273,8 +1281,8 @@ async def finalize_conversation(conv_id: str) -> dict[str, Any]:
             content = ""
 
     if not content.strip():
-        fallback_model = os.getenv("SHIMS_DUOBOT_FALLBACK_MODEL", "qwen2.5:3b")
-        fb = await asyncio.to_thread(_call_ollama_chat_sync, fallback_model, [
+        fallback_model = os.getenv("SHIMS_DUOBOT_FALLBACK_MODEL", "")
+        fb = await asyncio.to_thread(_call_native_chat_sync, fallback_model, [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ])

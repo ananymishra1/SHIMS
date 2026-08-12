@@ -10,7 +10,7 @@ transports in :mod:`shared.ai` and :mod:`shared.agent_loop` and adds:
 
 * per-provider circuit breaker (consecutive failures open the breaker),
 * bounded retry on fast transient failures,
-* global concurrency cap so parallel brains can't stampede Ollama,
+* global concurrency cap so parallel brains can't stampede the local engine,
 * cached provider health for the UI,
 * one ``ai_gateway_usage`` row per call for the usage dashboard
   (``ai_usage_log`` is the older per-user token-quota table — different thing).
@@ -99,9 +99,10 @@ def ensure_gateway_schema() -> None:
     )
     # Seed routes that preserve the models these features were hardcoded to
     # before routing existed. INSERT OR IGNORE keeps admin edits intact.
+    # Local features route to the native engine; empty model = loaded GGUF.
     for key, provider, model in (
-        ('chemistry', 'ollama', 'qwen2.5:14b'),
-        ('bmr_drafting', 'ollama', 'qwen2.5:14b'),
+        ('chemistry', 'native', ''),
+        ('bmr_drafting', 'native', ''),
     ):
         try:
             db.execute('INSERT OR IGNORE INTO ai_feature_routes(feature_key, provider, model) VALUES (?, ?, ?)',
@@ -201,15 +202,16 @@ class LLMGateway:
 
     # ── prompt/system surface (ask_ai) ───────────────────────────────────
     def _provider_chain(self, requested: Optional[str]) -> list[str]:
-        first = (requested or settings.ai_provider or 'ollama').lower().strip()
+        first = (requested or settings.ai_provider or 'native').lower().strip()
         if first in {'google', 'claude'}:
             first = {'google': 'gemini', 'claude': 'anthropic'}[first]
         chain = [first]
-        # Add LM Studio as second priority if it's not the first and is running
+        # Native engine is the first local fallback, then LM Studio; Ollama is
+        # no longer part of any default chain (explicit requests still honored).
+        if first != 'native':
+            chain.append('native')
         if first != 'lmstudio':
             chain.append('lmstudio')
-        if first != 'ollama':
-            chain.append('ollama')
         for name in _CLOUD_PROVIDERS:
             if name not in chain and _cloud_configured(name):
                 chain.append(name)
@@ -224,9 +226,9 @@ class LLMGateway:
         # Per-feature admin routing applies when the caller didn't pin a model.
         if not model:
             route_provider, route_model = resolve_route(feature)
-            if route_model:
+            if route_provider or route_model:
                 provider = route_provider or provider
-                model = route_model
+                model = route_model or model
 
         chain = self._provider_chain(provider)
         last_result: Any = None
@@ -279,7 +281,7 @@ class LLMGateway:
         """Agent-loop surface: returns {content, tool_calls}; raises LLMUnavailable."""
         from . import agent_loop
 
-        name = (provider or 'ollama').lower().strip()
+        name = (provider or 'native').lower().strip()
         if self.breaker_open(name):
             raise LLMUnavailable('circuit_open', provider=name,
                                  detail=f'{name} skipped for {int(_BREAKER_COOLDOWN)}s after repeated failures')
@@ -292,7 +294,9 @@ class LLMGateway:
                 async with self._sem:
                     if name == 'anthropic':
                         result = await agent_loop._anthropic_chat_stream_raw(model, messages, tools, timeout=timeout)
-                    elif name in {'openai', 'kimi', 'deepseek', 'qwen', 'lmstudio'}:
+                    elif name == 'native':
+                        result = await agent_loop._native_chat_raw(model, messages, tools, timeout=timeout)
+                    elif name in {'openai', 'kimi', 'deepseek', 'qwen', 'lmstudio', 'vllm', 'sglang', 'aphrodite', 'koboldcpp'}:
                         result = await agent_loop._openai_compatible_chat_raw(name, model, messages, tools, timeout=timeout)
                     elif name == 'huggingface':
                         result = await agent_loop._hf_chat_raw(model, messages, tools, timeout=timeout)
@@ -331,26 +335,26 @@ class LLMGateway:
         now = time.time()
         providers: dict[str, Any] = {}
 
-        cached = self._health.get('ollama')
+        cached = self._health.get('native')
         if not cached or now - cached['checked'] > _HEALTH_TTL:
-            start = time.time()
             entry: dict[str, Any] = {'checked': now, 'ok': False, 'latency_ms': 0.0, 'detail': '', 'models': 0}
             try:
-                async with httpx.AsyncClient(timeout=5) as client:
-                    r = await client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
-                    r.raise_for_status()
-                    models = r.json().get('models', [])
-                entry.update(ok=True, latency_ms=round((time.time() - start) * 1000, 1), models=len(models))
+                from .native_engine import get_engine
+                engine = get_engine()
+                health = engine.health()
+                models = engine.models()
+                entry.update(ok=bool(health.get('ready')), models=len(models),
+                             detail=health.get('state', ''))
             except Exception as exc:
                 entry['detail'] = str(exc)[:120]
-            self._health['ollama'] = entry
+            self._health['native'] = entry
             cached = entry
-        providers['ollama'] = {
+        providers['native'] = {
             'configured': True,
             'ok': cached['ok'],
             'latency_ms': cached.get('latency_ms', 0),
             'models': cached.get('models', 0),
-            'breaker_open': self.breaker_open('ollama'),
+            'breaker_open': self.breaker_open('native'),
             'detail': cached.get('detail', ''),
         }
 
@@ -402,6 +406,37 @@ class LLMGateway:
             'detail': cached_lm.get('detail', ''),
         }
 
+        # Dedicated local inference engine health checks (OpenAI-compatible)
+        _LOCAL_ENGINES = (
+            ('vllm', settings.vllm_base_url),
+            ('sglang', settings.sglang_base_url),
+            ('aphrodite', settings.aphrodite_base_url),
+            ('koboldcpp', settings.koboldcpp_base_url),
+        )
+        for eng_name, eng_url in _LOCAL_ENGINES:
+            cached_eng = self._health.get(eng_name)
+            if not cached_eng or now - cached_eng['checked'] > _HEALTH_TTL:
+                start = time.time()
+                entry_eng: dict[str, Any] = {'checked': now, 'ok': False, 'latency_ms': 0.0, 'detail': '', 'models': 0}
+                try:
+                    async with httpx.AsyncClient(timeout=5) as client:
+                        r = await client.get(f"{eng_url.rstrip('/')}/v1/models")
+                        r.raise_for_status()
+                        models = r.json().get('data', [])
+                    entry_eng.update(ok=True, latency_ms=round((time.time() - start) * 1000, 1), models=len(models))
+                except Exception as exc:
+                    entry_eng['detail'] = str(exc)[:120]
+                self._health[eng_name] = entry_eng
+                cached_eng = entry_eng
+            providers[eng_name] = {
+                'configured': True,
+                'ok': cached_eng['ok'],
+                'latency_ms': cached_eng.get('latency_ms', 0),
+                'models': cached_eng.get('models', 0),
+                'breaker_open': self.breaker_open(eng_name),
+                'detail': cached_eng.get('detail', ''),
+            }
+
         for name in _CLOUD_PROVIDERS:
             configured = _cloud_configured(name)
             providers[name] = {
@@ -410,13 +445,14 @@ class LLMGateway:
                 'breaker_open': self.breaker_open(name),
             }
 
-        usable = providers['ollama']['ok'] or providers['huggingface']['ok'] or providers['lmstudio']['ok'] or any(
-            p['configured'] and not p['breaker_open'] for n, p in providers.items() if n not in ('ollama', 'huggingface', 'lmstudio')
+        local_ok = any(providers[e]['ok'] for e in ('native', 'huggingface', 'lmstudio', 'vllm', 'sglang', 'aphrodite', 'koboldcpp'))
+        usable = local_ok or any(
+            p['configured'] and not p['breaker_open'] for n, p in providers.items() if n not in ('native', 'huggingface', 'lmstudio', 'vllm', 'sglang', 'aphrodite', 'koboldcpp')
         )
         return {'ok': usable, 'providers': providers, 'checked_at': now}
 
     def best_cloud_chat_provider(self) -> Optional[tuple[str, str]]:
-        """Cloud (provider, model) usable by the agent loop when Ollama is down.
+        """Cloud (provider, model) usable by the agent loop when local engines are down.
 
         The agent loop's cloud transport is Anthropic-only, so only anthropic
         qualifies here.

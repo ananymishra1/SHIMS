@@ -35,6 +35,17 @@ def _envi(key: str, default: int) -> int:
         return default
 
 
+def _default_local_brain_url() -> str | None:
+    """Default local brain endpoint: the native engine loopback (OpenAI-compatible)."""
+    provider = (settings.ai_provider or "").lower()
+    if provider == "native":
+        port = _envi("SHIMS_NATIVE_PORT", 5115)
+        return f"http://127.0.0.1:{port}/v1"
+    if provider == "ollama":
+        return settings.ollama_base_url.rstrip("/") + "/v1"
+    return None
+
+
 @dataclass
 class BrainCfg:
     """One LLM provider's connection settings."""
@@ -52,14 +63,14 @@ class Config:
     workspace: Path = field(default_factory=lambda: GENERATED_DIR / "shims_chem")
     # --- brains ------------------------------------------------------------
     fast: BrainCfg = field(default_factory=lambda: BrainCfg(
-        url=_env("SHIMS_FAST_BRAIN_URL") or (settings.ollama_base_url.rstrip("/") + "/v1" if settings.ai_provider == "ollama" else None),
+        url=_env("SHIMS_FAST_BRAIN_URL") or (_default_local_brain_url()),
         model=_env("SHIMS_FAST_BRAIN_MODEL", settings.ollama_model),
         api_key=_env("SHIMS_FAST_BRAIN_KEY", "not-needed"),
         max_tokens=_envi("SHIMS_FAST_MAX_TOKENS", 1024),
         temperature=float(_env("SHIMS_FAST_TEMP", "0.2")),
     ))
     smart: BrainCfg = field(default_factory=lambda: BrainCfg(
-        url=_env("SHIMS_SMART_BRAIN_URL") or (settings.ollama_base_url.rstrip("/") + "/v1" if settings.ai_provider == "ollama" else None),
+        url=_env("SHIMS_SMART_BRAIN_URL") or (_default_local_brain_url()),
         model=_env("SHIMS_SMART_BRAIN_MODEL", settings.ollama_model),
         api_key=_env("SHIMS_SMART_BRAIN_KEY", "not-needed"),
         max_tokens=_envi("SHIMS_SMART_MAX_TOKENS", 4096),

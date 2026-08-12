@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -164,6 +165,30 @@ def merge_evidence(*groups: list[dict[str, Any]] | None, limit: int = 12) -> lis
     return [x.to_dict() for x in _dedupe(items, limit)]
 
 
+def _has_grounded_memory_evidence(evidence: list[dict[str, Any]]) -> bool:
+    """Memory-backed trust requires at least one genuinely relevant retrieval
+    hit: non-core, non-feedback, and above the same relevance bars retrieval
+    itself uses. Core directives and feedback preferences are not evidence."""
+    try:
+        min_score = float(os.getenv("SHIMS_RAG_MIN_SCORE", "1.5"))
+    except Exception:
+        min_score = 1.5
+    for e in evidence:
+        kind = str(e.get("kind") or "")
+        if kind not in {"rag", "memory", "mailbox", "capture"}:
+            continue
+        meta = e.get("metadata") or {}
+        src = str(meta.get("source") or "").lower()
+        tags = {str(t).lower() for t in (meta.get("tags") or [])}
+        if src in {"core", "feedback", "omni_feedback"} or tags & {"core", "feedback", "anti_pattern", "learned_preference"}:
+            continue
+        if kind in {"mailbox", "capture"}:
+            return True  # deterministic tool evidence, not fuzzy retrieval
+        if float(e.get("score") or 0.0) >= min_score:
+            return True
+    return False
+
+
 def build_trust(
     *,
     route: str = "",
@@ -191,7 +216,7 @@ def build_trust(
         level = TRUST_SOURCED
         score = 0.82
         reason = "Answer is grounded in web or stored research sources."
-    elif {"rag", "memory", "mailbox", "capture"} & kinds:
+    elif {"rag", "memory", "mailbox", "capture"} & kinds and _has_grounded_memory_evidence(evidence):
         level = TRUST_MEMORY
         score = 0.72
         reason = "Answer is grounded in local memory, mailbox, capture, or RAG context."

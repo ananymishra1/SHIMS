@@ -55,19 +55,54 @@ def test_recall_conversation_empty_inputs_are_safe():
 
 
 # ---------------------------------------------------------------------------
-# Fast lane: recall injection + background archiving + heartbeat
+# Unified lane: recall injection + background archiving + heartbeat
 # ---------------------------------------------------------------------------
 def _fake_collector(reply: str, *, delay: float = 0.0, capture: dict | None = None):
-    async def fake_collect(model, messages, *, realtime=False, max_tokens=None, on_delta=None, first_token_timeout=60.0):
+    """Fake for shared.agent_loop._native_chat_stream — the tool-aware
+    streamer the unified pipeline uses for the native engine (SHIMS is
+    native-only; Ollama is no longer a route)."""
+
+    async def fake_stream(model, messages, tools, on_delta, **_):
         if capture is not None:
             capture["messages"] = messages
         if delay:
             await asyncio.sleep(delay)
         if on_delta:
             await on_delta(reply)
-        return reply
+        return {"content": reply, "tool_calls": []}
 
-    return fake_collect
+    return fake_stream
+
+
+class _FakeSSEStream:
+    """Stands in for the lite lane's direct httpx SSE stream to the engine."""
+    status_code = 200
+    reason_phrase = "OK"
+
+    def __init__(self, reply: str):
+        self._reply = reply
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    async def aiter_lines(self):
+        yield 'data: {"choices": [{"delta": {"content": ' + json.dumps(self._reply) + '}}]}'
+        yield "data: [DONE]"
+
+
+def _patch_native_lanes(monkeypatch, m, reply: str, *, delay: float = 0.0, capture: dict | None = None):
+    """Hermetic native engine: covers the full lane (_native_chat_stream) and
+    the lite lane (direct httpx SSE), and blocks real engine load attempts."""
+    import httpx
+    monkeypatch.setattr("shared.agent_loop._native_chat_stream", _fake_collector(reply, delay=delay, capture=capture))
+    monkeypatch.setattr(m, "_kick_native_load", lambda *a, **k: None)
+    monkeypatch.setattr(httpx.AsyncClient, "stream", lambda self, method, url, **kw: _FakeSSEStream(reply))
 
 
 async def _collect_stream(m, req, settle: float = 0.0):
@@ -81,7 +116,7 @@ async def _collect_stream(m, req, settle: float = 0.0):
     return chunks
 
 
-def test_fast_lane_injects_recalled_context(monkeypatch):
+def test_unified_lane_injects_recalled_context(monkeypatch):
     import backend.app.main as m
 
     def fake_recall(session_id, query, *, limit=4, max_rows=800):
@@ -89,7 +124,10 @@ def test_fast_lane_injects_recalled_context(monkeypatch):
 
     capture: dict = {}
     monkeypatch.setattr(m, "recall_conversation", fake_recall)
-    monkeypatch.setattr(m, "_collect_ollama_stream", _fake_collector("Your dog is Biscuit.", capture=capture))
+    # Keep the brain-RAG half of retrieval deterministic so memory_hits
+    # reflects exactly the one recalled exchange.
+    monkeypatch.setattr(m, "brain_prompt_addendum", lambda *args, **kwargs: ("", {}))
+    _patch_native_lanes(monkeypatch, m, "Your dog is Biscuit.", capture=capture)
 
     req = m.ChatRequest(message="what is my dog called again?", session_id="test-recall-inject",
                         provider="ollama", model="llama3.2:latest", conversation_mode=True)
@@ -103,14 +141,14 @@ def test_fast_lane_injects_recalled_context(monkeypatch):
     assert meta["memory_hits"] == 1
 
 
-def test_fast_lane_recall_failure_never_blocks_reply(monkeypatch):
+def test_unified_lane_recall_failure_never_blocks_reply(monkeypatch):
     import backend.app.main as m
 
     def broken_recall(*args, **kwargs):
         raise RuntimeError("recall store unavailable")
 
     monkeypatch.setattr(m, "recall_conversation", broken_recall)
-    monkeypatch.setattr(m, "_collect_ollama_stream", _fake_collector("Still fine!"))
+    _patch_native_lanes(monkeypatch, m, "Still fine!")
 
     req = m.ChatRequest(message="hello there my friend", session_id="test-recall-broken",
                         provider="ollama", model="llama3.2:latest", conversation_mode=True)
@@ -119,7 +157,7 @@ def test_fast_lane_recall_failure_never_blocks_reply(monkeypatch):
     assert "Still fine!" in answer
 
 
-def test_fast_lane_archives_turn_in_background(monkeypatch):
+def test_unified_lane_archives_turn_in_background(monkeypatch):
     import backend.app.main as m
 
     recorded: dict = {}
@@ -129,7 +167,7 @@ def test_fast_lane_archives_turn_in_background(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setattr(m, "remember_turn", fake_remember_turn)
-    monkeypatch.setattr(m, "_collect_ollama_stream", _fake_collector("Archived reply."))
+    _patch_native_lanes(monkeypatch, m, "Archived reply.")
 
     req = m.ChatRequest(message="please remember this important fact forever", session_id="test-archive-bg",
                         provider="ollama", model="llama3.2:latest", conversation_mode=True)
@@ -140,11 +178,11 @@ def test_fast_lane_archives_turn_in_background(monkeypatch):
     assert recorded.get("assistant") == "Archived reply."
 
 
-def test_fast_lane_heartbeat_while_model_is_silent(monkeypatch):
+def test_unified_lane_heartbeat_while_model_is_silent(monkeypatch):
     import backend.app.main as m
 
     monkeypatch.setenv("SHIMS_STREAM_HEARTBEAT_SECONDS", "0.05")
-    monkeypatch.setattr(m, "_collect_ollama_stream", _fake_collector("Late answer.", delay=0.35))
+    _patch_native_lanes(monkeypatch, m, "Late answer.", delay=0.35)
 
     req = m.ChatRequest(message="think hard about this one", session_id="test-heartbeat-fast",
                         provider="ollama", model="llama3.2:latest", conversation_mode=False)

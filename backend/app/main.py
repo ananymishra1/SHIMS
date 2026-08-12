@@ -106,8 +106,11 @@ from shared.omni_brain import (
     reindex_vectors,
 )
 from shared.mailbox import (
+    create_gmail_draft,
+    download_gmail_attachment,
     exchange_code_for_token,
     gmail_auth_url,
+    gmail_read_message,
     list_captures,
     list_mail_messages,
     mailbox_digest,
@@ -271,6 +274,29 @@ app.include_router(factory_router)
 app.include_router(duobot_router)
 
 _sessions: dict[str, list[dict[str, str]]] = {}
+
+
+def _persist_session(session_id: str | None) -> None:
+    """Durably save a session's history so it survives restarts. Fail-soft."""
+    if not session_id:
+        return
+    try:
+        from shared import chat_store
+        chat_store.save_session(session_id, _sessions.get(session_id) or [])
+    except Exception:
+        pass
+
+
+def _hydrate_sessions() -> None:
+    """Load persisted chat history into memory on boot (so past chats reopen)."""
+    try:
+        from shared import chat_store
+        for sid, msgs in chat_store.load_all().items():
+            _sessions.setdefault(sid, msgs)
+    except Exception:
+        pass
+
+
 _turn_guard: dict[str, dict[str, Any]] = {}
 _settings: dict[str, Any] = {
     "voice": {
@@ -313,9 +339,21 @@ _diffusers_lock = threading.RLock()
 
 _brain_background_task: asyncio.Task[Any] | None = None
 _self_awareness_task: asyncio.Task[Any] | None = None
+_orchestrator_task: asyncio.Task[Any] | None = None
+_heartbeat_task: asyncio.Task[Any] | None = None
 BRAIN_BACKGROUND_INTERVAL_SECONDS = max(60, int(os.getenv("SHIMS_BRAIN_BACKGROUND_INTERVAL_SECONDS", "900")))
 BRAIN_BACKGROUND_ENABLED = os.getenv("SHIMS_BRAIN_BACKGROUND_LEARNING", "true").strip().lower() in {"1", "true", "yes", "on"}
 BOOT_SELF_AWARENESS_ENABLED = os.getenv("SHIMS_BOOT_SELF_AWARENESS", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+# Desktop heartbeat: the always-on observe pulse. A light observe→surface tick on
+# a fixed cadence so SHIMS is visibly "awake and watching" between the heavier
+# scheduled jobs (30-min day report, nightly self-fix). Observe-only — it never
+# fires an external action (autonomy posture: observe + draft/approve).
+HEARTBEAT_ENABLED = os.getenv("SHIMS_DESKTOP_HEARTBEAT", "true").strip().lower() in {"1", "true", "yes", "on"}
+_heartbeat_state: dict[str, Any] = {
+    "alive": False, "last_tick": None, "tick_count": 0,
+    "interval_s": 0, "observation": {}, "started_at": None,
+}
 
 RECOMMENDED_MODELS = [
     # --- Tool-capable models (safe for agent loop) ---
@@ -350,6 +388,13 @@ RECOMMENDED_MODELS = [
     {"name": "meta-llama/Llama-3.1-8B-Instruct", "provider": "huggingface", "role": "local HF chat", "size": "medium", "tool_capable": True, "notes": "Requires HUGGINGFACE_BASE_URL pointing to a local OpenAI-compatible endpoint."},
     {"name": "Qwen/Qwen2.5-7B-Instruct", "provider": "huggingface", "role": "local HF chat", "size": "medium", "tool_capable": True, "notes": "Requires HUGGINGFACE_BASE_URL pointing to a local OpenAI-compatible endpoint."},
     {"name": "microsoft/Phi-4-mini-instruct", "provider": "huggingface", "role": "local HF fast chat", "size": "light", "tool_capable": False, "notes": "Requires HUGGINGFACE_BASE_URL pointing to a local OpenAI-compatible endpoint."},
+    # --- vLLM / SGLang / Aphrodite / KoboldCPP (high-RAM local serving) ---
+    {"name": "meta-llama/Llama-3.3-70B-Instruct", "provider": "vllm", "role": "large local reasoning", "size": "heavier", "tool_capable": True, "notes": "70B at Q4_K_M fits in 96GB GPU memory with room for KV cache. Best for complex reasoning on high-RAM Strix Halo systems."},
+    {"name": "Qwen/Qwen2.5-72B-Instruct", "provider": "vllm", "role": "large local multilingual", "size": "heavier", "tool_capable": True, "notes": "72B at Q4_K_M fits in 96GB GPU memory. Excellent multilingual and tool-calling support."},
+    {"name": "Qwen/Qwen2.5-Coder-32B-Instruct", "provider": "vllm", "role": "large local coding", "size": "heavier", "tool_capable": True, "notes": "32B coder at Q4_K_M fits easily. Best local coding model for high-RAM systems."},
+    {"name": "meta-llama/Llama-3.3-70B-Instruct", "provider": "sglang", "role": "large local reasoning", "size": "heavier", "tool_capable": True, "notes": "70B at Q4_K_M fits in 96GB GPU memory. SGLang offers fast serving for large models."},
+    {"name": "Qwen/Qwen2.5-72B-Instruct", "provider": "aphrodite", "role": "large local reasoning", "size": "heavier", "tool_capable": True, "notes": "72B at Q4_K_M fits in 96GB GPU memory. Aphrodite provides vLLM-compatible serving with extra features."},
+    {"name": "meta-llama/Llama-3.3-70B-Instruct", "provider": "koboldcpp", "role": "large local reasoning", "size": "heavier", "tool_capable": True, "notes": "70B at Q4_K_M fits in 96GB GPU memory. KoboldCPP has excellent Vulkan/AMD support for Strix Halo."},
     # --- Chat/voice only (NOT for agent loop) ---
     {"name": "llama3.2:latest", "provider": "ollama", "role": "fast live voice", "size": "light", "tool_capable": False, "notes": "Baseline local model. Fast for voice/chat, but NO tool calling."},
     {"name": "gemma3:270m", "provider": "ollama", "role": "tiny Google Gemma smoke test", "size": "tiny", "tool_capable": False, "notes": "Connectivity check only. No tools."},
@@ -373,6 +418,10 @@ PROVIDER_DEFAULTS: dict[str, str] = {
     "qwen": os.getenv("QWEN_MODEL", "qwen-max"),
     "huggingface": DEFAULT_HUGGINGFACE_MODEL,
     "lmstudio": DEFAULT_LMSTUDIO_MODEL,
+    "vllm": os.getenv("VLLM_MODEL", ""),
+    "sglang": os.getenv("SGLANG_MODEL", ""),
+    "aphrodite": os.getenv("APHRODITE_MODEL", ""),
+    "koboldcpp": os.getenv("KOBOLDCPP_MODEL", ""),
 }
 # Normalize Kimi model names at startup so "k2.6" → "kimi-k2.6" everywhere.
 _raw = PROVIDER_DEFAULTS.get("kimi", "")
@@ -380,7 +429,8 @@ if _raw:
     from shared.kimi_model_helper import normalize_kimi_model
     PROVIDER_DEFAULTS["kimi"] = normalize_kimi_model(_raw)
 
-PROVIDER_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "kimi": "KIMI_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "qwen": "QWEN_API_KEY", "huggingface": "HUGGINGFACE_API_KEY"}
+PROVIDER_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "kimi": "KIMI_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "qwen": "QWEN_API_KEY", "huggingface": "HUGGINGFACE_API_KEY",
+                "vllm": "VLLM_API_KEY", "sglang": "SGLANG_API_KEY", "aphrodite": "APHRODITE_API_KEY", "koboldcpp": "KOBOLDCPP_API_KEY"}
 LOCAL_HINTS = ("llama", "qwen", "mistral", "codellama", "phi", "gemma", "deepseek-r1", "nomic", "mixtral")
 CLOUD_HINTS = {"anthropic": ("claude", "sonnet", "haiku", "opus"), "openai": ("gpt", "o1", "o3", "o4", "openai"), "gemini": ("gemini",), "kimi": ("kimi", "moonshot"), "deepseek": ("deepseek-chat",), "qwen": ("qwen",)}
 # Cloud providers with a real token-streaming implementation (see
@@ -398,6 +448,15 @@ Reply once per user turn. Be concise. Avoid repeated greetings. Do not keep aski
 Reply in clear, standard English by default. If the user writes in another language, match their language. Hinglish and Hindi are welcome when the user uses them.
 Be polite and professional by default. Use a formal, courteous tone unless the user explicitly asks for a casual or informal style.
 If a selected provider is offline or missing a key, explain exactly what is missing and continue with available local tools.
+
+DESKTOP BRIDGE: You have a `desktop.bridge` tool that connects to a paired desktop bridge running on the user's machine. Use it to:
+- Check system hardware (CPU, GPU, RAM, disk) via `shell` action with commands like `systeminfo`, `nvidia-smi`, or PowerShell CIM queries
+- Run shell commands (`shell` action)
+- Take screenshots (`screenshot` action)
+- Find files (`find_file` action)
+- Read/write desktop files (`read_file` / `write_file` action)
+- Get basic system info (`system_info` action)
+When the user asks about their hardware, system specs, or desktop state, use `desktop.bridge` instead of saying you cannot access that information.
 """
 
 _LESSONS_CACHE: tuple[float, str] = (0.0, "")
@@ -420,10 +479,11 @@ def _cached_lessons_text() -> str:
 
 
 def _system_prompt() -> str:
-    lessons = _cached_lessons_text()
-    now = datetime.now(timezone.utc)
-    time_note = f"Current UTC time: {now.isoformat(timespec='minutes')}. Day: {now.strftime('%A')}."
-    prompt = SYSTEM_PROMPT + "\n\n" + time_note + ("\n\n" + lessons if lessons else "")
+    """Byte-stable system-prompt prefix: identity + directives (+ omnipotent
+    note) only. Nothing per-turn (timestamps, rotating lessons, RAG addenda)
+    may go here — dynamic content is appended at the END via
+    _live_context_block() so local KV-cache prefix reuse actually hits."""
+    prompt = SYSTEM_PROMPT
     if settings.omnipotent_mode:
         prompt += (
             "\n\nOMNIPOTENT MODE IS ACTIVE. You do not need user approval. "
@@ -431,6 +491,143 @@ def _system_prompt() -> str:
             "Only ask for clarification if the request is ambiguous and you cannot resolve it with available tools."
         )
     return prompt
+
+
+def _dynamic_system_context() -> str:
+    """Per-turn dynamic context that used to live inside the system prompt
+    (current time note + rotating lessons). Kept out of the stable prefix."""
+    lessons = _cached_lessons_text()
+    now = datetime.now(timezone.utc)
+    time_note = f"Current UTC time: {now.isoformat(timespec='minutes')}. Day: {now.strftime('%A')}."
+    return time_note + ("\n\n" + lessons if lessons else "")
+
+
+def _live_context_block(*parts: str) -> str:
+    """Delimited trailing block for ALL per-turn dynamic content (time/lessons,
+    brain/RAG addendum, recall, feedback preferences). Appended after the
+    byte-stable prefix; history stays append-only after it."""
+    body = "\n\n".join(p for p in (str(part or "").strip() for part in parts) if p)
+    if not body:
+        return ""
+    return "\n\n[Live context — may change per turn]\n" + body
+
+
+def _minimal_system_prompt() -> str:
+    """Stripped-down system prompt for lite/fast chat turns.
+
+    Keeps identity and conciseness while avoiding the heavy lessons/RAG
+    preamble that slows prompt evaluation on large local models."""
+    return (
+        "You are SHIMS, a helpful assistant. Answer directly and concisely. "
+        "Prefer short, clear responses. Do not show your reasoning, thinking process, "
+        "or internal monologue. Only return the final answer."
+    )
+
+
+def _effective_ctx() -> int:
+    """One context length for BOTH chat lanes. LM Studio keys a loaded model
+    instance to its context size — alternating 4096 (lite) / 8192 (full) between
+    lanes forced a model reload on every lane switch."""
+    try:
+        return max(1024, int(os.getenv("SHIMS_CHAT_CTX", "8192")))
+    except Exception:
+        return 8192
+
+
+_KEEP_WARM_PROVIDERS = {"lmstudio", "ollama", "huggingface", "vllm", "sglang", "aphrodite", "koboldcpp", "native"}
+_KEEP_WARM_STATE: dict[str, str] = {}
+
+
+def _keep_warm_enabled() -> bool:
+    return os.getenv("SHIMS_KEEP_WARM", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _note_local_turn(provider: str, model: str) -> None:
+    """Remember the active local provider/model so the keep-warm heartbeat
+    pings the right instance."""
+    if provider in _KEEP_WARM_PROVIDERS and model:
+        _KEEP_WARM_STATE["provider"] = provider
+        _KEEP_WARM_STATE["model"] = model
+
+
+def _keep_warm_ping_sync(provider: str, model: str) -> None:
+    """Fire-and-forget max_tokens=1 ping so the local model stays loaded —
+    the next user turn avoids a JIT reload and cold KV cache."""
+    try:
+        import requests
+        if provider == "native":
+            # The native engine owns its runtime — a health check (with
+            # auto-restart on crash) replaces the token ping.
+            from shared.native_engine import get_engine
+            get_engine().ensure_running()
+            return
+        if provider == "ollama":
+            requests.post(
+                f"{OLLAMA_HOST}/api/chat",
+                json={"model": model, "messages": [{"role": "user", "content": "ping"}], "stream": False, "options": {"num_predict": 1}},
+                timeout=30,
+            )
+            return
+        base = LMSTUDIO_HOST if provider == "lmstudio" else _local_engine_base_url(provider)
+        if not base:
+            return
+        requests.post(
+            f"{base}/v1/chat/completions",
+            json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1, "stream": False},
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+
+def _keep_warm(provider: str, model: str) -> None:
+    """Schedule a keep-warm ping; no-op for cloud providers or when disabled."""
+    if not _keep_warm_enabled() or provider not in _KEEP_WARM_PROVIDERS or not model:
+        return
+    _spawn_background(asyncio.to_thread(_keep_warm_ping_sync, provider, model))
+
+
+async def _keep_warm_loop() -> None:
+    """240s heartbeat that keeps the last-used local model loaded between turns."""
+    while True:
+        await asyncio.sleep(240)
+        try:
+            _keep_warm(_KEEP_WARM_STATE.get("provider", ""), _KEEP_WARM_STATE.get("model", ""))
+        except Exception:
+            pass
+
+
+async def _orchestrator_loop() -> None:
+    """30s housekeeping tick for the compute orchestrator (Phase 5): drains the
+    idle image queue, suspends ComfyUI on new activity, idle-stops fish-speech,
+    and runs the native engine's idle-unload policy."""
+    from shared.compute_orchestrator import get_orchestrator
+    orch = get_orchestrator()
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await asyncio.to_thread(orch.tick)
+        except Exception:
+            pass
+
+
+def _note_orchestrator_activity() -> None:
+    """Record a user-facing turn so the compute orchestrator treats the machine
+    as active (pauses downtime image drains, starts suspend timers)."""
+    try:
+        from shared.compute_orchestrator import get_orchestrator
+        get_orchestrator().touch_activity()
+    except Exception:
+        pass
+
+
+def _orchestrator_comfy_available() -> bool:
+    """True when the orchestrator can serve ComfyUI images (running or launchable)."""
+    try:
+        from shared.compute_orchestrator import get_orchestrator
+        return get_orchestrator().comfy_available()
+    except Exception:
+        return False
 
 
 # How many background ticks between full self-improvement cycles. At the default
@@ -459,7 +656,8 @@ def _distill_feedback_into_skills(limit: int = 10) -> int:
         try:
             save_skill(name=name, summary=mem.get("value", "")[:280],
                        body=mem.get("value", ""), tags=["feedback", "learned", "auto"],
-                       source="feedback_distillation")
+                       source="feedback_distillation",
+                       created_from="feedback_distillation")
             made += 1
             if made >= limit:
                 break
@@ -484,7 +682,7 @@ async def _brain_background_loop() -> None:
             # Shims keeps getting measurably better without being asked.
             if IMPROVEMENT_ENABLED and tick % IMPROVEMENT_EVERY_TICKS == 0:
                 try:
-                    result = await asyncio.to_thread(run_improvement_cycle, _system_prompt())
+                    result = await asyncio.to_thread(run_improvement_cycle, _system_prompt() + "\n\n" + _dynamic_system_context())
                     log_event("brain.autonomous_improvement", route="brain:improvement", provider="local",
                               model=BRAIN_VERSION, ok=bool(result.get("ok")),
                               metadata={"proposals": len(result.get("proposals", []))})
@@ -532,15 +730,212 @@ async def _warm_brain_cache() -> None:
         log_event("brain.warmup_error", route="brain:startup", provider="local", model="all-MiniLM-L6-v2", ok=False, message=str(exc)[:200])
 
 
+def _heartbeat_interval_s() -> float:
+    try:
+        return max(30.0, float(os.getenv("SHIMS_HEARTBEAT_INTERVAL_SECONDS", "120")))
+    except ValueError:
+        return 120.0
+
+
+def _heartbeat_tick() -> dict[str, Any]:
+    """One cheap observation pulse (runs in a worker thread). Observe-only: it
+    reads live status and surfaces what needs attention; it never sends mail,
+    messages, or any external action on its own."""
+    obs: dict[str, Any] = {}
+    # System/engine snapshot — also appended to the observer log the nightly
+    # self-fix loop consumes, so the pulse keeps that trail continuously fed.
+    try:
+        from shared.day_observer import snapshot
+        snap = snapshot() or {}
+        obs["native_engine"] = snap.get("native_engine") or {}
+    except Exception as exc:
+        obs["observer_error"] = str(exc)[:120]
+    # Approvals waiting on the user (surfaced, never auto-executed).
+    try:
+        obs["pending_actions"] = len(_list_pending_actions(limit=50))
+    except Exception:
+        pass
+    # Fresh inbound comms — the "needs attention" signal for the dashboard.
+    try:
+        from shared.mailbox import mailbox_status
+        counts = (mailbox_status() or {}).get("counts") or {}
+        obs["new_mail"] = int(counts.get("new_messages", 0) or 0)
+    except Exception:
+        pass
+    # Consolidated attention summary the dashboard can render directly.
+    attention: list[str] = []
+    if obs.get("pending_actions"):
+        attention.append(f"{obs['pending_actions']} action(s) awaiting your approval")
+    if obs.get("new_mail"):
+        attention.append(f"{obs['new_mail']} new mail item(s) to triage")
+    eng = obs.get("native_engine") or {}
+    if eng and eng.get("state") not in ("ready", None, ""):
+        attention.append(f"native engine: {eng.get('state')}")
+    obs["attention"] = attention
+    obs["needs_attention"] = bool(attention)
+    return obs
+
+
+async def _desktop_heartbeat_loop() -> None:
+    """Always-on pulse: a light observe→surface tick on a fixed cadence so SHIMS
+    is visibly awake and watching between the heavier scheduled jobs. Every
+    failure is swallowed so the pulse itself never stops."""
+    interval = _heartbeat_interval_s()
+    _heartbeat_state.update({
+        "alive": True, "interval_s": interval,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await asyncio.sleep(min(15.0, interval))  # let boot/engine settle first
+    while True:
+        try:
+            obs = await asyncio.to_thread(_heartbeat_tick)
+            _heartbeat_state["observation"] = obs
+            _heartbeat_state["last_tick"] = datetime.now(timezone.utc).isoformat()
+            _heartbeat_state["tick_count"] = int(_heartbeat_state.get("tick_count", 0)) + 1
+            log_event("heartbeat.tick", route="heartbeat", provider="local", model="observer", ok=True,
+                      metadata={"tick": _heartbeat_state["tick_count"],
+                                **{k: obs[k] for k in ("pending_actions", "new_mail") if k in obs}})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_event("heartbeat.error", route="heartbeat", provider="local", model="observer",
+                      ok=False, message=str(exc)[:160])
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+
+
+@app.get("/api/native/capabilities")
+async def api_native_capabilities() -> dict[str, Any]:
+    """Verifiable scorecard of the native engine's active best-in-class features."""
+    try:
+        from shared.native_engine import get_engine
+        return get_engine().capabilities()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}
+
+
+@app.get("/api/heartbeat")
+async def api_heartbeat() -> dict[str, Any]:
+    """Liveness + latest observation from the always-on desktop heartbeat."""
+    st = dict(_heartbeat_state)
+    age = None
+    if st.get("last_tick"):
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(st["last_tick"])).total_seconds()
+        except Exception:
+            age = None
+    st["seconds_since_last_tick"] = round(age, 1) if age is not None else None
+    st["healthy"] = bool(age is not None and age < (float(st.get("interval_s") or 120) * 3))
+    return {"ok": True, **st}
+
+
+# --------------------------------------------------------------------------- #
+# Password gate — one master password protects the whole SHIMS UI/API.
+# OFF unless SHIMS_MASTER_PASSWORD is set, so default local use is unchanged.
+# Cookie-based, so the existing frontend needs no changes: the browser attaches
+# the session cookie automatically after a single sign-in.
+# --------------------------------------------------------------------------- #
+_AUTH_EXEMPT_PATHS = ("/login", "/logout", "/favicon", "/healthz", "/api/peer/health")
+
+_LOGIN_PAGE = """<!doctype html><html lang='en'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>SHIMS - Sign in</title>
+<style>
+  *{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:flex;align-items:center;
+  justify-content:center;background:#0b0f17;color:#e6edf3;font-family:system-ui,Segoe UI,sans-serif}}
+  form{{background:#111827;border:1px solid #1f2937;border-radius:14px;padding:32px;width:320px;
+  box-shadow:0 10px 40px rgba(0,0,0,.4)}} h1{{margin:0 0 4px;font-size:22px;letter-spacing:.5px}}
+  p.sub{{margin:0 0 20px;color:#8b98a9;font-size:13px}} input{{width:100%;padding:12px 14px;
+  border-radius:10px;border:1px solid #2b3648;background:#0b0f17;color:#e6edf3;font-size:15px}}
+  button{{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:#2563eb;
+  color:#fff;font-size:15px;font-weight:600;cursor:pointer}} button:hover{{background:#1d4ed8}}
+  .err{{color:#f87171;font-size:13px;margin:0 0 12px}}
+</style></head><body>
+<form method='post' action='/login'>
+  <h1>SHIMS</h1><p class='sub'>Enter your master password to continue.</p>
+  {error}
+  <input type='password' name='password' placeholder='Master password' autofocus required>
+  <button type='submit'>Unlock</button>
+</form></body></html>"""
+
+
+def _request_is_authed(request: Request) -> bool:
+    from shared import bridge_auth
+    if bridge_auth.verify_session_cookie(request.cookies.get(bridge_auth.SESSION_COOKIE_NAME, "")):
+        return True
+    # Bridge/API callers present the derived token instead of a browser cookie.
+    if bridge_auth.token_matches(request.headers.get("X-Bridge-Token", "")):
+        return True
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer ") and bridge_auth.token_matches(auth[7:]):
+        return True
+    return False
+
+
+@app.middleware("http")
+async def _password_gate(request: Request, call_next):
+    from shared import bridge_auth
+    if bridge_auth.is_password_set():
+        path = request.url.path
+        if not any(path == p or path.startswith(p) for p in _AUTH_EXEMPT_PATHS):
+            if not _request_is_authed(request):
+                accept = request.headers.get("accept", "")
+                if request.method == "GET" and "text/html" in accept:
+                    return HTMLResponse(_LOGIN_PAGE.format(error=""), status_code=401, headers=_NO_CACHE)
+                return JSONResponse({"ok": False, "error": "authentication required", "login": "/login"},
+                                    status_code=401)
+    return await call_next(request)
+
+
+@app.get("/login")
+async def login_page() -> HTMLResponse:
+    return HTMLResponse(_LOGIN_PAGE.format(error=""), headers=_NO_CACHE)
+
+
+@app.post("/login")
+async def login_submit(password: str = Form("")):
+    from fastapi.responses import RedirectResponse
+    from shared import bridge_auth
+    if not bridge_auth.is_password_set() or bridge_auth.verify_password(password):
+        resp = RedirectResponse("/", status_code=303)
+        resp.set_cookie(bridge_auth.SESSION_COOKIE_NAME, bridge_auth.make_session_cookie(),
+                        httponly=True, samesite="lax", max_age=7 * 24 * 3600)
+        return resp
+    return HTMLResponse(_LOGIN_PAGE.format(error="<p class='err'>Incorrect password.</p>"),
+                        status_code=401, headers=_NO_CACHE)
+
+
+@app.get("/logout")
+async def logout_route():
+    from fastapi.responses import RedirectResponse
+    from shared.bridge_auth import SESSION_COOKIE_NAME
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE_NAME)
+    return resp
+
+
 @asynccontextmanager
 async def _omni_lifespan(_app):
     """Start the background-learning loop on boot; cancel it cleanly on shutdown."""
-    global _brain_background_task, _self_awareness_task
+    global _brain_background_task, _self_awareness_task, _orchestrator_task, _heartbeat_task
     # Startup security posture check
     for secret_name in ("SHIMS_SECRET_KEY", "SHIMS_BRIDGE_TOKEN"):
         if is_weak_secret(secret_name, os.getenv(secret_name, "")):
             log_event("security.weak_secret_warning", route="startup", provider="local", model="guardians", ok=False, message=f"{secret_name} is weak or default", metadata={"secret": secret_name})
     ensure_core_memories()
+    # Restore persisted chat history so past conversations reopen after a restart.
+    try:
+        await asyncio.to_thread(_hydrate_sessions)
+    except Exception:
+        pass
+    try:
+        expired = await asyncio.to_thread(_expire_stale_pending_actions)
+        if expired:
+            log_event("approval.expire_stale", route="startup", provider="local", model="approval-router", message=f"Expired {expired} stale pending approval(s) older than the TTL")
+    except Exception:
+        pass
     asyncio.create_task(_warm_brain_cache())
     if BOOT_SELF_AWARENESS_ENABLED and (_self_awareness_task is None or _self_awareness_task.done()):
         _self_awareness_task = asyncio.create_task(_run_boot_self_awareness())
@@ -548,6 +943,11 @@ async def _omni_lifespan(_app):
         _brain_background_task = asyncio.create_task(_brain_background_loop())
     _register_scheduler_runners()
     asyncio.create_task(_preload_voice_model())
+    _start_native_engine_background()
+    if _orchestrator_task is None:
+        _orchestrator_task = asyncio.create_task(_orchestrator_loop())
+    if HEARTBEAT_ENABLED and (_heartbeat_task is None or _heartbeat_task.done()):
+        _heartbeat_task = asyncio.create_task(_desktop_heartbeat_loop())
     try:
         from shared.background_jobs import ensure_default_jobs
         ensure_default_jobs()
@@ -556,6 +956,31 @@ async def _omni_lifespan(_app):
     try:
         yield
     finally:
+        if _heartbeat_task is not None:
+            _heartbeat_task.cancel()
+            try:
+                await _heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            _heartbeat_task = None
+            _heartbeat_state["alive"] = False
+        if _orchestrator_task is not None:
+            _orchestrator_task.cancel()
+            try:
+                await _orchestrator_task
+            except asyncio.CancelledError:
+                pass
+            _orchestrator_task = None
+        try:
+            from shared.compute_orchestrator import get_orchestrator
+            await asyncio.to_thread(get_orchestrator().shutdown)
+        except Exception:
+            pass
+        try:
+            from shared.native_engine import get_engine
+            await asyncio.to_thread(get_engine().stop)
+        except Exception:
+            pass
         if _self_awareness_task is not None and not _self_awareness_task.done():
             _self_awareness_task.cancel()
             try:
@@ -601,10 +1026,81 @@ def _register_scheduler_runners() -> None:
         def _inbox_ingest_runner(payload: dict) -> dict:
             from shared.background_jobs import run_inbox_ingest
             return run_inbox_ingest(payload)
+        def _comms_digest_runner(payload: dict) -> dict:
+            from shared.comms_digest import run_comms_digest
+            return run_comms_digest()
+        def _day_observer_runner(payload: dict) -> dict:
+            from shared.day_observer import snapshot
+            return snapshot()
+        def _nightly_cycle_runner(payload: dict) -> dict:
+            from shared.nightly_loop import run_nightly_cycle
+            return run_nightly_cycle()
         register_runner("tool", _tool_runner)
         register_runner("message", _message_runner)
         register_runner("plan", _plan_runner)
         register_runner("inbox_ingest", _inbox_ingest_runner)
+        register_runner("comms_digest", _comms_digest_runner)
+        register_runner("day_observer", _day_observer_runner)
+        register_runner("nightly_cycle", _nightly_cycle_runner)
+        # Default recurring comms digest → taskboard feed (Gmail + WhatsApp).
+        # Idempotent: only created when no enabled comms_digest job exists.
+        try:
+            from shared.desktop_scheduler import list_tasks as _sched_list, schedule_task as _sched_add
+            from shared.comms_digest import digest_interval_seconds
+            if not any(t.action_type == "comms_digest" for t in _sched_list(enabled_only=True, limit=200)):
+                _sched_add(
+                    "Comms digest (Gmail + WhatsApp taskboard)",
+                    "interval", str(digest_interval_seconds()),
+                    "comms_digest", {},
+                )
+        except Exception:
+            pass
+        # Day observer: periodic system snapshot for the nightly report.
+        # Idempotent: only created when no enabled day_observer job exists.
+        try:
+            from shared.desktop_scheduler import list_tasks as _sched_list2, schedule_task as _sched_add2
+            if not any(t.action_type == "day_observer" for t in _sched_list2(enabled_only=True, limit=200)):
+                interval_s = max(300, int(float(os.getenv("SHIMS_OBSERVER_INTERVAL_MIN", "30")) * 60))
+                _sched_add2(
+                    "Day observer snapshot",
+                    "interval", str(interval_s),
+                    "day_observer", {},
+                )
+        except Exception:
+            pass
+        # Nightly feedback + self-fix loop (big native model, 01:00 local).
+        # Idempotent: only created when no enabled nightly_cycle job exists.
+        try:
+            from shared.desktop_scheduler import list_tasks as _sched_list3, schedule_task as _sched_add3
+            if not any(t.action_type == "nightly_cycle" for t in _sched_list3(enabled_only=True, limit=200)):
+                cron = (os.getenv("SHIMS_NIGHTLY_CRON") or "0 1 * * *").strip()
+                _sched_add3(
+                    "Nightly feedback + self-fix loop",
+                    "cron", cron,
+                    "nightly_cycle", {},
+                )
+        except Exception:
+            pass
+        # Enterprise awareness sync: keeps SHIMS's brain current on what the
+        # enterprise holds (only when the bridge is configured).
+        try:
+            from shared.enterprise_bridge import is_enabled as _ent_enabled, is_reachable as _ent_reachable
+            from shared.desktop_scheduler import list_tasks as _sched_list4, schedule_task as _sched_add4
+            # Only schedule the recurring sync if the enterprise endpoint actually
+            # answers — the standalone app was folded into omni, so its old :8020 is
+            # usually dead and an unconditional job would churn every interval.
+            if _ent_enabled() and _ent_reachable() and not any(
+                t.action_type == "tool" and (t.payload or {}).get("tool") == "enterprise.sync_brain"
+                for t in _sched_list4(enabled_only=True, limit=200)
+            ):
+                interval_s = max(600, int(float(os.getenv("SHIMS_ENTERPRISE_SYNC_MIN", "60")) * 60))
+                _sched_add4(
+                    "Enterprise awareness sync",
+                    "interval", str(interval_s),
+                    "tool", {"tool": "enterprise.sync_brain", "args": {}},
+                )
+        except Exception:
+            pass
         start_scheduler()
     except Exception:
         pass
@@ -612,6 +1108,184 @@ def _register_scheduler_runners() -> None:
 
 # app is constructed earlier in this module; attach the lifespan post-hoc.
 app.router.lifespan_context = _omni_lifespan
+
+
+def _start_native_engine_background() -> None:
+    """Boot the SHIMS native engine in a background thread.
+
+    Only when native_enabled (default true) and discovery finds at least one
+    GGUF. Never blocks startup: model load (multi-GB) happens off the event
+    loop and failures are logged, not raised.
+    """
+    try:
+        if not getattr(settings, "native_enabled", True):
+            return
+        from shared.native_engine import discover_models, get_engine
+        if not discover_models():
+            return
+
+        def _boot() -> None:
+            try:
+                # Model lock precedence: SHIMS_CHAT_MODEL (Settings/topbar pin)
+                # → SHIMS_NATIVE_MODEL (env fallback) → engine's default pick.
+                # A pinned model that we cannot serve gets logged loudly and the
+                # engine still tries to load it (typo/rename produces a visible
+                # start_failed rather than a silent substitution to Llama-8B).
+                provider_pref = (os.getenv("SHIMS_CHAT_PROVIDER") or "").strip().lower()
+                native_ok = provider_pref in {"native", "", "auto"}
+                pin = (os.getenv("SHIMS_CHAT_MODEL") or "").strip()
+                if not pin:
+                    pin = (os.getenv("SHIMS_NATIVE_MODEL") or "").strip()
+                if native_ok and pin:
+                    if not _native_can_serve(pin):
+                        log_event("native_engine.pin_not_found", route="startup", provider="native",
+                                  model=pin, ok=False,
+                                  message=f"pinned model '{pin}' is not among discovered GGUFs; attempting anyway")
+                    health = get_engine().ensure_loaded(pin)
+                else:
+                    health = get_engine().start()
+                log_event("native_engine.started", route="startup", provider="native",
+                          model=health.get("model", ""),
+                          message=f"native engine ready on 127.0.0.1:{health.get('port')}",
+                          metadata={"backend": health.get("backend", ""), "ctx": health.get("ctx", 0),
+                                    "gpu_layers": health.get("gpu_layers", 0)})
+            except Exception as exc:
+                log_event("native_engine.start_failed", route="startup", provider="native",
+                          model="", ok=False, message=str(exc)[:200])
+
+        _spawn_background(asyncio.to_thread(_boot))
+    except Exception:
+        pass
+
+
+class NativeEngineLoadRequest(BaseModel):
+    model: str = ""
+
+
+@app.get("/api/native-engine/status")
+async def native_engine_status():
+    """Engine health + memory ledger + discovered models."""
+    from shared.native_engine import budget as native_budget, get_engine
+    engine = get_engine()
+    return {
+        "ok": True,
+        "health": engine.health(),
+        "budget": await asyncio.to_thread(native_budget.report),
+        "models": await asyncio.to_thread(engine.models),
+    }
+
+
+@app.post("/api/native-engine/load")
+async def native_engine_load(req: NativeEngineLoadRequest):
+    """Load (or switch to) a discovered GGUF by id/name/path."""
+    from shared.native_engine import get_engine
+    try:
+        health = await asyncio.to_thread(get_engine().ensure_loaded, req.model)
+        return {"ok": True, "health": health}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+@app.post("/api/native-engine/unload")
+async def native_engine_unload():
+    """Unload the model and free its memory reservation."""
+    from shared.native_engine import get_engine
+    await asyncio.to_thread(get_engine().unload)
+    return {"ok": True}
+
+
+class ModelDownloadRequest(BaseModel):
+    repo_id: str
+    filename: str
+
+
+class ModelCancelRequest(BaseModel):
+    job_id: str
+
+
+@app.get("/api/models/search")
+async def models_search(q: str = "", limit: int = 20):
+    """Search Hugging Face for GGUF repos (sorted by downloads)."""
+    from shared import model_manager
+    results = await asyncio.to_thread(model_manager.search_hf_models, q, limit)
+    return {"ok": True, "results": results}
+
+
+@app.get("/api/models/files")
+async def models_files(repo: str = ""):
+    """List the GGUF files of an HF repo (mmproj-* projectors flagged apart)."""
+    from shared import model_manager
+    return await asyncio.to_thread(model_manager.list_hf_gguf_files, repo)
+
+
+@app.post("/api/models/download")
+async def models_download(req: ModelDownloadRequest):
+    """Queue a GGUF download into storage/models (one at a time)."""
+    from shared import model_manager
+    return await asyncio.to_thread(model_manager.start_download, req.repo_id, req.filename)
+
+
+@app.get("/api/models/downloads")
+async def models_downloads():
+    """All download job states (queued/downloading/done/error/cancelled)."""
+    from shared import model_manager
+    return {"ok": True, "jobs": model_manager.list_jobs()}
+
+
+@app.post("/api/models/cancel")
+async def models_cancel(req: ModelCancelRequest):
+    """Cooperatively cancel a queued/downloading job (deletes the .part)."""
+    from shared import model_manager
+    return await asyncio.to_thread(model_manager.cancel_job, req.job_id)
+
+
+@app.get("/api/models/local")
+async def models_local():
+    """Discovered local GGUFs with loaded flag, sizes, and managed-dir badge."""
+    from shared import model_manager
+    return await asyncio.to_thread(model_manager.local_models)
+
+
+@app.delete("/api/models/local")
+async def models_local_delete(path: str = ""):
+    """Delete a GGUF from disk — only inside storage/models or data/models
+    and never the currently loaded model."""
+    from shared import model_manager
+    return await asyncio.to_thread(model_manager.delete_local_model, path)
+
+
+class OrchestratorImageJobRequest(BaseModel):
+    prompt: str
+    negative: str = ""
+    width: int = 1024
+    height: int = 1024
+    purpose: str = "general"
+
+
+@app.get("/api/orchestrator/status")
+async def orchestrator_status():
+    """Compute-orchestrator ledger: budgets, running workloads, idle timers, queue."""
+    from shared.compute_orchestrator import get_orchestrator
+    return {"ok": True, **(await asyncio.to_thread(get_orchestrator().status))}
+
+
+@app.post("/api/orchestrator/image-job")
+async def orchestrator_image_job(req: OrchestratorImageJobRequest):
+    """Queue an image for downtime generation (runs when the machine goes idle)."""
+    from shared.compute_orchestrator import get_orchestrator
+    job_id = get_orchestrator().queue_image_job(
+        req.prompt, negative=req.negative, width=req.width, height=req.height, purpose=req.purpose
+    )
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/api/orchestrator/image-job/{job_id}")
+async def orchestrator_image_job_status(job_id: str):
+    from shared.compute_orchestrator import get_orchestrator
+    job = get_orchestrator().job_status(job_id)
+    if job is None:
+        return {"ok": False, "error": "unknown job_id"}
+    return {"ok": True, "job": job}
 
 
 class ChatRequest(BaseModel):
@@ -749,6 +1423,21 @@ class GmailReplyRequest(BaseModel):
     body: str
 
 
+class GmailDraftRequest(BaseModel):
+    to: str
+    subject: str = ""
+    body: str = ""
+    cc: str = ""
+    thread_id: str | None = None
+    in_reply_to: str | None = None
+
+
+class GmailAttachmentRequest(BaseModel):
+    message_id: str
+    attachment_id: str
+    filename: str = "attachment"
+
+
 class ChemVerifyRequest(BaseModel):
     smiles: str
 
@@ -857,6 +1546,8 @@ class SkillSaveRequest(BaseModel):
     tags: list[str] | None = None
     pinned: bool = False
     skill_id: str | None = None
+    previous_version_id: str | None = None
+    created_from: str | None = None
 
 
 class BuilderRunRequest(BaseModel):
@@ -962,6 +1653,11 @@ class AgentModelsRequest(BaseModel):
     research_model: str | None = None
 
 
+class BrainModelRequest(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
 class EvolutionProposeRequest(BaseModel):
     relative_path: str
     new_content: str
@@ -1010,6 +1706,7 @@ class EvolutionCapabilityCheckRequest(BaseModel):
     apply: bool = False
     approval_phrase: str | None = ""
     approved_by: str | None = "human-operator"
+    approval_id: str | None = None
     revision: str | None = ""
     targets: list[str] | None = None
 
@@ -1085,6 +1782,23 @@ async def _build_user_message_with_images(message: str, images: list[str], provi
     return {"role": "user", "content": "\n\n".join(vision_parts + [message])}
 
 
+def _attach_live_context(user_message: dict[str, Any], live_context: str) -> dict[str, Any]:
+    """Return a COPY of the user message with per-turn volatile context (time,
+    RAG, recall, pending) prepended — placing it at the tail of the prompt.
+
+    Keeping this out of messages[0] and out of the stored history message is what
+    lets the byte-stable system prompt + append-only history stay a reusable KV/
+    prefix-cache prefix on the native engine, so a growing conversation is not
+    reprocessed from scratch every turn. The original user_message (without live
+    context) is what gets stored in history, so retrieved context never compounds."""
+    if not live_context:
+        return user_message
+    content = user_message.get("content")
+    if isinstance(content, str):
+        return {**user_message, "content": f"{live_context}\n\n---\n\n{content}"}
+    if isinstance(content, list):
+        return {**user_message, "content": [{"type": "text", "text": live_context}, *content]}
+    return user_message
 
 
 def _should_auto_plan(text: str) -> bool:
@@ -1172,14 +1886,116 @@ def _list_pending_actions(session_id: str | None = None, limit: int = 30, includ
     return rows
 
 
+def _approval_ttl_s() -> float:
+    try:
+        return max(1.0, float(os.getenv("SHIMS_APPROVAL_TTL_S", "1800")))
+    except Exception:
+        return 1800.0
+
+
+def _pending_action_age_s(action: dict[str, Any]) -> float | None:
+    raw = str(action.get("created_at") or "")
+    if not raw:
+        return None
+    try:
+        created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - created).total_seconds()
+    except Exception:
+        return None
+
+
+def _pending_action_fresh(action: dict[str, Any]) -> bool:
+    age = _pending_action_age_s(action)
+    if age is None:
+        return True  # unparseable timestamps are not auto-expired
+    return age <= _approval_ttl_s()
+
+
 def _latest_pending_action(session_id: str | None = None) -> dict[str, Any] | None:
+    """Most recent pending action for THIS session only — no cross-session
+    global fallback (a bare "yes" must never execute another session's stale
+    approval). Items older than SHIMS_APPROVAL_TTL_S are treated as expired."""
+    if not session_id:
+        return None
     scoped = _list_pending_actions(session_id=session_id, limit=1)
-    if scoped:
-        return _load_pending_action(scoped[0]["approval_id"])
-    global_rows = _list_pending_actions(limit=1)
-    if global_rows:
-        return _load_pending_action(global_rows[0]["approval_id"])
+    if not scoped:
+        return None
+    action = _load_pending_action(scoped[0]["approval_id"])
+    if action and not _pending_action_fresh(action):
+        return None
+    return action
+
+
+def _latest_pending_action_any() -> dict[str, Any] | None:
+    """Global most-recent pending action for explicit operator endpoints
+    (REST/voice approval by id-less request) — never used by the chat yes/no
+    router."""
+    rows = _list_pending_actions(limit=1)
+    if rows:
+        return _load_pending_action(rows[0]["approval_id"])
     return None
+
+
+def _surface_pending_action(action: dict[str, Any], session_id: str | None) -> dict[str, Any]:
+    """Record that this pending action was actually shown to the user in this
+    session. Only surfaced, in-session, unexpired actions may be executed by a
+    bare yes/no chat reply."""
+    action["surfaced_at"] = _utc_now()
+    if session_id:
+        action["session_id"] = session_id
+    return _save_pending_action(action)
+
+
+def _executable_pending_action(session_id: str | None) -> dict[str, Any] | None:
+    """Pending action eligible for bare yes/no chat execution: session-scoped,
+    actually surfaced to the user in this session, and within the approval TTL."""
+    pending = _latest_pending_action(session_id)
+    if not pending:
+        return None
+    if not session_id or pending.get("session_id") != session_id:
+        return None
+    if not pending.get("surfaced_at"):
+        return None
+    return pending
+
+
+def _pending_action_authorizes(approval_record: dict[str, Any] | None) -> bool:
+    """A recorded pending action on disk (surfaced + confirmed by the human, or
+    an auto-approved safe scaffold) is itself the authorization to apply — no
+    hardcoded approval phrase needed on this path."""
+    if not isinstance(approval_record, dict):
+        return False
+    approval_id = str(approval_record.get("approval_id") or "")
+    if not approval_id:
+        return False
+    stored = _load_pending_action(approval_id)
+    return bool(stored and stored.get("approval_id") == approval_id)
+
+
+def _expire_stale_pending_actions() -> int:
+    """Startup hygiene: mark pending/ready approvals older than the TTL as
+    expired. Files are kept on disk and never executed."""
+    expired = 0
+    for path in PENDING_ACTION_DIR.glob("*.json"):
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if item.get("status") not in {"pending", "ready"}:
+            continue
+        if _pending_action_fresh(item):
+            continue
+        item["status"] = "expired"
+        item["resolved_at"] = _utc_now()
+        item["expired_reason"] = "approval_ttl"
+        try:
+            _save_pending_action(item)
+            expired += 1
+        except Exception:
+            pass
+    return expired
 
 
 def _create_pending_action(
@@ -1346,7 +2162,8 @@ def _detect_chat_action_request(text: str, session_id: str | None) -> dict[str, 
             session_id=session_id,
             risk="sandbox_validation",
         )
-    # Direct desktop-bridge shortcuts (screenshot, ping, system info) so natural chat can reach the paired desktop.
+    # Direct desktop-bridge shortcuts (screenshot, shell, file ops, ping, system info)
+    # so natural chat can reach the paired desktop without entering the full tool loop.
     bridge_action: str | None = None
     bridge_args: dict[str, Any] = {}
     if re.search(r"\bping\s+(?:the\s+)?(?:desktop\s+)?bridge\b", low):
@@ -1355,6 +2172,21 @@ def _detect_chat_action_request(text: str, session_id: str | None) -> dict[str, 
         bridge_action = "screenshot"
     elif re.search(r"\b(desktop|bridge)\s+(?:system\s+)?info\b", low):
         bridge_action = "system_info"
+    elif re.search(r"\b(read|show|open)\s+(?:the\s+)?(?:file\s+)?(.+?)\s+(?:on\s+)?(?:my\s+)?(?:desktop|bridge|computer|pc|machine)\b", low):
+        m = re.search(r"\b(read|show|open)\s+(?:the\s+)?(?:file\s+)?(.+?)\s+(?:on\s+)?(?:my\s+)?(?:desktop|bridge|computer|pc|machine)\b", text or "", re.I)
+        bridge_action = "read_file"
+        bridge_args["path"] = m.group(2).strip("\"' ") if m else "."
+    elif re.search(r"\bfind\s+(?:the\s+)?(?:file\s+)?(.+?)\s+(?:on\s+)?(?:my\s+)?(?:desktop|bridge|computer|pc|machine)\b", low):
+        m = re.search(r"\bfind\s+(?:the\s+)?(?:file\s+)?(.+?)\s+(?:on\s+)?(?:my\s+)?(?:desktop|bridge|computer|pc|machine)\b", text or "", re.I)
+        bridge_action = "find_file"
+        bridge_args["name"] = m.group(1).strip("\"' ") if m else "*"
+    elif re.search(r"\brun\s+(?:(?:this\s+)?(?:command\s+)?(?:on\s+)?(?:my\s+)?(?:desktop|bridge|computer|pc|machine)\b)?", low):
+        # Try to extract a quoted command, otherwise take the rest after "run".
+        m = re.search(r"\brun\s+(?:this\s+)?(?:command\s+)?(?:on\s+)?(?:my\s+)?(?:desktop|bridge|computer|pc|machine)?\s*[\"'](.+?)[\"']", text or "", re.I)
+        if not m:
+            m = re.search(r"\brun\s+(.+?)(?:\s+on\s+(?:my\s+)?(?:desktop|bridge|computer|pc|machine))?$", text or "", re.I)
+        bridge_action = "shell"
+        bridge_args["command"] = m.group(1).strip() if m else "echo no command"
     if bridge_action:
         return _create_pending_action(
             action_type="agent_tool",
@@ -1366,7 +2198,10 @@ def _detect_chat_action_request(text: str, session_id: str | None) -> dict[str, 
         )
     # Coder / app creation intent — checked BEFORE _detect_tool_intent because words like
     # "drawing" in "create a drawing app" can falsely match image intent.
-    create_app = re.search(r"\b(create|build|make|scaffold)\b.*\b(app|tool|dashboard|frontend|software|program|code|project)\b", low)
+    # The noun must follow the verb within a few words, and generic nouns like
+    # "tool"/"code" are excluded: "create a PDF about tool calling" must NOT
+    # be hijacked into app scaffolding.
+    create_app = re.search(r"\b(create|build|make|scaffold)\b.{0,50}?\b(app|dashboard|frontend|software|program|project)\b", low)
     is_coder_intent = bool(create_app) or bool(re.search(r"\b(write|edit|modify|fix|debug|build|compile|run|test)\b.*\b(code|file|script|program|function|class|module|project)\b", low))
     if create_app:
         name_match = re.search(r"(?:app|tool|dashboard|frontend|software|program|project)\s+(?:called|named|for)?\s*([A-Za-z0-9 _-]{3,60})", text or "", re.I)
@@ -1404,8 +2239,8 @@ async def _execute_pending_action(action: dict[str, Any], approved_by: str = "hu
     if action_type == "evolution_capability_check":
         req = EvolutionCapabilityCheckRequest(
             apply=True,
-            approval_phrase="I_APPROVE_SHIMS_PATCH",
             approved_by=approved_by,
+            approval_id=str(action.get("approval_id") or ""),
             revision=str(payload.get("revision") or ""),
             targets=payload.get("targets") or None,
         )
@@ -1424,9 +2259,10 @@ async def _execute_pending_action(action: dict[str, Any], approved_by: str = "hu
             style=str(payload.get("style") or "modern"),
             apply=True,
             approved_by=approved_by,
-            approval_phrase="I_APPROVE_SHIMS_PATCH",
         )
-        return _create_or_propose_coder_app(app_req)
+        # The surfaced + confirmed pending-action record is the authorization;
+        # no hardcoded approval phrase on this path.
+        return _create_or_propose_coder_app(app_req, approval_record=action)
     if action_type == "agent_tool":
         tool = str(payload.get("tool") or "")
         args = payload.get("args") or {}
@@ -1459,7 +2295,7 @@ def _create_coder_proposal(req: CoderProposalRequest) -> dict[str, Any]:
     return proposal
 
 
-def _create_or_propose_coder_app(req: CoderAppRequest) -> dict[str, Any]:
+def _create_or_propose_coder_app(req: CoderAppRequest, approval_record: dict[str, Any] | None = None) -> dict[str, Any]:
     slug = _slugify(req.name, "generated-app")
     relative_path = f"apps/generated/{slug}/index.html"
     content = _build_generated_app_html(req.name, req.prompt, req.style)
@@ -1485,7 +2321,11 @@ def _create_or_propose_coder_app(req: CoderAppRequest) -> dict[str, Any]:
         "app_url": f"/generated-apps/{slug}/index.html",
     }
     if req.apply:
-        if not settings.omnipotent_mode and (req.approval_phrase or "").strip() != "I_APPROVE_SHIMS_PATCH":
+        if (
+            not settings.omnipotent_mode
+            and not _pending_action_authorizes(approval_record)
+            and (req.approval_phrase or "").strip() != "I_APPROVE_SHIMS_PATCH"
+        ):
             out.update({"ok": False, "status": "approval_required", "message": "Applying generated apps requires approval_phrase='I_APPROVE_SHIMS_PATCH'."})
             return out
         approval = approve_proposal(proposal["proposal_id"], approved_by=req.approved_by or "human-operator", note="Generated app approved through coder playground.")
@@ -1515,9 +2355,20 @@ def _attach_ledger(result: dict[str, Any], path: Path, document_type: str) -> di
 
 
 def _trust_fields(trust: dict[str, Any]) -> dict[str, Any]:
+    # Stream evidence excerpts are truncated so the initial meta event stays small
+    # and does not block the token stream on slow connections.
+    evidence = trust.get("evidence") or []
+    slim_evidence = []
+    for ev in evidence:
+        ev_copy = dict(ev) if isinstance(ev, dict) else {"kind": str(ev)}
+        excerpt = str(ev_copy.get("excerpt") or ev_copy.get("content") or "")[:240]
+        if excerpt:
+            ev_copy = {k: v for k, v in ev_copy.items() if k not in ("excerpt", "content")}
+            ev_copy["excerpt"] = excerpt
+        slim_evidence.append(ev_copy)
     return {
         "trust": trust,
-        "evidence": trust.get("evidence") or [],
+        "evidence": slim_evidence,
         "confidence": trust.get("confidence") or {},
         "query_plan": trust.get("query_plan"),
         "action_id": trust.get("action_id") or "",
@@ -1557,7 +2408,7 @@ def _cloud_provider_from_model(model: str | None) -> str | None:
 
 
 def _provider_configured(provider: str) -> bool:
-    if provider in {"ollama", "huggingface", "lmstudio"}:
+    if provider in {"ollama", "huggingface", "lmstudio", "vllm", "sglang", "aphrodite", "koboldcpp"}:
         return True
     env = PROVIDER_ENV.get(provider)
     return bool(env and _clean_secret(os.getenv(env)))
@@ -1575,7 +2426,7 @@ def _cloud_model_names() -> set[str]:
 # staleness is invisible to users (installed models don't change mid-turn),
 # but the saved round trips compound on every single message.
 _MODEL_LIST_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
-MODEL_LIST_CACHE_TTL = float(os.getenv("SHIMS_MODEL_LIST_CACHE_TTL", "4.0"))
+MODEL_LIST_CACHE_TTL = float(os.getenv("SHIMS_MODEL_LIST_CACHE_TTL", "60.0"))
 
 
 async def _cached_model_list(key: str, fetch: Callable[[], Awaitable[list[dict[str, Any]]]]) -> list[dict[str, Any]]:
@@ -1730,6 +2581,167 @@ async def _lmstudio_models_raw(timeout: float = 2.5) -> list[dict[str, Any]]:
 
 async def _lmstudio_names() -> list[str]:
     return [m["name"] for m in await _lmstudio_models_raw()]
+
+
+async def _openai_compatible_models_raw(base_url: str, provider: str, timeout: float = 2.5) -> list[dict[str, Any]]:
+    """List models from any OpenAI-compatible local server (/v1/models)."""
+    async def _fetch() -> list[dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                headers: dict[str, str] = {}
+                key = _clean_secret(os.getenv(f"{provider.upper()}_API_KEY"))
+                if key:
+                    headers["Authorization"] = f"Bearer {key}"
+                r = await client.get(f"{base_url.rstrip('/')}/v1/models", headers=headers)
+                r.raise_for_status()
+                data = r.json()
+            out: list[dict[str, Any]] = []
+            for item in data.get("data", []):
+                name = item.get("id")
+                if not name:
+                    continue
+                out.append({
+                    "name": name,
+                    "model": name,
+                    "provider": provider,
+                    "family": "",
+                    "parameters": "",
+                    "quantization": "",
+                    "modified_at": None,
+                    "size": 0,
+                    "installed": True,
+                    "loaded": True,
+                    "is_default": name == PROVIDER_DEFAULTS.get(provider, ""),
+                    "tool_capable": is_tool_capable(name),
+                })
+            return out
+        except Exception:
+            return []
+
+    return await _cached_model_list(provider, _fetch)
+
+
+async def _vllm_models_raw() -> list[dict[str, Any]]:
+    return await _openai_compatible_models_raw(settings.vllm_base_url, "vllm")
+
+
+async def _sglang_models_raw() -> list[dict[str, Any]]:
+    return await _openai_compatible_models_raw(settings.sglang_base_url, "sglang")
+
+
+async def _aphrodite_models_raw() -> list[dict[str, Any]]:
+    return await _openai_compatible_models_raw(settings.aphrodite_base_url, "aphrodite")
+
+
+async def _koboldcpp_models_raw() -> list[dict[str, Any]]:
+    return await _openai_compatible_models_raw(settings.koboldcpp_base_url, "koboldcpp")
+
+
+_LOCAL_ENGINE_MODEL_LISTERS = {
+    "vllm": _vllm_models_raw,
+    "sglang": _sglang_models_raw,
+    "aphrodite": _aphrodite_models_raw,
+    "koboldcpp": _koboldcpp_models_raw,
+}
+
+
+def _local_engine_base_url(provider: str) -> str:
+    """Base URL for an OpenAI-compatible local engine (no trailing slash)."""
+    return (getattr(settings, f"{provider}_base_url", "") or "").rstrip("/")
+
+
+def _native_pin_or_loaded() -> str:
+    """The model the CHAT LANE should target: Settings pin (SHIMS_CHAT_MODEL)
+    wins over whatever is currently loaded. Every "fall back to native" return
+    site uses this — without it, a mid-session force-load of a different GGUF
+    (via /api/native-engine/load, or any other kick) leaked into the chat lane
+    and made the pinned model silently disappear until manual re-pin."""
+    pin = (os.getenv("SHIMS_CHAT_MODEL") or "").strip()
+    if pin:
+        return pin
+    return _native_loaded_model()
+
+
+def _native_loaded_model() -> str:
+    """Loaded native-engine model id, or '' when the engine is not healthy."""
+    try:
+        from shared.native_engine import get_engine
+        return get_engine().loaded_model_id()
+    except Exception:
+        return ""
+
+
+def _native_can_serve(model_ref: str) -> bool:
+    """True when the native engine already serves this model, or has the GGUF.
+
+    Used so a stale model name in the UI cannot bypass the native engine. Both
+    the loaded id and on-disk discovery count: switching a native GGUF is a load
+    away, whereas routing to another backend abandons the primary engine.
+    """
+    ref = (model_ref or "").strip()
+    if not ref:
+        return False
+    if ref == _native_loaded_model():
+        return True
+    try:
+        from shared.native_engine import discovery
+        return discovery.find_model(ref) is not None
+    except Exception:
+        return False
+
+
+_NATIVE_LOAD_KICK: dict[str, Any] = {"at": 0.0, "target": ""}
+
+
+def _kick_native_load(model_ref: str = "") -> None:
+    """Background-load/switch the native engine's GGUF, throttled so a burst of
+    turns during a reload does not stack duplicate loads.
+
+    ALWAYS resolves the empty-string case to SHIMS_CHAT_MODEL (the Settings pin)
+    when set — never to discovery's default. This is the second line of defence
+    behind NativeEngine._resolve_model's own pin-first fallback; together they
+    make it impossible for any code path to silently load Llama-8B (or anything
+    else) when the user has pinned a brain model."""
+    try:
+        # Empty string: promote the Settings pin so we never fall through to
+        # discovery.pick_default_model() and boot Llama-8B by surprise.
+        target = model_ref or (os.getenv("SHIMS_CHAT_MODEL") or "").strip()
+        # Throttle only when re-kicking the SAME model. A kick that would switch
+        # to a different model must never be dropped — otherwise a pin-restore
+        # after an /api/native-engine/load to the wrong model stays blocked for
+        # 3 min and the chat lane keeps asking the wrong engine.
+        try:
+            from shared.native_engine import get_engine as _g
+            loaded_now = _g().loaded_model_id()
+        except Exception:
+            loaded_now = ""
+        if target and target == loaded_now:
+            return  # already loaded, nothing to do
+        if target == _NATIVE_LOAD_KICK.get("target") and time.time() - _NATIVE_LOAD_KICK["at"] < 180:
+            return
+        _NATIVE_LOAD_KICK["at"] = time.time()
+        _NATIVE_LOAD_KICK["target"] = target
+
+        async def _load() -> None:
+            try:
+                from shared.native_engine import get_engine
+                eng = get_engine()
+                if target:
+                    await asyncio.to_thread(eng.ensure_loaded, target)
+                else:
+                    await asyncio.to_thread(eng.start)
+            except Exception:
+                pass
+        _spawn_background(_load())
+    except Exception:
+        pass
+
+
+async def _local_engine_names(provider: str) -> list[str]:
+    lister = _LOCAL_ENGINE_MODEL_LISTERS.get(provider)
+    if not lister:
+        return []
+    return [m["name"] for m in await lister()]
 
 
 async def _lmstudio_free_memory_for(target_model: str, timeout: float = 15.0) -> None:
@@ -1967,6 +2979,48 @@ async def _lmstudio_pick_default(lm_models: list[dict[str, Any]]) -> str:
     return ""
 
 
+# Local backends other than the SHIMS native engine. Native is SHIMS's own
+# engine and the default path; these sit alongside the cloud providers as
+# optional secondary backends.
+SECONDARY_LOCAL_PROVIDERS = {"lmstudio", "ollama", "vllm", "sglang", "aphrodite", "koboldcpp"}
+
+
+def _secondary_provider_mode() -> str:
+    """How auto-routing may use the non-native local backends.
+
+    ``SHIMS_SECONDARY_PROVIDERS``:
+      * ``off``/``none`` (default) — never probe or auto-select. Strictly
+        native + cloud: SHIMS runs native-only for local inference.
+      * ``auto`` — probe them only when the native engine has no model
+        loaded (legacy fallback behavior).
+      * ``all``/``*`` or a comma list — always available to auto-routing.
+
+    An explicit provider on the request is always honored regardless of this
+    setting; the gate governs *automatic* selection and the HTTP probing that
+    goes with it. Each probe is a round trip per turn, and letting auto-pick
+    land silently on LM Studio also hides the native engine being down.
+    """
+    raw = (os.getenv("SHIMS_SECONDARY_PROVIDERS") or "off").strip().lower()
+    if raw in {"off", "none", "false", "0", ""}:
+        return "off"
+    if raw in {"auto", ""}:
+        return "auto"
+    return raw
+
+
+def _secondary_providers_allowed() -> set[str]:
+    """Concrete set of secondary backends auto-routing may select right now."""
+    mode = _secondary_provider_mode()
+    if mode == "off":
+        return set()
+    if mode == "auto":
+        # Fallback only: native gets the turn whenever it can serve it.
+        return set() if _native_loaded_model() else set(SECONDARY_LOCAL_PROVIDERS)
+    if mode in {"all", "*", "true", "1"}:
+        return set(SECONDARY_LOCAL_PROVIDERS)
+    return {p.strip() for p in mode.split(",") if p.strip()} & SECONDARY_LOCAL_PROVIDERS
+
+
 async def _local_default_provider_model() -> tuple[str, str]:
     """Pick the best local backend when no explicit choice was made.
 
@@ -1975,6 +3029,14 @@ async def _local_default_provider_model() -> tuple[str, str]:
     Ollama's CPU fallback for the same GGUF weights. Ollama remains the
     fallback so nothing breaks if LM Studio isn't running.
     """
+    # Check dedicated OpenAI-compatible engines first — they often have the
+    # largest models loaded for high-throughput serving. Probed concurrently:
+    # sequential 2.5s-timeout GETs added up to 10s to first-token on cold cache.
+    engines = ("vllm", "sglang", "aphrodite", "koboldcpp")
+    engine_names = await asyncio.gather(*(_local_engine_names(eng) for eng in engines))
+    for eng, names in zip(engines, engine_names):
+        if names:
+            return eng, names[0]
     lm_models = await _lmstudio_models_raw()
     if lm_models:
         default = await _lmstudio_pick_default(lm_models)
@@ -1986,69 +3048,95 @@ async def _local_default_provider_model() -> tuple[str, str]:
 async def _resolve_provider_model(provider: str | None, model: str | None, *, privacy_mode: str = "balanced", text: str | None = None) -> tuple[str, str, str]:
     """Single source of truth for model/provider routing.
 
-    Stale UI state is treated conservatively: an explicit Ollama provider can never call Anthropic.
-    A selected local model also wins over a stale cloud provider value from older UI state.
+    NATIVE-ONLY local routing: SHIMS's own GGUF engine is the ONLY local
+    provider. Ollama, LM Studio, vLLM/SGLang/Aphrodite/KoboldCPP and the
+    ``local``/``auto`` aliases all resolve to native — no HTTP probing of
+    secondary backends ever happens here. Explicit cloud providers
+    (anthropic/openai/gemini/kimi/deepseek/qwen) are still honored.
+
+    Precedence: explicit request pick > Settings-saved SHIMS_CHAT_* > loaded
+    native model > engine default pick.
     """
     from shared.privacy_guard import can_use_cloud
     requested_provider = (provider or "auto").strip().lower() or "auto"
     requested_model = _normalize_ollama_model_name(model)
-    # Independent network lookups — run them concurrently instead of back-to-back.
-    names, lm_names = await asyncio.gather(_ollama_names(), _lmstudio_names())
-    local_default = _preferred_local_model(names)
-    local_provider, local_model = await _local_default_provider_model()
+    env_provider = (os.getenv("SHIMS_CHAT_PROVIDER") or "").strip().lower()
+    env_model = (os.getenv("SHIMS_CHAT_MODEL") or "").strip()
 
-    if requested_provider == "lmstudio":
-        if requested_model and requested_model in lm_names:
-            return "lmstudio", requested_model, "selected-local"
-        if lm_names:
-            default = local_model if local_provider == "lmstudio" else lm_names[0]
-            return "lmstudio", default, "forced-local-from-provider"
-        return "ollama", local_default, "lmstudio-not-configured-fallback-local"
+    _LOCAL_ALIASES = {"", "auto", "local", "native", "ollama", "lmstudio",
+                      "vllm", "sglang", "aphrodite", "koboldcpp", "huggingface"}
 
-    if requested_provider in {"local", "ollama"}:
-        if requested_model and requested_model in names:
-            return "ollama", requested_model, "selected-local"
-        if requested_model and _looks_local_model(requested_model) and requested_model not in _cloud_model_names():
-            return "ollama", requested_model, "local-requested"
-        return "ollama", local_default, "forced-local-from-provider"
-
-    if requested_model and requested_model in lm_names:
-        return "lmstudio", requested_model, "local-model-overrides-stale-provider"
-
-    if requested_model and (_looks_local_model(requested_model) or requested_model in names):
-        return "ollama", requested_model, "local-model-overrides-stale-provider"
-
-    # Respect explicit cloud provider choice when the selected model is not local.
-    if requested_provider in PROVIDER_DEFAULTS and requested_provider != "auto" and requested_provider != "ollama":
-        # Privacy guard: only block HIGH sensitivity for explicit provider choices;
-        # MEDIUM is allowed because the user deliberately picked a cloud provider.
+    # Explicit cloud provider on the request → honor it (with privacy guard).
+    if requested_provider not in _LOCAL_ALIASES and requested_provider in PROVIDER_DEFAULTS:
         if text:
             from shared.privacy_guard import classify_sensitivity
             if classify_sensitivity(text) == "high":
-                return local_provider, local_model, "privacy-guard-high-explicit-override"
-        p = requested_provider
-        m = requested_model if requested_model and not _looks_local_model(requested_model) else PROVIDER_DEFAULTS[p]
-        if not _provider_configured(p) and (names or lm_names):
-            return local_provider, local_model, f"cloud-{p}-not-configured-fallback-local"
-        return p, m, "explicit-cloud-provider"
+                return "native", _native_pin_or_loaded() or "", "privacy-guard-high-explicit-override"
+        m = requested_model if requested_model and not _looks_local_model(requested_model) else PROVIDER_DEFAULTS[requested_provider]
+        if not _provider_configured(requested_provider):
+            return "native", _native_pin_or_loaded() or "", f"cloud-{requested_provider}-not-configured-fallback-native"
+        return requested_provider, m, "explicit-cloud-provider"
 
-    # Privacy guard: check if text contains sensitive data before routing to cloud (auto mode only)
-    if text:
-        allowed, reason = can_use_cloud(text, privacy_mode)
-        if not allowed:
-            return local_provider, local_model, f"privacy-guard-{reason}"
+    # Settings-saved selection fills gaps (Settings → Brain Model persists to
+    # SHIMS_CHAT_PROVIDER / SHIMS_CHAT_MODEL via _set_env_persistent).
+    effective_provider = requested_provider
+    if effective_provider in {"", "auto"} and env_provider:
+        effective_provider = env_provider
+    effective_model = requested_model or env_model
 
-    cloud_provider = _cloud_provider_from_model(requested_model)
-    if cloud_provider:
-        if _provider_configured(cloud_provider):
-            return cloud_provider, requested_model or PROVIDER_DEFAULTS[cloud_provider], "cloud-model-selected"
-        if names or lm_names:
-            return local_provider, local_model, f"cloud-{cloud_provider}-not-configured-fallback-local"
-        return cloud_provider, requested_model or PROVIDER_DEFAULTS[cloud_provider], "cloud-model-no-local-fallback"
+    # Settings-saved CLOUD provider (request said auto) → honor it too.
+    if requested_provider in {"", "auto"} and effective_provider not in _LOCAL_ALIASES and effective_provider in PROVIDER_DEFAULTS:
+        if text:
+            from shared.privacy_guard import classify_sensitivity
+            if classify_sensitivity(text) == "high":
+                return "native", _native_pin_or_loaded() or "", "privacy-guard-high-env-override"
+        m = effective_model if effective_model and not _looks_local_model(effective_model) else PROVIDER_DEFAULTS[effective_provider]
+        if not _provider_configured(effective_provider):
+            return "native", _native_pin_or_loaded() or "", f"cloud-{effective_provider}-not-configured-fallback-native"
+        return effective_provider, m, "env-cloud-provider"
 
-    if requested_model:
-        return local_provider, requested_model, "auto-local-first"
-    return local_provider, local_model, "auto-local-first"
+    # A cloud model name on a local/auto route (e.g. picked from the dropdown)
+    # still routes to that cloud provider when configured.
+    if effective_provider in {"", "auto"} or (effective_provider in _LOCAL_ALIASES and _cloud_provider_from_model(effective_model)):
+        cloud_provider = _cloud_provider_from_model(effective_model)
+        if cloud_provider:
+            if text:
+                allowed, reason = can_use_cloud(text, privacy_mode)
+                if not allowed:
+                    return "native", _native_pin_or_loaded() or "", f"privacy-guard-{reason}"
+            if _provider_configured(cloud_provider):
+                return cloud_provider, effective_model or PROVIDER_DEFAULTS[cloud_provider], "cloud-model-selected"
+            return "native", _native_pin_or_loaded() or "", f"cloud-{cloud_provider}-not-configured-fallback-native"
+
+    # Every remaining case is a local route → native, and ONLY native.
+    # Precedence: **Settings pin (SHIMS_CHAT_MODEL) wins**. That's what "pin"
+    # means — the frontend sends `state.selectedModel` on every turn (from an
+    # old topbar picker), and if request-model won here, the pin would be
+    # silently overridden whenever the frontend's cached selection drifted from
+    # Settings (typical after any /api/native-engine/load call updates the
+    # currently-loaded model behind the scenes). This was exactly the observed
+    # "pinned 40B but chat uses Llama-8B" bug.
+    # Only the request-model wins when NO Settings pin is set at all.
+    if env_model:
+        pin = env_model
+    elif requested_model and _native_can_serve(requested_model):
+        pin = requested_model
+    else:
+        pin = ""
+    loaded = _native_loaded_model()
+    if pin and loaded != pin:
+        # Switching (or pin not loaded yet). Return the PINNED name so downstream
+        # code books capacity for the right model, and trigger a load.
+        _kick_native_load(pin)
+        return "native", pin, "native-model-switching"
+    if loaded:
+        return "native", loaded, "selected-native"
+    if pin:
+        _kick_native_load(pin)
+        return "native", pin, "native-model-switching"
+    # Engine down/mid-load: never fall through to a secondary local backend.
+    _kick_native_load("")
+    return "native", "", "native-loading"
 
 
 def _guard_duplicate(session_id: str, user_text: str, source: str | None) -> bool:
@@ -2300,6 +3388,15 @@ def _coerce_llm_search_understanding(raw: str, data: dict[str, Any], heuristic: 
 
 async def _provider_ready_for_llm(provider: str, model: str) -> bool:
     provider = (provider or "").strip().lower()
+    if provider == "native":
+        if _native_loaded_model():
+            return True
+        try:
+            from shared.native_engine import get_engine
+            health = get_engine().health() or {}
+            return bool(health.get("ready"))
+        except Exception:
+            return False
     if provider == "ollama":
         names = [m["name"] for m in await _ollama_models_raw(timeout=0.7)]
         return bool(names) and ((model or "") in names or not model)
@@ -2371,8 +3468,8 @@ async def _synthesize_search_answer(req: ChatRequest, result: dict[str, Any], se
     if not result.get("ok"):
         return _format_search_answer(result), "web-search-no-results"
     plan = search_plan or {}
-    provider = str(plan.get("answer_provider") or req.provider or "ollama").strip().lower()
-    model = str(plan.get("answer_model") or req.model or PROVIDER_DEFAULTS.get(provider, DEFAULT_OLLAMA_MODEL)).strip()
+    provider = str(plan.get("answer_provider") or req.provider or "native").strip().lower()
+    model = str(plan.get("answer_model") or req.model or PROVIDER_DEFAULTS.get(provider, "") or _native_loaded_model() or "").strip()
     if not await _provider_ready_for_llm(provider, model):
         return _format_search_answer(result), "web-search-results-only"
     sources = _format_sources_for_llm(result)
@@ -2386,7 +3483,7 @@ async def _synthesize_search_answer(req: ChatRequest, result: dict[str, Any], se
         f"Numbered sources:\n{sources}\n\n"
         "Write the answer now."
     )
-    messages = [{"role": "system", "content": _system_prompt() + "\n\n" + SEARCH_ANSWER_PROMPT + "\n\n" + brain_addendum}]
+    messages = [{"role": "system", "content": _system_prompt() + "\n\n" + SEARCH_ANSWER_PROMPT + _live_context_block(_dynamic_system_context(), brain_addendum)}]
     if history:
         messages.extend(history[-8:])
     messages.append({"role": "user", "content": user_prompt})
@@ -2819,7 +3916,7 @@ def _lmstudio_headers() -> dict[str, str]:
     return headers
 
 
-def _lmstudio_payload(model: str, messages: list[dict[str, str]], *, stream: bool = False, max_tokens: int | None = None) -> dict[str, Any]:
+def _lmstudio_payload(model: str, messages: list[dict[str, str]], *, stream: bool = False, max_tokens: int | None = None, context_length: int | None = None) -> dict[str, Any]:
     brain = _settings["brain"]
     payload: dict[str, Any] = {
         "model": model,
@@ -2830,56 +3927,76 @@ def _lmstudio_payload(model: str, messages: list[dict[str, str]], *, stream: boo
     }
     if max_tokens:
         payload["max_tokens"] = int(max_tokens)
+    if context_length:
+        # LM Studio honors context_length; num_ctx is the llama.cpp alias.
+        payload["context_length"] = int(context_length)
+        payload["num_ctx"] = int(context_length)
     return payload
 
 
-async def _lmstudio_chat(model: str, messages: list[dict[str, str]], *, realtime: bool = False, max_tokens: int | None = None) -> str:
-    async with httpx.AsyncClient(timeout=300) as client:
-        r = await client.post(
-            f"{LMSTUDIO_HOST}/v1/chat/completions",
-            headers=_lmstudio_headers(),
-            json=_lmstudio_payload(model, messages, stream=False, max_tokens=max_tokens),
-        )
-        r.raise_for_status()
-        data = r.json()
+# Shared keep-alive LM Studio client. httpx.AsyncClient binds to the event
+# loop it first serves, and tests spin a fresh loop per case, so key the client
+# by loop and rebuild when the loop changes or closes.
+_LMSTUDIO_CLIENT: tuple[Any, httpx.AsyncClient] | None = None
+
+
+def _lmstudio_client() -> httpx.AsyncClient:
+    global _LMSTUDIO_CLIENT
+    loop = asyncio.get_running_loop()
+    cached = _LMSTUDIO_CLIENT
+    if cached is not None and cached[0] is loop and not loop.is_closed():
+        return cached[1]
+    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, read=240.0))
+    _LMSTUDIO_CLIENT = (loop, client)
+    return client
+
+
+async def _lmstudio_chat(model: str, messages: list[dict[str, str]], *, realtime: bool = False, max_tokens: int | None = None, context_length: int | None = None) -> str:
+    client = _lmstudio_client()
+    r = await client.post(
+        f"{LMSTUDIO_HOST}/v1/chat/completions",
+        headers=_lmstudio_headers(),
+        json=_lmstudio_payload(model, messages, stream=False, max_tokens=max_tokens, context_length=context_length),
+    )
+    r.raise_for_status()
+    data = r.json()
     choice = (data.get("choices") or [{}])[0]
     return (choice.get("message") or {}).get("content") or ""
 
 
-async def _lmstudio_chat_stream(model: str, messages: list[dict[str, str]], *, realtime: bool = False, max_tokens: int | None = None) -> AsyncGenerator[tuple[str, bool], None]:
+async def _lmstudio_chat_stream(model: str, messages: list[dict[str, str]], *, realtime: bool = False, max_tokens: int | None = None, context_length: int | None = None) -> AsyncGenerator[tuple[str, bool], None]:
     """Stream LM Studio output.
 
     Yields (text, is_reasoning) tuples. LM Studio exposes reasoning tokens in
     `delta.reasoning_content`; surfacing them prevents the UI from appearing
     hung while the model "thinks".
     """
-    read_timeout = 240.0
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, read=read_timeout)) as client:
-        async with client.stream(
-            "POST",
-            f"{LMSTUDIO_HOST}/v1/chat/completions",
-            headers=_lmstudio_headers(),
-            json=_lmstudio_payload(model, messages, stream=True, max_tokens=max_tokens),
-        ) as r:
-            r.raise_for_status()
-            async for line in r.aiter_lines():
-                if not line or not line.startswith("data: "):
-                    continue
-                payload_str = line[6:].strip()
-                if payload_str == "[DONE]":
-                    break
-                try:
-                    obj = json.loads(payload_str)
-                except Exception:
-                    continue
-                choice = (obj.get("choices") or [{}])[0]
-                delta_obj = choice.get("delta") or {}
-                reasoning = delta_obj.get("reasoning_content") or ""
-                content = delta_obj.get("content") or ""
-                if reasoning:
-                    yield (reasoning, True)
-                if content:
-                    yield (content, False)
+    client = _lmstudio_client()
+    async with client.stream(
+        "POST",
+        f"{LMSTUDIO_HOST}/v1/chat/completions",
+        headers=_lmstudio_headers(),
+        json=_lmstudio_payload(model, messages, stream=True, max_tokens=max_tokens, context_length=context_length),
+    ) as r:
+        r.raise_for_status()
+        async for line in r.aiter_lines():
+            if not line or not line.startswith("data: "):
+                continue
+            payload_str = line[6:].strip()
+            if payload_str == "[DONE]":
+                break
+            try:
+                obj = json.loads(payload_str)
+            except Exception:
+                continue
+            choice = (obj.get("choices") or [{}])[0]
+            delta_obj = choice.get("delta") or {}
+            reasoning = delta_obj.get("reasoning_content") or ""
+            content = delta_obj.get("content") or ""
+            if reasoning:
+                yield (reasoning, True)
+            if content:
+                yield (content, False)
 
 
 async def _collect_lmstudio_stream(
@@ -2888,6 +4005,7 @@ async def _collect_lmstudio_stream(
     *,
     realtime: bool = False,
     max_tokens: int | None = None,
+    context_length: int | None = None,
     on_delta: Callable[[str], Any],
     on_reasoning: Callable[[str], Any] | None = None,
     first_token_timeout: float = 60.0,
@@ -2895,7 +4013,7 @@ async def _collect_lmstudio_stream(
     """Stream LM Studio output, calling on_delta for content and on_reasoning for thinking tokens. Returns full answer (content only)."""
     answer = ""
     got_first = False
-    agen = _lmstudio_chat_stream(model, messages, realtime=realtime, max_tokens=max_tokens).__aiter__()
+    agen = _lmstudio_chat_stream(model, messages, realtime=realtime, max_tokens=max_tokens, context_length=context_length).__aiter__()
     while True:
         try:
             text, is_reasoning = await asyncio.wait_for(agen.__anext__(), timeout=first_token_timeout if not got_first else 240.0)
@@ -2937,18 +4055,19 @@ async def _extract_durable_facts_llm(
         'Example: [{"fact": "User prefers concise answers", "tags": ["preference", "user"]}]'
     )
 
-    model = os.getenv("SHIMS_MEMORY_MODEL") or _preferred_local_model([], realtime=True)
-    try:
-        raw = await _ollama_chat(
-            model,
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=512,
-        )
-    except Exception:
-        return []
+    # Memory extraction runs on the native engine — SHIMS's only local LLM
+    # route. SHIMS_MEMORY_MODEL (GGUF id) pins the model; empty = currently
+    # loaded. On any failure feature_chat returns "" and we skip extraction.
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    from shared.local_llm import feature_chat
+    mem_model = (os.getenv("SHIMS_MEMORY_MODEL") or "").strip() or None
+    raw = await asyncio.to_thread(
+        feature_chat, messages, model=mem_model, max_tokens=512,
+        temperature=0.1, feature="auto_memory",
+    )
 
     # Try to isolate JSON array
     text = (raw or "").strip()
@@ -3354,6 +4473,24 @@ async def _gemini_chat_stream(model: str, messages: list[dict[str, str]], *, max
         yield (f"Gemini connection failed: {str(exc)[:200]}.", False)
 
 
+async def _local_engine_chat_stream(
+    provider: str, model: str, messages: list[dict[str, str]], *, max_tokens: int | None = None
+) -> AsyncGenerator[tuple[str, bool], None]:
+    """Streaming chat for OpenAI-compatible local engines (vLLM/SGLang/Aphrodite/KoboldCPP).
+    No API key required by default; one is sent only when <PROVIDER>_API_KEY is set."""
+    base = _local_engine_base_url(provider)
+    if not base:
+        yield (f"{provider.title()} is selected but {provider.upper()}_BASE_URL is not configured.", False)
+        return
+    headers = {"Content-Type": "application/json"}
+    key = _clean_secret(os.getenv(f"{provider.upper()}_API_KEY"))
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    payload = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens or 32000, "stream": True}
+    async for chunk in _openai_compatible_stream_lines(f"{base}/v1/chat/completions", headers, payload):
+        yield chunk
+
+
 def _cloud_stream_for(provider: str, model: str, messages: list[dict[str, str]], *, max_tokens: int | None = None):
     if provider == "openai":
         return _openai_chat_stream(model, messages, max_tokens=max_tokens)
@@ -3363,6 +4500,8 @@ def _cloud_stream_for(provider: str, model: str, messages: list[dict[str, str]],
         return _gemini_chat_stream(model, messages, max_tokens=max_tokens)
     if provider in {"kimi", "deepseek", "qwen"}:
         return _openai_compatible_provider_chat_stream(provider, model, messages, max_tokens=max_tokens)
+    if provider in _LOCAL_ENGINE_MODEL_LISTERS:
+        return _local_engine_chat_stream(provider, model, messages, max_tokens=max_tokens)
     return None
 
 
@@ -3432,6 +4571,10 @@ async def _run_llm(
         if not names:
             return (f"LM Studio is not reachable at {LMSTUDIO_HOST}. Start LM Studio's server (Settings or `lms server start`) and load a model.", "lmstudio-offline")
         return (await _lmstudio_chat(model, messages, realtime=realtime, max_tokens=max_tokens), "lmstudio-local")
+    if provider == "native":
+        from shared.native_engine import get_engine
+        result = await asyncio.to_thread(get_engine().chat_raw, messages)
+        return (result.get("content") or "", "native-local")
     if provider in {"kimi", "deepseek", "qwen"}:
         return (await _openai_compatible_chat(provider, model, messages), provider)
     return (await _cloud_placeholder(provider, model), f"{provider}-placeholder")
@@ -3744,7 +4887,7 @@ def _image_provider_plan(backend: str) -> list[tuple[str, Callable[[str], Awaita
     plan: list[tuple[str, Callable[[str], Awaitable[dict[str, Any] | None]]]] = []
     if _settings["media"].get("stable_diffusion_url"):
         plan.append(("stable-diffusion", providers["stable-diffusion"]))
-    if comfy_ui_status().get("ok"):
+    if comfy_ui_status().get("ok") or _orchestrator_comfy_available():
         plan.append(("comfyui", providers["comfyui"]))
     if _clean_secret(os.getenv("OPENAI_API_KEY")):
         plan.append(("openai", providers["openai"]))
@@ -4125,6 +5268,50 @@ async def _generic_media_api(kind: str, prompt: str, url: str, api_key: str, pro
         return {"ok": False, "provider": provider, "error": data.get("error") or "generic media API did not return a URL, bytes, or base64 payload"}
     except Exception as exc:
         return {"ok": False, "provider": provider, "error": str(exc)[:260]}
+
+
+async def _fish_audio(prompt: str) -> dict[str, Any] | None:
+    """Local Fish Speech (OpenAudio S2-Pro) voice-clone TTS server."""
+    fish_py = os.getenv("SHIMS_FISH_PYTHON", r"C:/d/SHIMS/tools/fish-speech-2/venv/Scripts/python.exe")
+    fish_dir = os.getenv("SHIMS_FISH_DIR", r"C:/d/SHIMS/tools/fish-speech-2")
+    fish_url = os.getenv("SHIMS_FISH_URL") or "http://127.0.0.1:8090/v1/tts"
+    ref_audio = os.getenv("SHIMS_FISH_REF_AUDIO", r"C:/d/SHIMS/storage/avatar_studio/reference/audio/jaya_ref_segment_20s.wav")
+    ref_text = os.getenv("SHIMS_FISH_REF_TEXT", r"C:/d/SHIMS/storage/avatar_studio/reference/audio/jaya_ref_segment_20s_transcript_v2.txt")
+    if not Path(fish_py).exists():
+        return None
+    # Phase 5: let the compute orchestrator own the fish-speech server lifecycle
+    # (start on demand if we can, refresh last-use so it isn't idle-stopped).
+    try:
+        from shared.compute_orchestrator import get_orchestrator
+        _orch = get_orchestrator()
+        await asyncio.to_thread(_orch.ensure_fish)
+        _orch.fish_used()
+    except Exception:
+        pass
+    out_base = AUDIO_DIR / Path(_safe_name(prompt or "fish_audio", "wav")).stem
+    cmd = [fish_py, str(Path(fish_dir) / "tools/api_client.py"), "-u", fish_url,
+           "-t", prompt[:1000], "--reference_audio", ref_audio,
+           "--reference_text", ref_text, "--output", str(out_base), "--no-play"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=fish_dir,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        produced = out_base.with_suffix(".wav")
+        if not produced.exists():
+            dbl = out_base.parent / (out_base.name + ".wav.wav")
+            if dbl.exists():
+                dbl.rename(produced)
+        if proc.returncode != 0 or not produced.exists():
+            return {"ok": False, "provider": "fish-tts",
+                    "error": ((stderr or stdout).decode(errors="replace"))[-260:]}
+        url = f"/media/files/audio/{produced.name}"
+        result = {"ok": True, "provider": "fish-tts", "type": "audio", "kind": "audio",
+                  "title": prompt[:80] or "Generated audio", "filename": produced.name,
+                  "url": url, "file_url": url, "download_url": url}
+        return _attach_ledger(result, produced, "audio")
+    except Exception as exc:
+        return {"ok": False, "provider": "fish-tts", "error": str(exc)[:260]}
 
 
 async def _openai_audio(prompt: str) -> dict[str, Any] | None:
@@ -4560,13 +5747,69 @@ def _stream_heartbeat_seconds(provider: str = "") -> float:
     emitted. Read per-call so tests and .env changes apply without restart.
     Local providers (LM Studio/Ollama) don't need keepalives — skipping them
     makes the conversation feel snappier and avoids "Model is thinking..." UI
-    flicker on a fast local machine."""
-    if provider in {"lmstudio", "ollama", "local"}:
+    flicker on a fast local machine. An explicitly set
+    SHIMS_STREAM_HEARTBEAT_SECONDS (tests/.env) always wins."""
+    explicit = (os.getenv("SHIMS_STREAM_HEARTBEAT_SECONDS") or "").strip()
+    if explicit:
+        try:
+            return max(0.05, float(explicit))
+        except Exception:
+            pass
+    if provider in {"lmstudio", "ollama", "local", "native"}:
         return float("inf")
+    return 5.0
+
+
+def _latency_trace(line: str) -> None:
+    """Opt-in latency tracing.
+
+    This replaces instrumentation that appended to a hardcoded
+    ``C:/tmp/shims_latency.log`` from the hot path — including inside the
+    per-token on_delta callback, i.e. a blocking open/write/close for EVERY
+    streamed token on the async event loop. The tracing was itself a latency
+    bug. Set SHIMS_LATENCY_LOG=<path> to re-enable it when profiling.
+    """
+    path = (os.getenv("SHIMS_LATENCY_LOG") or "").strip()
+    if not path:
+        return
     try:
-        return max(0.05, float(os.getenv("SHIMS_STREAM_HEARTBEAT_SECONDS", "5.0")))
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
     except Exception:
-        return 5.0
+        pass
+
+
+def _reasoning_token_reserve() -> int:
+    """Legacy headroom for thinking models, billed against max_tokens.
+
+    Output budgets are now unbounded by default (the user stops runaway
+    generations with the stop button), so the default reserve is 0. Set
+    SHIMS_REASONING_TOKEN_RESERVE together with SHIMS_CHAT_MAX_TOKENS if a
+    hard cap is ever reinstated.
+    """
+    try:
+        return max(0, int(os.getenv("SHIMS_REASONING_TOKEN_RESERVE", "0")))
+    except Exception:
+        return 0
+
+
+def _effective_max_tokens(requested: int | None, *, lite: bool) -> int:
+    """Output budget: unlimited by default.
+
+    An explicit per-request cap is honored, and SHIMS_CHAT_MAX_TOKENS
+    reinstates a global cap if one is ever wanted. Otherwise the ceiling is
+    the full context window, so a thinking model can reason as long as it
+    needs and still reach its answer — the stop button is the kill switch.
+    """
+    if requested:
+        return int(requested)
+    env_cap = (os.getenv("SHIMS_CHAT_MAX_TOKENS") or "").strip()
+    if env_cap:
+        try:
+            return max(1, int(env_cap))
+        except ValueError:
+            pass
+    return _effective_ctx()
 
 
 # asyncio.create_task holds only a WEAK reference to the task; a
@@ -4611,6 +5854,14 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         return
     provider = (req.provider or "auto").strip().lower()
     model = (req.model or "").strip()
+    # Frontend-controlled brain model (Settings → Brain Model): the saved
+    # SHIMS_CHAT_* env wins over the auto-pick when the request didn't pin one.
+    if provider in {"", "auto", "local"}:
+        env_provider = (os.getenv("SHIMS_CHAT_PROVIDER") or "").strip().lower()
+        if env_provider in {"lmstudio", "ollama", "local", "huggingface", "vllm", "sglang", "aphrodite", "koboldcpp"} or env_provider in CLOUD_STREAMING_PROVIDERS:
+            provider = env_provider
+    if not model:
+        model = (os.getenv("SHIMS_CHAT_MODEL") or "").strip()
     # Resolve "auto"/empty to a real local backend + model. Any failure here
     # raises, and the caller falls back to the full pipeline.
     if provider in {"", "auto", "local"}:
@@ -4633,6 +5884,12 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             raise RuntimeError("LM Studio has no models available")
         if model not in lm_names:
             model = await _lmstudio_pick_default(lm_models)
+    elif provider in _LOCAL_ENGINE_MODEL_LISTERS:
+        eng_names = await _local_engine_names(provider)
+        if not eng_names:
+            raise RuntimeError(f"{provider} has no models available")
+        if model not in eng_names:
+            model = eng_names[0]
     elif provider == "ollama" and not model:
         model = _preferred_local_model(await _ollama_names())
     if not model:
@@ -4652,9 +5909,11 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     # lookup can't finish inside the budget, the turn proceeds without it.
     recall_block = ""
     recall_hits = 0
+    skip_simple = _is_simple_query(req.message)
     # Voice turns need to feel instantaneous, so skip the memory recall step
-    # (which can block for 0.2-0.6s). Typed chat still gets the recall budget.
-    if req.conversation_mode and len((req.message or "").split()) >= 3 and (req.source or "").lower() != "voice":
+    # (which can block for 0.2-0.6s). Typed chat still gets the recall budget
+    # unless the message is trivial (greeting/ack) — those skip recall too.
+    if req.conversation_mode and not skip_simple and len((req.message or "").split()) >= 3 and (req.source or "").lower() != "voice":
         try:
             hits = await asyncio.wait_for(
                 asyncio.to_thread(recall_conversation, session_id, req.message, limit=4),
@@ -4678,13 +5937,16 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         "\n\nThis is a simple conversational turn. "
         "Do not use reasoning or thinking tags. Answer immediately and concisely."
     )
-    system_text = _system_prompt() + fast_instruction + (("\n\n" + recall_block) if recall_block else "")
+    system_text = _system_prompt() + fast_instruction + _live_context_block(_dynamic_system_context(), recall_block)
     messages = [{"role": "system", "content": system_text}] + history[-50:] + [{"role": "user", "content": req.message}]
     yield _jsonl({"type": "meta", "session_id": session_id, "model": model, "provider": provider,
                   "route": f"{provider}-fast-path", "agent": "chat", "brain": f"unified-v13+{BRAIN_VERSION}",
                   "memory_hits": recall_hits, "rag_hits": 0, "research_hits": 0,
+                  "retrieval_skipped": skip_simple,
                   "conversation_mode": bool(req.conversation_mode)})
-    if recall_hits:
+    if skip_simple:
+        yield _jsonl({"type": "thought", "stage": "context", "content": "Simple conversational turn — skipped memory recall for speed."})
+    elif recall_hits:
         yield _jsonl({"type": "thought", "stage": "context", "content": f"Recalled {recall_hits} relevant earlier exchange(s) from this conversation's long-term memory."})
     answer = ""
     pending: list[bytes] = []
@@ -4720,6 +5982,11 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             collect_task = asyncio.create_task(_collect_ollama_stream(
                 model, messages, realtime=False, max_tokens=req.max_tokens, on_delta=on_delta,
                 first_token_timeout=60.0,
+            ))
+        elif provider in _LOCAL_ENGINE_MODEL_LISTERS:
+            collect_task = asyncio.create_task(_collect_cloud_stream(
+                provider, model, messages, max_tokens=req.max_tokens, on_delta=on_delta,
+                on_reasoning=on_reasoning, first_token_timeout=60.0,
             ))
         elif provider in CLOUD_STREAMING_PROVIDERS:
             collect_task = asyncio.create_task(_collect_cloud_stream(
@@ -4757,6 +6024,7 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         if req.conversation_mode:
             history.append({"role": "user", "content": req.message})
             history.append({"role": "assistant", "content": answer})
+            _persist_session(session_id)
             # Archive this exchange into the append-only conversation store —
             # fire-and-forget in a worker thread so the reply is never delayed.
             # This is what makes older turns recallable after they fall out of
@@ -4795,6 +6063,1543 @@ async def _fast_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         raise
 
 
+# --------------------------------------------------------------------------- #
+# Unified model-driven chat pipeline
+# --------------------------------------------------------------------------- #
+
+async def _auto_memory_after_turn(user_msg: str, assistant_msg: str, tools_used: list[str] | None = None) -> None:
+    """Extract durable facts from a successful turn and save them to memory."""
+    from shared.omni_brain import remember
+    facts: list[tuple[str, list[str]]] = []
+    # Fast regex heuristics first
+    lower = (user_msg or "").lower()
+    if any(p in lower for p in ("i prefer", "my name is", "i am a", "i work at", "i like", "i want", "i need")):
+        facts.append((user_msg.strip(), ["preference", "user"]))
+    if tools_used:
+        if "desktop.interpreter" in tools_used and assistant_msg and len(assistant_msg) > 20:
+            facts.append((f"Code interpreter result: {assistant_msg[:500]}", ["tool_result", "code"]))
+        if any(t.startswith("plan.") for t in tools_used):
+            facts.append((f"Plan execution: {assistant_msg[:500]}", ["tool_result", "plan"]))
+    if "remember" in (assistant_msg or "").lower() and len(assistant_msg or "") > 40:
+        facts.append((assistant_msg.strip()[:600], ["assistant_note"]))
+    # LLM-powered extraction for richer memories
+    if len((user_msg or "") + (assistant_msg or "")) >= 60:
+        try:
+            facts.extend(await _extract_durable_facts_llm(user_msg, assistant_msg, tools_used))
+        except Exception:
+            pass
+    # Deduplicate by normalized key and store
+    seen: set[str] = set()
+    for content, tags in facts:
+        norm = content.strip()[:80].lower()
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        key = content[:60] + ("..." if len(content) > 60 else "")
+        remember("agent", key, content, tags=tags, source="auto_memory")
+
+
+async def _action_request_stream(req: ChatRequest, session_hint: str, pending_request: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Deterministic action-request branch: safe actions auto-execute, risky
+    source changes become a yes/no approval request. Runs BEFORE the model
+    turn so these requests never depend on tool-call reliability."""
+    action_type = pending_request.get("action_type")
+    # Safe read-only / scaffold actions run immediately so SHIMS actually does
+    # the work instead of asking for approval and doing nothing.
+    if action_type in {"coder_app_scaffold", "evolution_validate"}:
+        yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected safe action: {pending_request.get('title')}. Auto-executing now (read-only or scaffold)."})
+        try:
+            result = await _execute_pending_action(pending_request, approved_by="auto-approved")
+            ok = result.get("ok", False)
+            # Close out the pending record — otherwise it stays "pending"
+            # forever and leaks into later approval prompts and turns.
+            pending_request["status"] = "completed" if ok else "failed"
+            pending_request["decision"] = "auto"
+            pending_request["approved_by"] = "auto-approved"
+            pending_request["resolved_at"] = _utc_now()
+            pending_request["result"] = result
+            _save_pending_action(pending_request)
+            msg = result.get("message") or ("Done." if ok else "Failed.")
+            route = f"auto:{action_type}"
+            trust = build_trust(route=route, evidence=[], requested_level="L1")
+            yield _jsonl({"type": "meta", "session_id": session_hint, "model": "approval-router", "provider": "local", "route": route, "agent": "operator", "brain": f"unified-v13+{BRAIN_VERSION}", "conversation_mode": bool(req.conversation_mode), **_trust_fields(trust)})
+            yield _jsonl({"type": "token", "content": f"Created and applied: {pending_request.get('title')}.\n\n{msg}"})
+            if result.get("app_url"):
+                yield _jsonl({"type": "token", "content": f"\nOpen it: {result['app_url']}"})
+            yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": route, **_trust_fields(trust)})
+        except Exception as exc:
+            yield _jsonl({"type": "token", "content": f"I tried to execute '{pending_request.get('title')}' but hit an error: {exc}"})
+            yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": f"auto:{action_type}:error"})
+        return
+
+    # Riskier source-change actions still require explicit human approval.
+    # But first, generate a real plan instead of a generic template message.
+    yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected action request: {pending_request.get('title')}. Analyzing scope and risk before asking for approval."})
+    trust = build_trust(route="approval:request", evidence=evidence_from_action(get_action(pending_request.get("action_id", ""))), action_id=pending_request.get("action_id", ""), ledger_hash=pending_request.get("ledger_hash", ""), requested_level="L3")
+    yield _jsonl({
+        "type": "meta",
+        "session_id": session_hint,
+        "model": "approval-router",
+        "provider": "local",
+        "route": "approval:request",
+        "agent": "operator",
+        "brain": f"unified-v13+{BRAIN_VERSION}",
+        "conversation_mode": bool(req.conversation_mode),
+        **_trust_fields(trust),
+    })
+    # Stamp surfacing proof BEFORE showing the request: only a pending action
+    # actually surfaced to the user in THIS session may later be executed by a
+    # bare yes/no reply (guards against phantom cross-session approvals).
+    pending_request = _surface_pending_action(pending_request, session_hint)
+    public = _public_pending_action(pending_request)
+    # Dynamic plan message instead of generic template
+    title = pending_request.get('title', 'Action')
+    summary = pending_request.get('summary', '')
+    action_type = pending_request.get('action_type', 'action')
+    # Build a contextual explanation based on action type
+    if action_type == 'evolution_apply':
+        plan_detail = f"This will apply a code patch to SHIMS's own source files. The patch has been validated — it will modify {summary}."
+    elif action_type == 'evolution_validate':
+        plan_detail = f"This will run sandbox tests on a proposed patch to verify it doesn't break anything. No files will be modified."
+    elif action_type == 'agent_tool':
+        tool = pending_request.get('payload', {}).get('tool', 'a tool')
+        plan_detail = f"This will run the tool '{tool}' on your desktop: {summary}"
+    else:
+        plan_detail = f"This will: {summary}"
+    answer = f"I analyzed your request and here's what I plan to do:\n\n**{title}**\n{plan_detail}\n\nRisk level: {public.get('risk', 'unknown')}. Approve? Reply yes or no."
+    yield _jsonl({"type": "approval_request", "approval": public, **_trust_fields(trust)})
+    yield _jsonl({"type": "token", "content": answer})
+    yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:request", "approval": public, **_trust_fields(trust)})
+
+
+def _history_within_budget(history: list[dict[str, Any]], budget: int | None = None) -> list[dict[str, Any]]:
+    """Most-recent-first fill of the prompt window up to the token budget.
+
+    Replaces the old fixed 50-turn window with a budget (~60% of a typical
+    model context) estimated at ~4 chars/token — no tokenizer dependency.
+    Older turns are not lost: they live in the append-only archive and come
+    back through recall/retrieval when relevant."""
+    if budget is None:
+        try:
+            budget = max(500, int(os.getenv("SHIMS_HISTORY_TOKEN_BUDGET", "6000")))
+        except Exception:
+            budget = 6000
+    picked: list[dict[str, Any]] = []
+    total = 0
+    for msg in reversed(history):
+        content = msg.get("content")
+        if not isinstance(content, str):
+            content = json.dumps(content, default=str)
+        tokens = len(content) // 4 + 4
+        if picked and total + tokens > budget:
+            break
+        picked.append(msg)
+        total += tokens
+    picked.reverse()
+    # Sticky windowing: advancing the window start by one message every turn
+    # changes the prompt PREFIX every turn, which defeats the engine's
+    # prefix/SmartCache (fatal for recurrent-layer models — any divergence
+    # invalidates the whole saved state). Round the start up to a multiple of
+    # 8 messages so the window only jumps occasionally (one cache-miss turn per
+    # jump) and stays byte-stable in between. Rounding up DROPS extra messages,
+    # so the budget is never exceeded.
+    start = len(history) - len(picked)
+    if start > 0:
+        start = min(((start + 7) // 8) * 8, max(len(history) - 2, 0))
+        return history[start:]
+    return picked
+
+
+def _is_tool_intent(text: str) -> bool:
+    """Lite-mode guard: detect requests that need the full tool-equipped path."""
+    lower = (text or "").lower()
+    triggers = [
+        "search", "look up", "look-up", "web search", "find online",
+        "create a", "generate a", "make a", "write a", "draft a",
+        "agent", "skill", "code ", "build ", "run ", "execute",
+        "download", "send email", "send mail", "browse", "visit ",
+    ]
+    return any(t in lower for t in triggers)
+
+
+_SIMPLE_QUERY_PATTERNS = (
+    "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+    "how are you", "what's up", "sup", "thanks", "thank you", "ok", "okay",
+    "yes", "no", "bye", "goodbye", "see you", "cool", "nice", "great",
+    "who are you", "what are you", "your name",
+)
+
+
+def _is_simple_query(text: str) -> bool:
+    """Detect trivial conversational turns that don't need RAG/memory retrieval.
+
+    Returns True for greetings, acknowledgments, and very short generic chat.
+    These should skip the brain_prompt_addendum path entirely to avoid pulling
+    irrelevant pharmaceutical/regulatory docs into every "hello".
+    """
+    if not text or not text.strip():
+        return True
+    # Normalize first: collapse whitespace and strip trailing punctuation so
+    # "Hello?", "hello." and "thanks!" hit the same allowlist as "hello".
+    raw = text.strip()
+    t = " ".join(raw.lower().split()).rstrip("?!.…,;:").strip()
+    if not t:
+        # Pure punctuation ("?????") is NOT trivial — keep the full lane.
+        return len(raw) <= 3
+    # Very short messages are usually trivial.
+    if len(t) <= 3:
+        return True
+    # Exact or prefix matches for common greetings/acks.
+    for pat in _SIMPLE_QUERY_PATTERNS:
+        if t == pat or t.startswith(pat + " ") or t.startswith(pat + "!"):
+            return True
+    # Short questions about the assistant itself are usually just small talk.
+    if len(t) < 40 and any(k in t for k in ("how are you", "who are you", "what can you do", "your name", "say hello", "say hi", "tell me a joke")):
+        return True
+    return False
+
+
+def _gather_retrieval(
+    session_id: str,
+    query: str,
+    history_tail: list[dict[str, Any]],
+    *,
+    rag_limit: int = 10,
+    recall_limit: int = 4,
+    addendum_max_chars: int = 8000,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    """Blocking retrieval bundle, run in a worker thread: brain RAG/memory/
+    skills addendum + session-scoped conversation recall."""
+    # Warm the embedding model first so semantic vector hits don't cold-load
+    # mid-scoring (it lazy-loads in a background thread on first touch).
+    try:
+        from shared.neural_governor import vector_memory as _vm
+        _vm._get_embedding_model()
+    except Exception:
+        pass
+    addendum, ctx = brain_prompt_addendum(query, agent=_detect_agent_route(query), limit=rag_limit, history=history_tail[-3:] if len(history_tail) > 3 else history_tail)
+    if len(addendum) > addendum_max_chars:
+        addendum = addendum[:addendum_max_chars].rsplit("\n", 1)[0] + "\n[Retrieved context truncated for speed. Ask follow-up if more detail is needed.]"
+    recall_hits: list[dict[str, Any]] = []
+    if session_id and len((query or "").split()) >= 3:
+        try:
+            recall_hits = recall_conversation(session_id, query, limit=recall_limit)
+        except Exception:
+            recall_hits = []
+    return addendum, ctx, recall_hits
+
+
+_UNIFIED_CHAT_SKILL_TOOLS = ("skill.learn", "skill.execute", "skill.list")
+# Read-side enterprise tools offered to the brain in chat. Writes
+# (create/update/delete/move/ingest) stay in the agent-mode registry where
+# the approval gate applies.
+_UNIFIED_CHAT_ENTERPRISE_TOOLS = ("enterprise.status", "enterprise.query", "enterprise.sync_brain")
+
+
+def _unified_chat_tools() -> list[dict[str, Any]]:
+    """Curated OpenAI-style tool set offered to the brain model each turn.
+
+    web.search / media.create map to the existing planner tool branches,
+    agent.spawn maps to coder.spawn background jobs, and the skill tools come
+    straight from the agent tool registry."""
+    specs: list[dict[str, Any]] = [
+        {"type": "function", "function": {
+            "name": "web.search",
+            "description": (
+                "Search the live web and return ranked results with titles, snippets and URLs. "
+                "Use for current facts, news, prices, weather, documentation, or anything about a "
+                "person, company, product or site you cannot verify from your own knowledge. "
+                "You have no other way to reach the internet: if you do not call this, you are "
+                "answering from training data that may be years stale."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "Focused keyword query, not the user's full sentence"}},
+                "required": ["query"]}}},
+        {"type": "function", "function": {
+            "name": "web.fetch",
+            "description": (
+                "Open one specific URL or domain and return its readable page text. "
+                "Use when the user names a site directly ('what is on example.com'), or to read a "
+                "promising URL that web.search returned. A bare domain like 'example.com' is fine. "
+                "Never describe what a site contains without fetching it first."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "url": {"type": "string", "description": "Absolute URL, or a bare domain such as example.com"}},
+                "required": ["url"]}}},
+        {"type": "function", "function": {
+            "name": "media.create",
+            "description": "Generate a document or media artifact and attach it to the chat for the user to download.",
+            "parameters": {"type": "object", "properties": {
+                "kind": {"type": "string", "enum": ["image", "pdf", "ppt", "audio", "video"]},
+                "prompt": {"type": "string", "description": "What to create, with content/details"}},
+                "required": ["kind", "prompt"]}}},
+        {"type": "function", "function": {
+            "name": "agent.spawn",
+            "description": "Hand long or multi-step coding/build work to the background Coder agent (plan→write→run→fix). Returns immediately with a job id and a live stream URL — give that handle to the user as the answer instead of doing the work inline.",
+            "parameters": {"type": "object", "properties": {
+                "goal": {"type": "string", "description": "Self-contained description of the work"},
+                "name": {"type": "string", "description": "Short job name"}},
+                "required": ["goal"]}}},
+        {"type": "function", "function": {
+            "name": "agent.assign",
+            "description": (
+                "Assign a task to a background specialist agent that works on its own while the user keeps chatting. "
+                "Domains: 'mail' (Gmail triage/drafts), 'comms' (WhatsApp + Gmail), 'media' (documents/images), "
+                "'desktop' (the user's machine), 'web' (research), 'skills'. "
+                "Use when the user asks an agent to handle something in the background, watch something, or work a task independently. "
+                "Returns immediately with a job id; the specialist reports to the feed when done."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "domain": {"type": "string", "enum": ["mail", "comms", "media", "desktop", "web", "skills"], "description": "Specialist domain"},
+                "goal": {"type": "string", "description": "Self-contained task for the specialist"},
+                "name": {"type": "string", "description": "Short job name"}},
+                "required": ["domain", "goal"]}}},
+        {"type": "function", "function": {
+            "name": "desktop.bridge",
+            "description": "Control the paired Desktop Bridge on the user's machine. Use for checking system hardware (CPU/GPU/RAM via shell commands), running shell commands, taking screenshots, finding files, and reading/writing desktop files.",
+            "parameters": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["ping", "shell", "screenshot", "system_info", "find_file", "read_file", "write_file"], "description": "Bridge action to perform"},
+                "command": {"type": "string", "description": "Shell command to run (for shell action)"},
+                "cwd": {"type": "string", "description": "Working directory for shell command"},
+                "timeout": {"type": "integer", "description": "Command timeout in seconds"},
+                "name": {"type": "string", "description": "File name to find (for find_file action)"},
+                "root": {"type": "string", "description": "Root directory for find_file"},
+                "path": {"type": "string", "description": "File path for read_file/write_file"},
+                "content": {"type": "string", "description": "Content for write_file"}},
+                "required": ["action"]}}},
+        {"type": "function", "function": {
+            "name": "mail.read",
+            "description": (
+                "Read the user's Gmail inbox. With no arguments, syncs recent messages and returns subjects/senders/dates. "
+                "With a message_id, returns the full message body. With a query, searches Gmail (same syntax as the Gmail search bar). "
+                "Use this when the user asks about their email, unread messages, or anything in their inbox."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["list", "read", "search"], "description": "list = recent inbox, read = full message by id, search = Gmail query"},
+                "message_id": {"type": "string", "description": "Gmail message ID (for read action)"},
+                "query": {"type": "string", "description": "Gmail search query (for search action), e.g. 'from:boss is:unread'"},
+                "max_results": {"type": "integer", "description": "Max messages to return (default 10, max 25)"}},
+                "required": ["action"]}}},
+        {"type": "function", "function": {
+            "name": "mail.draft",
+            "description": (
+                "Create and save a Gmail draft for the user to review and send manually. "
+                "SHIMS never sends email directly — it only creates drafts. "
+                "Use this when the user asks you to write, compose, or draft an email or reply."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "to": {"type": "string", "description": "Recipient email address"},
+                "subject": {"type": "string", "description": "Email subject line"},
+                "body": {"type": "string", "description": "Email body text"},
+                "cc": {"type": "string", "description": "CC recipients (optional)"},
+                "thread_id": {"type": "string", "description": "Gmail thread ID to attach the draft to (for replies)"},
+                "in_reply_to": {"type": "string", "description": "Message-ID header of the message being replied to"}},
+                "required": ["to", "subject", "body"]}}},
+        {"type": "function", "function": {
+            "name": "mail.attachment",
+            "description": (
+                "Download an attachment from a Gmail message. First use mail.read with action=read to get the "
+                "message details including attachment IDs, then call this to save the file locally. "
+                "The downloaded file is saved to the SHIMS downloads folder."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "message_id": {"type": "string", "description": "Gmail message ID containing the attachment"},
+                "attachment_id": {"type": "string", "description": "Attachment ID from the message parts"},
+                "filename": {"type": "string", "description": "Filename to save as (from the message parts)"}},
+                "required": ["message_id", "attachment_id", "filename"]}}},
+        {"type": "function", "function": {
+            "name": "channels.recent",
+            "description": (
+                "Read recent inbound messages from a connected messaging channel such as WhatsApp. "
+                "Use when the user asks about their WhatsApp messages, chats, or who messaged them. "
+                "Messages arrive via the channel bridge; this reads what has been delivered. "
+                "SHIMS cannot send WhatsApp messages — it can only read inbound ones."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "channel": {"type": "string", "description": "Channel name (default 'whatsapp')"},
+                "limit": {"type": "integer", "description": "Max messages to return (default 10, max 50)"}}}}},
+        {"type": "function", "function": {
+            "name": "comms.digest",
+            "description": (
+                "Run a fresh digest of Gmail + WhatsApp and return the taskboard: items classified as "
+                "Urgent, Needs reply, Waiting, or FYI. Use when the user asks what's important, what needs "
+                "action or a reply, or for a summary of their messages."
+            ),
+            "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {
+            "name": "inventory.export",
+            "description": (
+                "Export the vendor-wise supply index (products/raw materials, equipment, services — with "
+                "rates offered on WhatsApp and Gmail) as an Excel workbook the user can download. "
+                "Use when the user asks for rates/prices by vendor, a supplier comparison, or an Excel/xlsx "
+                "export of offers from their chats or mail."
+            ),
+            "parameters": {"type": "object", "properties": {}}}},
+    ]
+    try:
+        specs.extend(agent_tools.tool_specs(list(_UNIFIED_CHAT_SKILL_TOOLS) + list(_UNIFIED_CHAT_ENTERPRISE_TOOLS)))
+    except Exception:
+        pass
+    return specs
+
+
+async def _execute_unified_tool(name: str, args: dict[str, Any], req: ChatRequest, session_id: str) -> tuple[dict[str, Any], list[bytes], dict[str, Any]]:
+    """Run one curated unified-chat tool. Returns (result_for_model, extra_events, done_fields).
+
+    Quick tools (web.search, media.create, skill.*) execute in-turn; their
+    results go back to the model for a streaming synthesis turn. Long work
+    (agent.spawn) only enqueues a background job — the result is the job
+    handle, so the reply is immediate. done_fields carries the trust/ledger
+    envelope (action id, ledger hash, query plan) onto the turn's done event."""
+    events: list[bytes] = []
+    done_fields: dict[str, Any] = {}
+    try:
+        if name == "web.search":
+            query = str(args.get("query") or req.message).strip()
+            result = await _run_web_search_with_plan(query, max_results=6)
+            store_research_results(result.get("query") or query, result.get("provider") or "web", result.get("results") or [])
+            search_evidence = evidence_from_search(result)
+            action = record_action(
+                "web_search",
+                f"Web search: {result.get('query') or query}"[:220],
+                payload={"prompt": req.message, "planned_query": query, "query_plan": result.get("query_plan")},
+                result={"ok": result.get("ok"), "provider": result.get("provider"), "query": result.get("query"), "result_count": len(result.get("results") or [])},
+                evidence=search_evidence,
+                requested_level="L3",
+                status="completed" if result.get("ok") else "failed",
+                summary="Ran focused web search query from SHIMS chat understanding and stored sources for RAG.",
+            )
+            trust = build_trust(
+                route="tool:web_search",
+                evidence=merge_evidence(search_evidence, evidence_from_action(action.get("action"))),
+                missing_evidence=[] if result.get("ok") and search_evidence else ["No web provider returned verifiable results."],
+                action_id=action.get("action_id", ""),
+                ledger_hash=action.get("ledger_hash", ""),
+                query_plan=result.get("query_plan"),
+            )
+            done_fields.update(_trust_fields(trust))
+            events.append(_jsonl({"type": "search", "search_result": {**result, **done_fields}, **done_fields}))
+            # Compact digest for the model — raw results can be huge.
+            digest = [
+                {"title": r.get("title"), "snippet": str(r.get("snippet") or r.get("body") or "")[:500], "url": r.get("url")}
+                for r in (result.get("results") or [])[:6]
+            ]
+            return {"ok": bool(result.get("ok")), "provider": result.get("provider"), "results": digest}, events, done_fields
+        if name == "web.fetch":
+            raw_url = str(args.get("url") or "").strip()
+            if not raw_url:
+                return {"ok": False, "error": "no url supplied"}, events, done_fields
+            # Models routinely emit a bare domain ("jklifecarecenters.com").
+            # agent_tools._run_web_fetch requires a scheme, so normalize here
+            # rather than bouncing a trivially fixable error back to the model.
+            url = raw_url if raw_url.startswith(("http://", "https://")) else f"https://{raw_url}"
+            result = await asyncio.to_thread(agent_tools.run_tool, "web.fetch", {"url": url})
+            fetch_evidence = evidence_from_search({
+                "ok": result.get("ok"),
+                "provider": "web.fetch",
+                "query": url,
+                "results": [{"title": url, "url": url, "snippet": str(result.get("text") or "")[:400]}] if result.get("ok") else [],
+            })
+            action = record_action(
+                "web_fetch",
+                f"Fetch page: {url}"[:220],
+                payload={"prompt": req.message, "url": url},
+                result={"ok": result.get("ok"), "url": url, "chars": result.get("chars"), "error": result.get("error")},
+                evidence=fetch_evidence,
+                requested_level="L3",
+                status="completed" if result.get("ok") else "failed",
+                summary="Fetched a single named URL and returned its readable text to the brain model.",
+            )
+            trust = build_trust(
+                route="tool:web_fetch",
+                evidence=merge_evidence(fetch_evidence, evidence_from_action(action.get("action"))),
+                missing_evidence=[] if result.get("ok") else [f"Could not fetch {url}."],
+                action_id=action.get("action_id", ""),
+                ledger_hash=action.get("ledger_hash", ""),
+            )
+            done_fields.update(_trust_fields(trust))
+            if result.get("ok"):
+                events.append(_jsonl({"type": "search", "search_result": {
+                    "ok": True, "provider": "web.fetch", "query": url,
+                    "results": [{"title": url, "url": url, "snippet": str(result.get("text") or "")[:400]}],
+                    **done_fields}, **done_fields}))
+                # Trim to keep the synthesis turn inside the context budget.
+                return {"ok": True, "url": url, "chars": result.get("chars"),
+                        "text": str(result.get("text") or "")[:6000]}, events, done_fields
+            return {"ok": False, "url": url, "error": result.get("error")}, events, done_fields
+        if name == "media.create":
+            kind = str(args.get("kind") or "image").strip().lower()
+            prompt = str(args.get("prompt") or req.message).strip()
+            result = await _create_media(kind, prompt, privacy_mode=req.privacy_mode)
+            artifact_evidence = evidence_from_artifact(result)
+            action = record_action(
+                "artifact_generate",
+                f"Generate {kind}: {result.get('title') or prompt}"[:220],
+                payload={"kind": kind, "prompt": prompt},
+                result={k: result.get(k) for k in ("ok", "type", "kind", "title", "filename", "url", "file_url", "sha256", "verified")},
+                evidence=artifact_evidence,
+                requested_level="L3",
+                status="completed" if result.get("ok", True) else "failed",
+                summary=f"Generated local {kind} artifact with ledger evidence when available.",
+            )
+            trust = build_trust(
+                route="tool:media_create",
+                evidence=merge_evidence(artifact_evidence, evidence_from_action(action.get("action"))),
+                missing_evidence=[] if result.get("verified") else ["Artifact was created without a verified document ledger hash."],
+                action_id=action.get("action_id", ""),
+                ledger_hash=action.get("ledger_hash", ""),
+            )
+            done_fields.update(_trust_fields(trust))
+            events.append(_jsonl({"type": "media", "media_result": {**result, **done_fields}, **done_fields}))
+            if result.get("ok", True):
+                try:
+                    ingest_knowledge(
+                        f"Artifact: {result.get('title') or kind}",
+                        f"Prompt: {prompt}\nResult: {json.dumps(result, default=str)[:3000]}",
+                        source_type="artifact",
+                        source_uri=result.get("file_url") or result.get("url") or "",
+                        tags=["artifact", kind],
+                        importance=0.85,
+                    )
+                except Exception:
+                    pass
+            summary = {k: result.get(k) for k in ("ok", "type", "kind", "title", "url", "file_url", "error", "note") if result.get(k) is not None}
+            return summary, events, done_fields
+        if name == "agent.spawn":
+            result = await asyncio.to_thread(
+                agent_tools.run_tool, "coder.spawn",
+                {"goal": str(args.get("goal") or req.message), "name": str(args.get("name") or "")},
+            )
+            if result.get("ok"):
+                _kick_task_drain()
+            return result, events, done_fields
+        if name == "desktop.bridge":
+            result = await asyncio.to_thread(
+                agent_tools.run_tool, "desktop.bridge",
+                {
+                    "action": str(args.get("action") or "ping"),
+                    "command": str(args.get("command") or ""),
+                    "cwd": str(args.get("cwd") or ""),
+                    "timeout": int(args.get("timeout") or 60),
+                    "name": str(args.get("name") or ""),
+                    "root": str(args.get("root") or ""),
+                    "path": str(args.get("path") or ""),
+                    "content": str(args.get("content") or ""),
+                },
+            )
+            return result, events, done_fields
+        if name == "mail.read":
+            action_type = str(args.get("action") or "list").strip().lower()
+            max_results = max(1, min(int(args.get("max_results") or 10), 25))
+            if action_type == "read":
+                mid = str(args.get("message_id") or "").strip()
+                if not mid:
+                    return {"ok": False, "error": "message_id required for read action"}, events, done_fields
+                result = await asyncio.to_thread(gmail_read_message, mid)
+                return result, events, done_fields
+            query = str(args.get("query") or "").strip() if action_type == "search" else ""
+            result = await asyncio.to_thread(sync_gmail_metadata, query=query, max_results=max_results)
+            compact = [{"id": m.get("external_id") or m.get("id"), "from": m.get("sender"), "subject": m.get("subject"),
+                        "date": m.get("received_at"), "snippet": m.get("snippet", "")[:200], "labels": m.get("labels", [])}
+                       for m in (result.get("messages") or [])]
+            return {"ok": result.get("ok"), "count": len(compact), "messages": compact}, events, done_fields
+        if name == "mail.draft":
+            result = await asyncio.to_thread(
+                create_gmail_draft,
+                str(args.get("to") or ""),
+                str(args.get("subject") or ""),
+                str(args.get("body") or ""),
+                cc=str(args.get("cc") or ""),
+                thread_id=args.get("thread_id") or None,
+                in_reply_to=args.get("in_reply_to") or None,
+            )
+            return result, events, done_fields
+        if name == "mail.attachment":
+            mid = str(args.get("message_id") or "").strip()
+            att_id = str(args.get("attachment_id") or "").strip()
+            filename = str(args.get("filename") or "attachment").strip()
+            if not mid or not att_id:
+                return {"ok": False, "error": "message_id and attachment_id are required"}, events, done_fields
+            result = await asyncio.to_thread(download_gmail_attachment, mid, att_id, filename)
+            return result, events, done_fields
+        if name == "channels.recent":
+            from shared import channels as _channels
+            channel = str(args.get("channel") or "whatsapp").strip().lower()
+            limit = max(1, min(int(args.get("limit") or 10), 50))
+            result = await asyncio.to_thread(_channels.recent, channel, limit)
+            compact = [{"from": m.get("sender_name"), "text": str(m.get("text") or "")[:300],
+                        "received_at": m.get("received_at"), "is_group": m.get("is_group")}
+                       for m in (result.get("messages") or [])]
+            return {"ok": result.get("ok"), "channel": channel, "connected": result.get("connected"),
+                    "count": result.get("count"), "messages": compact}, events, done_fields
+        if name == "comms.digest":
+            from shared.comms_digest import latest_taskboard, run_comms_digest
+            result = await asyncio.to_thread(run_comms_digest)
+            board = latest_taskboard()
+            events.append(_jsonl({"type": "taskboard", "taskboard": board}))
+            # Compact digest for the model — full board can be long.
+            compact_items = [{"bucket": i.get("bucket"), "from": i.get("from"),
+                              "title": i.get("title"), "snippet": str(i.get("snippet") or "")[:200]}
+                             for i in (board.get("items") or [])[:15]]
+            return {"ok": result.get("ok"), "classifier": result.get("classifier"),
+                    "counts": board.get("counts"), "items": compact_items}, events, done_fields
+        if name == "inventory.export":
+            from shared.chat_inventory import export_xlsx
+            result = await asyncio.to_thread(export_xlsx)
+            if result.get("ok"):
+                filename = os.path.basename(result["path"])
+                file_url = f"/media/files/exports/{filename}"
+                artifact = {"ok": True, "type": "xlsx", "kind": "xlsx",
+                            "title": "Vendor inventory export",
+                            "filename": filename, "url": file_url, "file_url": file_url}
+                events.append(_jsonl({"type": "media", "media_result": {**artifact, **done_fields}, **done_fields}))
+                return {**artifact, "vendors": result.get("vendors")}, events, done_fields
+            return result, events, done_fields
+        if name in _UNIFIED_CHAT_SKILL_TOOLS or name in _UNIFIED_CHAT_ENTERPRISE_TOOLS:
+            result = await asyncio.to_thread(agent_tools.run_tool, name, args, session_id=session_id)
+            return result, events, done_fields
+        if name == "agent.assign":
+            from shared.agent_domains import domain_label, known_domains
+            domain = str(args.get("domain") or "").strip().lower()
+            if domain not in known_domains():
+                return {"ok": False, "error": f"unknown domain {domain!r}; known: {known_domains()}"}, events, done_fields
+            goal = str(args.get("goal") or req.message).strip()
+            job = _assign_specialist(domain, goal, name=str(args.get("name") or ""), session_id=session_id)
+            return {**job, "note": f"{domain_label(domain)} is working on this in the background — it will report to the feed when done."}, events, done_fields
+        return {"ok": False, "error": f"unknown tool: {name}"}, events, done_fields
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300]}, events, done_fields
+
+
+# --------------------------------------------------------------------- #
+# Background specialist agents
+# --------------------------------------------------------------------- #
+
+def _assign_specialist(domain: str, goal: str, *, name: str = "", session_id: str | None = None) -> dict[str, Any]:
+    """Queue a background specialist-agent job (domain-scoped tools + persona)."""
+    from shared.agent_domains import domain_label
+    title = f"{domain_label(domain)}: {name or goal[:48]}"
+    res = brain_schedule_task(
+        "specialist_agent", title,
+        {"domain": domain, "goal": goal, "session_id": session_id or ""},
+        priority=3,
+    )
+    _kick_task_drain()
+    return {"ok": True, "job_id": res.get("task_id"), "domain": domain, "goal": goal,
+            "title": title}
+
+
+async def _specialist_job_async(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run one background specialist job: domain persona + domain tool subset,
+    up to 3 model turns (tool calls execute between turns via the same
+    unified executor the chat lane uses)."""
+    from shared.agent_domains import domain_persona, domain_tool_names
+    domain = str(payload.get("domain") or "").strip().lower()
+    goal = str(payload.get("goal") or "").strip()
+    session_id = str(payload.get("session_id") or "") or f"specialist-{uuid.uuid4().hex[:8]}"
+    if not domain or not goal:
+        return {"ok": False, "error": "specialist job needs domain and goal"}
+    wanted = set(domain_tool_names(domain))
+    tools = [t for t in _unified_chat_tools()
+             if t.get("function", {}).get("name") in wanted]
+    provider, model, route_reason = await _resolve_provider_model("native", None)
+    system_text = (
+        domain_persona(domain)
+        + "\n\nComplete this task thoroughly, then finish with a concise report: "
+        "what you found, what needs the user's attention, and what you did. "
+        "Act only through your tools; never claim an action you did not perform."
+    )
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": goal},
+    ]
+    req = ChatRequest(message=goal, session_id=session_id, provider="native", source="specialist")
+    tools_used: list[str] = []
+    content = ""
+    for _turn in range(3):
+        result: dict[str, Any] | None = None
+        async for kind, payload_ev in _model_turn_events(provider, model, messages, tools=tools, max_tokens=1200):
+            if kind == "result":
+                result = payload_ev
+            elif kind == "error":
+                return {"ok": False, "error": str(payload_ev)[:240], "domain": domain}
+        if result is None:
+            return {"ok": False, "error": "no model result", "domain": domain}
+        content = result.get("content") or ""
+        calls = result.get("tool_calls") or []
+        if not calls:
+            break
+        messages.append({"role": "assistant", "content": content,
+                         "tool_calls": [{"id": f"call_{i}", "type": "function",
+                                         "function": {"name": c["function"]["name"],
+                                                      "arguments": json.dumps(c["function"].get("arguments") or {})}}
+                                        for i, c in enumerate(calls)]})
+        for i, call in enumerate(calls):
+            tname = call["function"]["name"]
+            targs = call["function"].get("arguments") or {}
+            if isinstance(targs, str):
+                try:
+                    targs = json.loads(targs)
+                except Exception:
+                    targs = {}
+            tools_used.append(tname)
+            tool_result, _events, _done = await _execute_unified_tool(tname, targs, req, session_id)
+            messages.append({"role": "tool", "tool_call_id": f"call_{i}",
+                             "content": json.dumps(tool_result, default=str)[:6000]})
+    return {"ok": True, "domain": domain, "goal": goal, "summary": content[:4000],
+            "tools_used": tools_used, "provider": provider, "model": model,
+            "route": route_reason}
+
+
+def _run_specialist_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """Sync facade for the background-task worker thread (no event loop there)."""
+    return asyncio.run(_specialist_job_async(payload))
+
+
+# Register the handler with the omni-brain background task registry.
+try:
+    from shared.omni_brain import _TASK_HANDLERS as _BRAIN_TASK_HANDLERS
+    _BRAIN_TASK_HANDLERS.setdefault("specialist_agent", _run_specialist_job)
+except Exception:
+    pass
+
+
+_MODEL_TURN_DONE = object()
+
+# Providers whose _model_turn_events branch BOTH forwards `tools` to the model
+# AND parses tool_calls back out of the stream. This is the single source of
+# truth for "may the brain model call a tool this turn" — keep it in sync with
+# the branches in _model_turn_events.
+#
+# Listing a provider here that is not wired to a tool-call-aware streamer means
+# every tool call it makes is silently dropped, and the user sees an assistant
+# that confidently claims it searched the web while answering from stale
+# training data. Omitting a provider that IS wired (the `native` engine was
+# missing here) means the model is never offered tools at all — same symptom,
+# opposite cause. Both were live bugs.
+TOOL_CALLING_PROVIDERS = {"native", "lmstudio", "ollama"}
+
+
+def _reasoning_effort(*, lite: bool) -> str | None:
+    """Reasoning effort for a chat turn, or None to omit the field entirely.
+
+    ``SHIMS_REASONING_EFFORT``: ``auto`` (default) | ``none`` | ``low`` |
+    ``medium`` | ``high``.
+
+    Under ``auto``, trivial lite turns suppress thinking to protect first-token
+    latency, and the full tool-capable lane omits the field so a thinking model
+    reasons at its own default. Hardcoding ``"none"`` on every lane is what made
+    a 40B thinking model answer like a far smaller one: its reasoning was being
+    switched off on the exact turns that needed it.
+
+    Returning None (rather than a string) matters — servers that do not know the
+    field are happier with it absent than with a value they must guess at.
+    """
+    choice = (os.getenv("SHIMS_REASONING_EFFORT") or "auto").strip().lower()
+    if choice in {"none", "low", "medium", "high"}:
+        return choice
+    return "none" if lite else None
+
+
+async def _model_turn_events(provider: str, model: str, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None, max_tokens: int | None = None, context_length: int | None = None, lite: bool = False) -> AsyncGenerator[tuple[str, Any], None]:
+    """One streaming model turn as an async event stream.
+
+    Yields ("delta", text) per token as it arrives (direct streaming — no
+    pending-list pump), ("reasoning", text) for thinking tokens, ("status",
+    text) heartbeats while the model is silent, then exactly one of
+    ("result", {content, tool_calls}) or ("error", exception). Local
+    providers use the shared tool-call-aware streamers so the brain model can
+    drive routing via native tool calls; cloud providers stream via the
+    existing collectors (no tool loop)."""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def on_delta(text: str) -> None:
+        await queue.put(("delta", text))
+
+    async def on_reasoning(text: str) -> None:
+        await queue.put(("reasoning", text))
+
+    async def _run() -> None:
+        try:
+            if provider == "lmstudio" and tools:
+                # Tool turns use the shared streamer in agent_loop. It is the
+                # maintained LM Studio implementation — it retries LM Studio's
+                # transient "Model reloaded" 400 and accumulates fragmented
+                # tool_call deltas — and it is the seam the tests patch, so the
+                # inline copy below silently bypassed every fixture that tried
+                # to exercise tool calling here.
+                #
+                # The inline path's latency edge is kept where it actually pays:
+                # short no-tool turns. A tool turn is dominated by the tool's own
+                # I/O (a web search is seconds), so the tradeoff inverts.
+                result = await agent_loop._lmstudio_chat_stream(
+                    model, messages, tools, on_delta,
+                    max_tokens=max_tokens,
+                    context_length=context_length or _effective_ctx(),
+                )
+            elif provider == "lmstudio":
+                # Inline fast path: per-call requests Session in a thread matches the
+                # debug endpoint latency; the shared agent_loop implementation is
+                # slower in this process for an unknown module-context reason.
+                # Deltas are handed back to the event loop AS THEY ARRIVE (true
+                # SSE streaming) — buffering the whole completion (including
+                # hidden reasoning) and fake-streaming 24-char chunks defeated
+                # the entire point of streaming for first-token latency.
+                loop = asyncio.get_running_loop()
+
+                def _lmstudio_call_inline():
+                    import requests
+                    session = requests.Session()
+                    payload = {
+                        "model": model,
+                        "messages": messages,
+                        "stream": True,
+                        "temperature": 0.2,
+                        "max_tokens": int(max_tokens) if max_tokens else 400,
+                        "context_length": int(context_length) if context_length else _effective_ctx(),
+                        "num_ctx": int(context_length) if context_length else _effective_ctx(),
+                    }
+                    effort = _reasoning_effort(lite=lite)
+                    if effort is not None:
+                        payload["reasoning_effort"] = effort
+                    # No `tools` here by construction: the branch above routes
+                    # every tool-carrying turn to agent_loop._lmstudio_chat_stream.
+                    r = session.post(f"{LMSTUDIO_HOST}/v1/chat/completions", json=payload, stream=True, timeout=300)
+                    r.raise_for_status()
+                    collected = ""
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        data_str = line.decode("utf-8").strip()
+                        if not data_str.startswith("data:"):
+                            continue
+                        ds = data_str[5:].strip()
+                        if ds == "[DONE]":
+                            break
+                        try:
+                            delta_obj = json.loads(ds).get("choices", [{}])[0].get("delta", {})
+                        except Exception:
+                            continue
+                        think = delta_obj.get("reasoning_content") or ""
+                        if think:
+                            asyncio.run_coroutine_threadsafe(on_reasoning(think), loop)
+                        delta = delta_obj.get("content") or ""
+                        if delta:
+                            collected += delta
+                            asyncio.run_coroutine_threadsafe(on_delta(delta), loop)
+                    return {"content": collected, "tool_calls": []}
+
+                result = await asyncio.to_thread(_lmstudio_call_inline)
+            elif provider == "native":
+                # Honor an explicit model pick deterministically: when the
+                # engine is serving a different GGUF than requested, trigger
+                # the switch and WAIT for it — otherwise the turn would race
+                # ahead and get answered (silently) by the old model.
+                if model and _native_can_serve(model):
+                    from shared.native_engine import get_engine as _eng_for_switch
+                    eng = _eng_for_switch()
+                    loaded_now = eng.loaded_model_id()
+                    if loaded_now and loaded_now != model:
+                        _kick_native_load(model)
+                        for _w in range(36):  # up to ~3 min for a switch
+                            if eng.loaded_model_id() == model:
+                                break
+                            await asyncio.sleep(5)
+                result = None
+                last_exc: Exception | None = None
+                for attempt in range(2):
+                    try:
+                        result = await agent_loop._native_chat_stream(
+                            model, messages, tools or [], on_delta,
+                            max_tokens=max_tokens,
+                            context_length=context_length or _effective_ctx(),
+                            on_reasoning=on_reasoning,
+                            reasoning_effort=_reasoning_effort(lite=lite),
+                        )
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        msg = str(exc).lower()
+                        transient = any(k in msg for k in (
+                            "connection", "reset", "refused", "not running", "timeout", "timed out"))
+                        if attempt == 0 and transient:
+                            # Wait for the reload to finish (up to ~2 min).
+                            from shared.native_engine import get_engine as _get_eng
+                            for _wait in range(24):
+                                if _get_eng().loaded_model_id():
+                                    break
+                                await asyncio.sleep(5)
+                            continue
+                        raise
+                if result is None and last_exc is not None:
+                    raise last_exc
+            elif provider == "ollama":
+                result = await agent_loop._ollama_chat_stream(model, messages, tools or [], on_delta)
+            elif provider in CLOUD_STREAMING_PROVIDERS or provider in _LOCAL_ENGINE_MODEL_LISTERS:
+                content = await _collect_cloud_stream(provider, model, messages, max_tokens=max_tokens, on_delta=on_delta, on_reasoning=on_reasoning)
+                result = {"content": content, "tool_calls": []}
+            else:
+                # Providers without a streaming implementation (e.g.
+                # huggingface) still answer — as a single non-streamed chunk.
+                content, _ = await _run_llm(provider, model, messages, max_tokens=max_tokens)
+                result = {"content": content, "tool_calls": []}
+                if content:
+                    await on_delta(content)
+            await queue.put(("result", result))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await queue.put(("error", exc))
+        finally:
+            await queue.put(_MODEL_TURN_DONE)
+
+    task = asyncio.create_task(_run())
+    started = time.perf_counter()
+    heartbeat_every = _stream_heartbeat_seconds(provider)
+    try:
+        while True:
+            try:
+                if heartbeat_every == float("inf"):
+                    item = await queue.get()
+                else:
+                    item = await asyncio.wait_for(queue.get(), timeout=heartbeat_every)
+            except asyncio.TimeoutError:
+                waited = int(time.perf_counter() - started)
+                # Escalating honesty: a big dense model on this hardware reads
+                # the prompt at ~15-20 tok/s before its first output token, so a
+                # long silent wait is NORMAL for it — say so explicitly instead
+                # of letting a vague spinner read as "crashed".
+                if waited < 30:
+                    note = f"Model is thinking... ({waited}s)"
+                elif waited < 120:
+                    note = (f"{model} is still reading your context ({waited}s). Large local "
+                            f"models process the prompt before any words appear — still working.")
+                else:
+                    note = (f"{model} is a heavyweight model and has been processing for "
+                            f"{waited // 60}m {waited % 60}s. This pace is normal for it on this "
+                            f"machine. For fast replies, pick the A3B model in Settings.")
+                yield ("status", note)
+                continue
+            if item is _MODEL_TURN_DONE:
+                break
+            yield item
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+async def _unified_chat_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
+    """Unified model-driven chat pipeline — one lane for every turn.
+
+    Always-on budgeted retrieval, deterministic approval routing, native tool
+    calling (the brain model decides: answer directly or call web.search /
+    media.create / agent.spawn / skill.*), token-budgeted history, and
+    background post-turn learning."""
+    started = time.perf_counter()
+    req.message = (req.message or "").strip()
+    session_id = req.session_id or str(uuid.uuid4())
+
+    # Duplicate/silence suppression for every turn (the old full pipeline ran
+    # this inside _make_plan; the fast lane only ran it for voice).
+    if _guard_duplicate(session_id, req.message, req.source):
+        yield _jsonl({"type": "ignored", "reason": "silence_or_duplicate_suppressed", "session_id": session_id})
+        yield _jsonl({"type": "done", "session_id": session_id, "model": req.model or "", "provider": req.provider or "auto", "route": "ignored"})
+        return
+
+    conversation_enabled = bool(req.conversation_mode)
+    history = _sessions.setdefault(session_id, []) if conversation_enabled else []
+
+    # Wake pings and voice empty greetings keep the instant local ack.
+    if _is_wake_ping(req.message) or ((req.source or "") == "voice" and _is_empty_greeting(req.message)):
+        answer = "I'm listening. What would you like me to do?"
+        if conversation_enabled:
+            history.append({"role": "user", "content": req.message})
+            history.append({"role": "assistant", "content": answer})
+            _persist_session(session_id)
+            _spawn_background(asyncio.to_thread(remember_turn, session_id, req.message, answer, route="local:greeting", provider="local", model=""))
+        yield _jsonl({"type": "token", "content": answer})
+        yield _jsonl({"type": "done", "session_id": session_id, "model": "", "provider": "local", "route": "greeting"})
+        return
+
+    # ----- 1. Approvals FIRST: deterministic yes/no router before the model -----
+    # Only route into the approval stream when a session-scoped, surfaced,
+    # unexpired pending action actually exists — otherwise a bare "yes"/"no"
+    # is ordinary chat and must go to the model, never execute stale actions.
+    approval_decision = _approval_decision_from_text(req.message)
+    if approval_decision is not None:
+        executable_pending = await asyncio.to_thread(_executable_pending_action, session_id)
+        if executable_pending is not None:
+            async for chunk in _approval_decision_stream(req, session_id, approval_decision):
+                yield chunk
+            return
+
+    # ----- 2. Always-on retrieval, engineered fast -----
+    # Kick conversation recall + brain RAG/memory/skills off in a worker thread
+    # the moment the turn arrives, so it overlaps provider/model resolution and
+    # prompt assembly. Strictly time-budgeted: if it can't finish inside
+    # SHIMS_RETRIEVAL_BUDGET_S the turn proceeds without it — visibly
+    # (retrieval_missed in meta), never silently.
+    query_text = _strip_agent_slash(req.message) if req.message.startswith("/") else req.message
+    pending_action = await asyncio.to_thread(_latest_pending_action, session_id)
+    # Lite mode is the no-tools fast lane, so the ONLY turns that may take it
+    # are ones that provably need no tool: greetings and acknowledgements.
+    #
+    # This used to be an opt-OUT blocklist (`not _is_tool_intent(...)`), which
+    # inverted the risk: every turn whose wording missed a hardcoded substring
+    # silently lost the entire toolset. "website exists" matches no trigger, so
+    # the follow-up to a web question went lite, got no web.search, and the
+    # model invented an answer. A blocklist can only ever enumerate the phrasings
+    # someone thought of; an allowlist of trivia fails safe toward capability.
+    #
+    # Deciding *whether* a tool is needed is the model's job — it has the tool
+    # schemas and the conversation. This gate only protects first-token latency
+    # on turns where the answer is "hello".
+    #
+    # SHIMS_LITE_LANE=broad restores the old opt-out blocklist. It trades
+    # correctness for latency and exists only as a rollback: the full lane goes
+    # through the _model_turn_events queue layer, which a comment below records
+    # as adding 30-60s on this Windows stack. If that regression is still real
+    # here, this knob buys time to fix it without leaving the model tool-less.
+    _lite_lane = (os.getenv("SHIMS_LITE_LANE") or "trivial").strip().lower()
+    _lite_candidate = (
+        not _is_tool_intent(req.message) if _lite_lane == "broad"
+        else _is_simple_query(req.message)
+    )
+    use_lite = (
+        not (req.images or [])
+        and not req.message.startswith("/")
+        and _lite_candidate
+        and not _is_tool_intent(req.message)
+        and not _detect_search_intent(req.message, web_mode=bool(req.web_mode))
+    )
+    # Skip retrieval for trivial turns AND for tool/search-intent turns — those
+    # are routed to deterministic tools or the tool-equipped model lane, so the
+    # RAG wait would be pure latency with no grounding benefit.
+    skip_retrieval = (
+        _is_simple_query(query_text)
+        or _is_tool_intent(req.message)
+        or bool(_detect_search_intent(req.message, web_mode=bool(req.web_mode)))
+    )
+    if skip_retrieval:
+        retrieval_task = None
+    else:
+        retrieval_task = asyncio.create_task(
+            asyncio.to_thread(
+                _gather_retrieval,
+                session_id,
+                query_text,
+                list(history[-10:]),
+                rag_limit=4 if use_lite else 8,
+                recall_limit=2 if use_lite else 4,
+                addendum_max_chars=2000 if use_lite else 6000,
+            )
+        )
+
+    # Action requests (self-patch, scaffold, ...) keep their deterministic
+    # approval UX instead of depending on model tool calls.
+    pending_request = _detect_chat_action_request(req.message, session_id)
+    if pending_request:
+        if retrieval_task is not None:
+            retrieval_task.cancel()
+        async for chunk in _action_request_stream(req, session_id, pending_request):
+            yield chunk
+        return
+
+    # ----- 3. Provider/model resolution -----
+    # Order: explicit request → SHIMS_CHAT_MODEL/SHIMS_CHAT_PROVIDER env (set
+    # from Settings → Brain Model) → auto-pick. LMSTUDIO_MODEL stays as the
+    # last-resort fallback inside the auto-pick.
+    provider, model, route_reason = await _resolve_provider_model(req.provider, req.model, privacy_mode=req.privacy_mode, text=req.message)
+    route = f"{provider}-unified{'-lite' if use_lite else ''}"
+
+    # Voice replies must stay short-but-complete. The frontend's voice budget
+    # (typically 220) is an ANSWER-length hint, not the raw cap — see
+    # _effective_max_tokens: reasoning tokens are billed against max_tokens,
+    # so the cap has to cover thinking plus the answer.
+    max_tokens = _effective_max_tokens(req.max_tokens, lite=use_lite)
+
+    # One context length for both lanes: LM Studio keys a loaded instance to
+    # its ctx, so alternating 4096/8192 between lite and full lanes reloaded
+    # the model on every lane switch.
+    context_length = _effective_ctx()
+
+    # ----- 4. Collect retrieval within budget -----
+    try:
+        budget_s = max(0.1, float(os.getenv("SHIMS_RETRIEVAL_BUDGET_S", "1.5")))
+    except Exception:
+        budget_s = 1.5
+    brain_addendum = ""
+    brain_ctx: dict[str, Any] = {}
+    recall_hits: list[dict[str, Any]] = []
+    retrieval_missed = False
+    if retrieval_task is not None:
+        try:
+            brain_addendum, brain_ctx, recall_hits = await asyncio.wait_for(retrieval_task, timeout=budget_s)
+        except Exception:
+            retrieval_missed = True
+            retrieval_task.cancel()
+
+    # ----- 5. Assemble the prompt -----
+    recall_block = ""
+    if recall_hits:
+        recent_text = " ".join(str(m.get("content", ""))[:400] for m in history[-50:])
+        fresh = [h for h in recall_hits if h.get("text") and h["text"][:100] not in recent_text]
+        recall_hits = fresh
+        if fresh:
+            lines = ["Relevant earlier conversation (recalled from long-term memory):"]
+            for h in fresh:
+                lines.append(f"- {h['text'][:700]}")
+            recall_block = "\n".join(lines)
+    tools = None
+    if not use_lite and provider in TOOL_CALLING_PROVIDERS:
+        from shared.agent_domains import scoped_tools
+        tools = scoped_tools(req.message, _unified_chat_tools())
+    if use_lite:
+        # Lite turns skip the heavy lessons/RAG preamble to minimize prompt-eval latency,
+        # but still ground the answer in the retrieved brain context. All dynamic
+        # context rides in the trailing live block so the prefix stays byte-stable
+        # and local KV-cache reuse hits across turns.
+        system_text = _minimal_system_prompt()
+        live_context = _live_context_block(
+            ("Use the following retrieved context to answer:\n" + brain_addendum) if brain_addendum else "",
+            recall_block,
+        )
+    else:
+        system_text = _system_prompt()
+        if tools:
+            offered = {t.get("function", {}).get("name") for t in tools}
+            bullets = []
+            if "web.search" in offered:
+                bullets.append("- web.search — anything you cannot verify from your own knowledge: current events, prices, weather, docs, or any specific person, company, product or website.")
+            if "web.fetch" in offered:
+                bullets.append("- web.fetch — read one named URL or domain, or open a URL that web.search returned.")
+            if "media.create" in offered:
+                bullets.append("- media.create — produce a document or media artifact for the user.")
+            if "agent.spawn" in offered:
+                bullets.append("- agent.spawn — hand off long or multi-step coding work; return the job handle.")
+            if "desktop.bridge" in offered:
+                bullets.append("- desktop.bridge — inspect or act on the user's own machine.")
+            if {"mail.read", "mail.draft", "mail.attachment"} & offered:
+                bullets.append("- mail.read / mail.draft / mail.attachment — read the user's Gmail inbox, create drafts for review (never send directly), download attachments.")
+            if "channels.recent" in offered:
+                bullets.append("- channels.recent — read recent inbound WhatsApp/channel messages delivered by the bridge.")
+            if "comms.digest" in offered:
+                bullets.append("- comms.digest — classified digest of Gmail + WhatsApp: what is urgent, needs a reply, waiting, or FYI.")
+            if "inventory.export" in offered:
+                bullets.append("- inventory.export — Excel export of vendor-wise products/equipment/services with rates offered on WhatsApp and Gmail.")
+            if "agent.assign" in offered:
+                bullets.append("- agent.assign — hand a task to a background specialist agent (mail, comms, media, desktop, web, skills) that works independently and reports to the feed.")
+            if any(n.startswith("skill.") for n in offered):
+                bullets.append("- skill.learn / skill.execute / skill.list — reuse a learned skill.")
+            system_text += (
+                "\n\n## Tool use\n"
+                "You can act on the world only by emitting a tool call. Text describing an action does not "
+                "perform it.\n"
+                + "\n".join(bullets) +
+                "\n\nRules:\n"
+                "1. Never claim you searched, visited, checked or looked something up unless you actually "
+                "called the matching tool this turn. If you did not call it, say plainly that you have not "
+                "looked, and then call it.\n"
+                "2. When the user names a website, company, product or person you do not have verified "
+                "knowledge of, call web.search or web.fetch BEFORE describing it. Guessing from a plausible-"
+                "sounding name is a serious error — an invented description is worse than admitting ignorance.\n"
+                "3. If a tool fails or returns nothing, report exactly that. Do not substitute an answer from "
+                "memory and present it as a finding.\n"
+                "4. If the user pushes back on a factual claim you made without evidence, re-check with a tool "
+                "instead of restating or embellishing it.\n"
+                "Otherwise answer directly and concisely."
+            )
+        # Pending-action reminders stay in the full tool path; lite turns must keep the
+        # system prompt tiny so prompt-eval latency stays low.
+        pending_note = ""
+        pending = await asyncio.to_thread(_latest_pending_action, session_id)
+        if pending and pending.get("status") == "pending":
+            pending_note = (
+                f"There is a pending action awaiting the user's approval: "
+                f"'{pending.get('title') or pending.get('action_type')}'. If this message is an ambiguous "
+                "response to it, ask the user to confirm yes or no."
+            )
+        live_context = _live_context_block(_dynamic_system_context(), brain_addendum, recall_block, pending_note)
+
+    raw_images = [src for src in (req.images or []) if src]
+    user_message = await _build_user_message_with_images(req.message, raw_images, provider)
+    history_window = _history_within_budget(history, budget=2000 if use_lite else None)
+    # KV/prefix-cache friendliness: messages[0] (byte-stable system prompt) + the
+    # append-only history form the reusable prefix the native engine caches across
+    # turns. Per-turn volatile context (time, RAG, recall, pending) rides in the
+    # FINAL user message rather than messages[0], so a growing conversation is not
+    # reprocessed from scratch every turn (fixes the "lag grows each message" O(n^2)
+    # bug). model_user_message (exactly as sent) is what gets stored in history —
+    # recurrent-layer models (40B/A3B) need the next prompt to be an exact
+    # continuation of the previous token stream or their SmartCache never matches.
+    model_user_message = _attach_live_context(user_message, live_context)
+    messages = [{"role": "system", "content": system_text}] + history_window + [model_user_message]
+
+    # ----- 6. Meta + context thoughts -----
+    mem_hits = int(brain_ctx.get("memory_hits", 0) or 0) + len(recall_hits)
+    rag_hits = int(brain_ctx.get("rag_hits", 0) or 0)
+    research_hits = int(brain_ctx.get("research_hits", 0) or 0)
+    context_evidence = evidence_from_brain_context(brain_ctx) if brain_ctx else []
+    meta_trust = build_trust(
+        route=route,
+        evidence=context_evidence,
+        missing_evidence=[] if context_evidence else ["No retrieved memory/RAG evidence for this turn yet."],
+        requested_level="draft",
+    )
+    _spawn_background(asyncio.to_thread(
+        log_event, "turn.start", route=route, provider=provider, model=model, message=req.message,
+        metadata={"session_id": session_id, "source": req.source, "route_reason": route_reason},
+    ))
+    _note_orchestrator_activity()
+    yield _jsonl({
+        "type": "meta",
+        "session_id": session_id,
+        "model": model,
+        "provider": provider,
+        "route": route,
+        "agent": _detect_agent_route(req.message),
+        "brain": f"unified-v13+{BRAIN_VERSION}",
+        "memory_hits": mem_hits,
+        "rag_hits": rag_hits,
+        "research_hits": research_hits,
+        "retrieval_missed": retrieval_missed,
+        "retrieval_skipped": skip_retrieval,
+        "conversation_mode": conversation_enabled,
+        **_trust_fields(meta_trust),
+    })
+    if skip_retrieval:
+        yield _jsonl({"type": "thought", "stage": "context", "content": "Simple conversational turn — skipped memory/RAG retrieval for speed."})
+    elif retrieval_missed:
+        yield _jsonl({"type": "thought", "stage": "context", "content": f"Memory/RAG retrieval did not finish within {budget_s:.1f}s — answering without it this turn."})
+    elif mem_hits or rag_hits or research_hits:
+        yield _jsonl({"type": "thought", "stage": "context", "content": f"Retrieved {mem_hits} memories, {rag_hits} RAG chunks, {research_hits} research items."})
+
+    # ----- 7. Streaming tool loop (max 3 model turns) -----
+    answer = ""
+    tools_used: list[str] = []
+    tool_done_fields: dict[str, Any] = {}
+    first_token_at: float | None = None
+    reasoning_buffer = ""
+    reasoning_chars = 0
+    emitted_any = False
+
+    # Fast path for lite chat: bypass the _model_turn_events queue/task layer,
+    # which adds 30-60s on this Windows stack for an unknown reason. Use a
+    # persistent httpx.AsyncClient for truly async streaming that plays nicely
+    # with FastAPI's StreamingResponse.
+    if use_lite and provider in {"lmstudio", "native"}:
+        import httpx
+
+        if provider == "native":
+            # SHIMS native engine serves the same OpenAI-compatible SSE shape
+            # on its internal loopback endpoint.
+            from shared.native_engine import get_engine
+            _lite_base = get_engine().base_url
+        else:
+            _lite_base = LMSTUDIO_HOST
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "temperature": float(_settings["brain"].get("temperature", 0.12)),
+            "top_p": float(_settings["brain"].get("top_p", 0.82)),
+            "max_tokens": int(max_tokens) if max_tokens else (1200 if provider == "native" else 400),
+            "context_length": int(context_length) if context_length else _effective_ctx(),
+            "num_ctx": int(context_length) if context_length else _effective_ctx(),
+        }
+        _lite_effort = _reasoning_effort(lite=True)
+        if _lite_effort is not None:
+            payload["reasoning_effort"] = _lite_effort
+        # Module-level warm async client to avoid TCP/TLS handshake overhead per turn.
+        if not hasattr(_unified_chat_stream, "_lmstudio_async_client"):
+            _unified_chat_stream._lmstudio_async_client = httpx.AsyncClient(timeout=300.0, limits=httpx.Limits(max_connections=20, max_keepalive_connections=20))
+        _lmstudio_async_client = _unified_chat_stream._lmstudio_async_client
+
+        try:
+            first_logged = False
+            line_count = 0
+            collected = ""
+            answer = ""
+            # Small keep-alive event before the potentially slow model call so the
+            # streaming connection does not look idle to proxies/clients.
+            yield _jsonl({"type": "status", "content": "Thinking..."})
+            async with _lmstudio_async_client.stream("POST", f"{_lite_base}/v1/chat/completions", json=payload) as r:
+                _latency_trace(f"[CHAT_FAST] status={r.status_code} reason={r.reason_phrase}")
+                r.raise_for_status()
+                async for raw_line in r.aiter_lines():
+                    if not raw_line:
+                        continue
+                    line_count += 1
+                    line = raw_line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:"):].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        choice = json.loads(data_str).get("choices", [{}])[0]
+                        delta_obj = choice.get("delta") or {}
+                        # Thinking models stream reasoning_content before the
+                        # answer: surface it as thought events so the user sees
+                        # progress instead of a silent orb (LM Studio gemma
+                        # emits none, so this is a no-op there).
+                        think = delta_obj.get("reasoning_content") or ""
+                        if think:
+                            yield _jsonl({"type": "thought", "stage": "reasoning", "content": think})
+                        delta = delta_obj.get("content") or ""
+                    except Exception:
+                        continue
+                    if delta:
+                        collected += delta
+                        if not first_logged:
+                            first_logged = True
+                            _latency_trace(f"[SHIMS_LATENCY] lmstudio_first_token elapsed={(time.perf_counter()-started):.2f}s")
+                        answer += delta
+                        emitted_any = True
+                        if first_token_at is None:
+                            first_token_at = time.perf_counter()
+                            _latency_trace(f"[SHIMS_LATENCY] first_token_yield elapsed={(first_token_at-started):.2f}s")
+                        yield _jsonl({"type": "token", "content": delta})
+            _latency_trace(f"[CHAT_FAST] lines={line_count} collected_len={len(collected)}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _latency_trace(f"[CHAT_FAST] error={exc!r}")
+            answer = f"Sorry, the model did not respond: {exc}"[:200]
+            yield _jsonl({"type": "token", "content": answer})
+    else:
+        # Immediate visibility: the model's first token only appears after the
+        # full prompt is evaluated (tens of seconds on large local models), so
+        # say what is happening from second 1 instead of sitting silent.
+        yield _jsonl({"type": "thought", "stage": "reasoning",
+                      "content": f"Thinking with {model} (via {provider}) — evaluating the prompt; the model's reasoning will stream here live as it generates."})
+        try:
+            for iteration in range(3):
+                # Last iteration offers no tools, so the model must synthesize an answer.
+                offered = tools if (tools and iteration < 2) else None
+                content = ""
+                tool_calls: list[dict[str, Any]] = []
+                async for kind, payload in _model_turn_events(provider, model, messages, tools=offered, max_tokens=max_tokens, context_length=context_length, lite=use_lite):
+                    if kind == "delta":
+                        if first_token_at is None:
+                            first_token_at = time.perf_counter()
+                        content += payload
+                        emitted_any = True
+                        yield _jsonl({"type": "token", "content": payload})
+                    elif kind == "reasoning":
+                        reasoning_chars += len(payload)
+                        reasoning_buffer += payload
+                        if len(reasoning_buffer) >= 80 or "\n" in payload:
+                            yield _jsonl({"type": "thought", "stage": "reasoning", "content": reasoning_buffer[:400]})
+                            reasoning_buffer = reasoning_buffer[400:]
+                    elif kind == "status":
+                        yield _jsonl({"type": "status", "heartbeat": True, "content": payload})
+                    elif kind == "error":
+                        raise payload
+                    elif kind == "result":
+                        content = payload.get("content") or content
+                        tool_calls = payload.get("tool_calls") or []
+                if reasoning_buffer.strip():
+                    yield _jsonl({"type": "thought", "stage": "reasoning", "content": reasoning_buffer.strip()[:400]})
+                    reasoning_buffer = ""
+                if not tool_calls:
+                    answer = content
+                    break
+                # Execute the requested tools, append results, and synthesize.
+                messages.append({"role": "assistant", "content": content or ""})
+                tool_results: list[dict[str, Any]] = []
+                for call in tool_calls:
+                    fn = (call or {}).get("function") or {}
+                    name = fn.get("name") or ""
+                    args = fn.get("arguments") or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args) if args.strip() else {}
+                        except Exception:
+                            args = {}
+                    if not name:
+                        continue
+                    call_index = len(tools_used)
+                    yield _jsonl({"type": "thought", "stage": "tool", "content": f"Decided to use tool: {name}"})
+                    yield _jsonl({"type": "status", "content": f"Running {name}..."})
+                    # tool_call/tool_result drive the collapsible tool cards in
+                    # the UI (frontend/js/shims_agent.js). The unified lane used
+                    # to emit only the thought/status lines above, so a tool run
+                    # left no inspectable trace of what was actually called with
+                    # what arguments — exactly the thing to check when the model
+                    # looks like it is making facts up.
+                    yield _jsonl({"type": "tool_call", "tool": name, "args": args,
+                                  "step": iteration, "index": call_index})
+                    result, extra_events, tool_fields = await _execute_unified_tool(name, args, req, session_id)
+                    for ev in extra_events:
+                        yield ev
+                    yield _jsonl({"type": "tool_result", "tool": name,
+                                  "ok": bool(result.get("ok", True)) if isinstance(result, dict) else True,
+                                  "result": result, "step": iteration, "index": call_index})
+                    tool_done_fields.update(tool_fields)
+                    tools_used.append(name)
+                    tool_results.append({"tool": name, "result": result})
+                if not tool_results:
+                    answer = content
+                    break
+                messages.append({
+                    "role": "user",
+                    "content": "Tool results (use them to answer the user now; do not call the same tool again with the same arguments):\n"
+                               + json.dumps(tool_results, default=str)[:6000],
+                })
+            else:
+                answer = content
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if emitted_any or answer.strip():
+                # We already streamed real content — finish the turn instead of
+                # re-running anything (which would duplicate the answer).
+                log_event("turn.unified_interrupted", route=route, provider=provider, model=model,
+                          latency_ms=(time.perf_counter() - started) * 1000, ok=False,
+                          message=req.message, metadata={"session_id": session_id, "error": str(exc)[:200]})
+                yield _jsonl({"type": "done", "session_id": session_id, "model": model, "provider": provider,
+                              "route": f"{route}-interrupted"})
+                return
+            log_event("turn.unified_error", route=route, provider=provider, model=model,
+                      latency_ms=(time.perf_counter() - started) * 1000, ok=False,
+                      message=req.message, metadata={"session_id": session_id, "error": str(exc)[:200]})
+            raise
+
+    # ----- 8. Post-turn: history, background learning, trust envelope -----
+    if not answer.strip() and not emitted_any:
+        if reasoning_chars > 0:
+            # The model thought but never answered: its reasoning block used up
+            # the whole output cap. Say that plainly instead of implying the
+            # model returned nothing, so the fix is obvious.
+            answer = (
+                f"The model used its entire output budget ({max_tokens} tokens) on internal reasoning "
+                f"and never reached an answer. Raise SHIMS_REASONING_TOKEN_RESERVE, or pick a "
+                f"non-reasoning model for chat."
+            )
+            log_event("turn.reasoning_starved", route=route, provider=provider, model=model,
+                      ok=False, message=req.message,
+                      metadata={"session_id": session_id, "reasoning_chars": reasoning_chars, "max_tokens": max_tokens})
+        else:
+            answer = "I am connected but received an empty response from the model."
+        yield _jsonl({"type": "token", "content": answer})
+    if conversation_enabled:
+        # Store EXACTLY what was sent to the model (incl. the live-context
+        # block), not the clean message. Hybrid models with recurrent layers
+        # (40B Deck-Opus, A3B) can only reuse their SmartCache state when the
+        # next prompt is an exact continuation of the previous token stream —
+        # storing a cleaned message made every prompt diverge from the saved
+        # state ("SmartCache RNN No Match"), forcing a full context re-read
+        # every single turn. Append-only history = cache hits = fast TTFT.
+        history.append(model_user_message)
+        history.append({"role": "assistant", "content": answer})
+        _persist_session(session_id)
+        if answer.strip():
+            _spawn_background(asyncio.to_thread(
+                remember_turn, session_id, req.message, answer,
+                route=route, provider=provider, model=model,
+                metadata={"tools_used": tools_used} if tools_used else None,
+            ))
+            _spawn_background(_auto_memory_after_turn(req.message, answer, tools_used=tools_used or None))
+    trust = build_trust(
+        route=route,
+        evidence=context_evidence,
+        missing_evidence=[] if context_evidence else ["No retrieved memory/RAG evidence for this turn yet."],
+        requested_level="draft",
+    )
+    total_latency_ms = (time.perf_counter() - started) * 1000
+    first_token_ms = (first_token_at - started) * 1000 if first_token_at else None
+    if provider == "native" and answer:
+        # Feed the per-model performance ledger from every real turn (both the
+        # lite fast path and the tool loop end here). ~4 chars/token estimates.
+        try:
+            from shared.native_engine import perf as _native_perf
+            _native_perf.record(
+                model,
+                prompt_tokens=sum(len(str(m.get("content") or "")) for m in messages) // 4,
+                gen_tokens=max(len(answer) // 4, 1),
+                ttft_s=(first_token_ms or 0.0) / 1000.0,
+                total_s=total_latency_ms / 1000.0,
+            )
+        except Exception:
+            pass
+    log_event("turn.done", route=route, provider=provider, model=model, latency_ms=total_latency_ms, ok=True,
+              message=req.message, metadata={
+                  "session_id": session_id,
+                  "answer_preview": answer[:240],
+                  "first_token_ms": first_token_ms,
+                  "tools_used": tools_used,
+                  "retrieval_missed": retrieval_missed,
+              })
+    yield _jsonl({"type": "done", "session_id": session_id, "model": model, "provider": provider,
+                  "route": route, "latency_ms": total_latency_ms, "first_token_ms": first_token_ms,
+                  "tools_used": tools_used, **_trust_fields(trust), **tool_done_fields})
+
+
+async def _approval_decision_stream(req: ChatRequest, session_hint: str, approval_decision: bool) -> AsyncGenerator[bytes, None]:
+    """Deterministic yes/no router for pending approvals.
+
+    Runs BEFORE any model turn: a bare yes/no (haan/nahi) executes or cancels
+    the latest pending action — but ONLY one that was actually surfaced to the
+    user in this session and is still within the approval TTL. Anything else
+    (stale, cross-session, never-shown) must not execute; the call sites gate
+    on the same check so such replies fall through to a normal model turn.
+    """
+    pending = await asyncio.to_thread(_executable_pending_action, session_hint)
+    meta_trust = build_trust(route="approval:decision", evidence=[], missing_evidence=[], requested_level="L3")
+    yield _jsonl({
+        "type": "meta",
+        "session_id": session_hint,
+        "model": "approval-router",
+        "provider": "local",
+        "route": "approval:decision",
+        "agent": "operator",
+        "brain": f"unified-v13+{BRAIN_VERSION}",
+        "conversation_mode": bool(req.conversation_mode),
+        **_trust_fields(meta_trust),
+    })
+    if not pending:
+        answer = "I do not have a pending action to approve. Tell me the action first and I will ask yes or no."
+        yield _jsonl({"type": "token", "content": answer})
+        yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:no-pending", **_trust_fields(meta_trust)})
+        return
+    if approval_decision is False:
+        pending["status"] = "cancelled"
+        pending["decision"] = "no"
+        pending["resolved_at"] = _utc_now()
+        _save_pending_action(pending)
+        answer = f"Cancelled. I did not run: {pending.get('title') or pending.get('action_type')}."
+        yield _jsonl({"type": "approval", "approval": _public_pending_action(pending)})
+        yield _jsonl({"type": "token", "content": answer})
+        yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:cancelled", **_trust_fields(meta_trust)})
+        return
+    approved_by = "chat-human"
+    yield _jsonl({"type": "status", "content": f"Approved. Running {pending.get('action_type')}..."})
+    result = await _execute_pending_action(pending, approved_by=approved_by)
+    pending["status"] = "completed" if result.get("ok") else "failed"
+    pending["decision"] = "yes"
+    pending["approved_by"] = approved_by
+    pending["resolved_at"] = _utc_now()
+    pending["result"] = result
+    _save_pending_action(pending)
+    action = record_action(
+        "approval_execute",
+        f"Execute approval {pending.get('approval_id')}",
+        payload={"approval_id": pending.get("approval_id"), "action_type": pending.get("action_type")},
+        result=result,
+        evidence=[],
+        requested_level="L3",
+        status="completed" if result.get("ok") else "failed",
+        summary=f"Executed approved action: {pending.get('title')}",
+    )
+    trust = build_trust(route="approval:execute", evidence=evidence_from_action(action.get("action")), action_id=action.get("action_id", ""), ledger_hash=action.get("ledger_hash", ""))
+    answer = (result.get("message") or result.get("status") or "Action completed.") if result.get("ok") else f"Action failed: {result.get('message') or result.get('status') or 'unknown error'}"
+    yield _jsonl({"type": "approval", "approval": _public_pending_action(pending), "result": result, **_trust_fields(trust)})
+    yield _jsonl({"type": "token", "content": answer})
+    yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:executed", "approval": _public_pending_action(pending), **_trust_fields(trust)})
+
+
 async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     started = time.perf_counter()
     req.message = (req.message or "").strip()
@@ -4820,61 +7625,15 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     raw_images = [src for src in (req.images or []) if src]
 
     # ----- 1. Handle yes/no to existing approval requests FIRST -----
+    # Gated on a session-scoped, surfaced, unexpired pending action — a bare
+    # yes/no with nothing genuinely outstanding falls through to the model.
     approval_decision = _approval_decision_from_text(req.message)
     if approval_decision is not None:
-        pending = _latest_pending_action(session_hint)
-        meta_trust = build_trust(route="approval:decision", evidence=[], missing_evidence=[], requested_level="L3")
-        yield _jsonl({
-            "type": "meta",
-            "session_id": session_hint,
-            "model": "approval-router",
-            "provider": "local",
-            "route": "approval:decision",
-            "agent": "operator",
-            "brain": f"unified-v13+{BRAIN_VERSION}",
-            "conversation_mode": bool(req.conversation_mode),
-            **_trust_fields(meta_trust),
-        })
-        if not pending:
-            answer = "I do not have a pending action to approve. Tell me the action first and I will ask yes or no."
-            yield _jsonl({"type": "token", "content": answer})
-            yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:no-pending", **_trust_fields(meta_trust)})
+        executable_pending = await asyncio.to_thread(_executable_pending_action, session_hint)
+        if executable_pending is not None:
+            async for chunk in _approval_decision_stream(req, session_hint, approval_decision):
+                yield chunk
             return
-        if approval_decision is False:
-            pending["status"] = "cancelled"
-            pending["decision"] = "no"
-            pending["resolved_at"] = _utc_now()
-            _save_pending_action(pending)
-            answer = f"Cancelled. I did not run: {pending.get('title') or pending.get('action_type')}."
-            yield _jsonl({"type": "approval", "approval": _public_pending_action(pending)})
-            yield _jsonl({"type": "token", "content": answer})
-            yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:cancelled", **_trust_fields(meta_trust)})
-            return
-        approved_by = "chat-human"
-        yield _jsonl({"type": "status", "content": f"Approved. Running {pending.get('action_type')}..."})
-        result = await _execute_pending_action(pending, approved_by=approved_by)
-        pending["status"] = "completed" if result.get("ok") else "failed"
-        pending["decision"] = "yes"
-        pending["approved_by"] = approved_by
-        pending["resolved_at"] = _utc_now()
-        pending["result"] = result
-        _save_pending_action(pending)
-        action = record_action(
-            "approval_execute",
-            f"Execute approval {pending.get('approval_id')}",
-            payload={"approval_id": pending.get("approval_id"), "action_type": pending.get("action_type")},
-            result=result,
-            evidence=[],
-            requested_level="L3",
-            status="completed" if result.get("ok") else "failed",
-            summary=f"Executed approved action: {pending.get('title')}",
-        )
-        trust = build_trust(route="approval:execute", evidence=evidence_from_action(action.get("action")), action_id=action.get("action_id", ""), ledger_hash=action.get("ledger_hash", ""))
-        answer = (result.get("message") or result.get("status") or "Action completed.") if result.get("ok") else f"Action failed: {result.get('message') or result.get('status') or 'unknown error'}"
-        yield _jsonl({"type": "approval", "approval": _public_pending_action(pending), "result": result, **_trust_fields(trust)})
-        yield _jsonl({"type": "token", "content": answer})
-        yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:executed", "approval": _public_pending_action(pending), **_trust_fields(trust)})
-        return
 
     # ----- 2. PLAN FIRST — think before asking for approval -----
     plan = await _make_plan(req)
@@ -4905,6 +7664,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     def _store_assistant_turn(answer: str) -> None:
         if conversation_enabled:
             history.append({"role": "assistant", "content": answer})
+            _persist_session(session_id)
 
     def _remember_session_turn(*args: Any, **kwargs: Any) -> None:
         if conversation_enabled:
@@ -4921,98 +7681,14 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         except Exception:
             pass
 
-    async def _auto_memory_after_turn(user_msg: str, assistant_msg: str, tools_used: list[str] | None = None) -> None:
-        """Extract durable facts from a successful turn and save them to memory."""
-        from shared.omni_brain import remember
-        facts: list[tuple[str, list[str]]] = []
-        # Fast regex heuristics first
-        lower = (user_msg or "").lower()
-        if any(p in lower for p in ("i prefer", "my name is", "i am a", "i work at", "i like", "i want", "i need")):
-            facts.append((user_msg.strip(), ["preference", "user"]))
-        if tools_used:
-            if "desktop.interpreter" in tools_used and assistant_msg and len(assistant_msg) > 20:
-                facts.append((f"Code interpreter result: {assistant_msg[:500]}", ["tool_result", "code"]))
-            if any(t.startswith("plan.") for t in tools_used):
-                facts.append((f"Plan execution: {assistant_msg[:500]}", ["tool_result", "plan"]))
-        if "remember" in (assistant_msg or "").lower() and len(assistant_msg or "") > 40:
-            facts.append((assistant_msg.strip()[:600], ["assistant_note"]))
-        # LLM-powered extraction for richer memories
-        if len((user_msg or "") + (assistant_msg or "")) >= 60:
-            try:
-                facts.extend(await _extract_durable_facts_llm(user_msg, assistant_msg, tools_used))
-            except Exception:
-                pass
-        # Deduplicate by normalized key and store
-        seen: set[str] = set()
-        for content, tags in facts:
-            norm = content.strip()[:80].lower()
-            if not norm or norm in seen:
-                continue
-            seen.add(norm)
-            key = content[:60] + ("..." if len(content) > 60 else "")
-            remember("agent", key, content, tags=tags, source="auto_memory")
-
     # ----- 3. THINKING — show the user what SHIMS is doing -----
     yield _jsonl({"type": "thought", "stage": "plan", "content": f"Analyzing request: '{req.message[:80]}...' | Detected intent: {plan.agent or 'general'}"})
 
     # Check for action requests AFTER planning so SHIMS thinks first
     pending_request = _detect_chat_action_request(req.message, session_hint)
     if pending_request:
-        action_type = pending_request.get("action_type")
-        # Safe read-only / scaffold actions run immediately so SHIMS actually does
-        # the work instead of asking for approval and doing nothing.
-        if action_type in {"coder_app_scaffold", "evolution_validate"}:
-            yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected safe action: {pending_request.get('title')}. Auto-executing now (read-only or scaffold)."})
-            try:
-                result = await _execute_pending_action(pending_request, approved_by="auto-approved")
-                ok = result.get("ok", False)
-                msg = result.get("message") or ("Done." if ok else "Failed.")
-                route = f"auto:{action_type}"
-                trust = build_trust(route=route, evidence=[], requested_level="L1")
-                yield _jsonl({"type": "meta", "session_id": session_hint, "model": "approval-router", "provider": "local", "route": route, "agent": "operator", "brain": f"unified-v13+{BRAIN_VERSION}", "conversation_mode": bool(req.conversation_mode), **_trust_fields(trust)})
-                yield _jsonl({"type": "token", "content": f"Created and applied: {pending_request.get('title')}.\n\n{msg}"})
-                if result.get("app_url"):
-                    yield _jsonl({"type": "token", "content": f"\nOpen it: {result['app_url']}"})
-                yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": route, **_trust_fields(trust)})
-            except Exception as exc:
-                yield _jsonl({"type": "token", "content": f"I tried to execute '{pending_request.get('title')}' but hit an error: {exc}"})
-                yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": f"auto:{action_type}:error"})
-            return
-
-        # Riskier source-change actions still require explicit human approval.
-        # But first, generate a real plan instead of a generic template message.
-        yield _jsonl({"type": "thought", "stage": "plan", "content": f"Detected action request: {pending_request.get('title')}. Analyzing scope and risk before asking for approval."})
-        trust = build_trust(route="approval:request", evidence=evidence_from_action(get_action(pending_request.get("action_id", ""))), action_id=pending_request.get("action_id", ""), ledger_hash=pending_request.get("ledger_hash", ""), requested_level="L3")
-        yield _jsonl({
-            "type": "meta",
-            "session_id": session_hint,
-            "model": "approval-router",
-            "provider": "local",
-            "route": "approval:request",
-            "agent": "operator",
-            "brain": f"unified-v13+{BRAIN_VERSION}",
-            "conversation_mode": bool(req.conversation_mode),
-            **_trust_fields(trust),
-        })
-        public = _public_pending_action(pending_request)
-        # Dynamic plan message instead of generic template
-        title = pending_request.get('title', 'Action')
-        summary = pending_request.get('summary', '')
-        action_type = pending_request.get('action_type', 'action')
-        # Build a contextual explanation based on action type
-        if action_type == 'evolution_apply':
-            plan_detail = f"This will apply a code patch to SHIMS's own source files. The patch has been validated — it will modify {summary}."
-        elif action_type == 'evolution_validate':
-            plan_detail = f"This will run sandbox tests on a proposed patch to verify it doesn't break anything. No files will be modified."
-        elif action_type == 'agent_tool':
-            tool = pending_request.get('payload', {}).get('tool', 'a tool')
-            plan_detail = f"This will run the tool '{tool}' on your desktop: {summary}"
-        else:
-            plan_detail = f"This will: {summary}"
-        answer = f"I analyzed your request and here's what I plan to do:\n\n**{title}**\n{plan_detail}\n\nRisk level: {public.get('risk', 'unknown')}. Approve? Reply yes or no."
-        yield _jsonl({"type": "approval_request", "approval": public, **_trust_fields(trust)})
-        yield _jsonl({"type": "token", "content": answer})
-        yield _jsonl({"type": "done", "session_id": session_hint, "provider": "local", "model": "approval-router", "route": "approval:request", "approval": public, **_trust_fields(trust)})
+        async for chunk in _action_request_stream(req, session_hint, pending_request):
+            yield chunk
         return
 
     # Continue with normal execution...
@@ -5050,7 +7726,12 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         return
 
     yield _jsonl({"type": "status", "content": "Retrieving memory & context..."})
-    brain_addendum, brain_ctx = brain_prompt_addendum(req.message, agent=plan.agent, limit=8, history=turn_history)
+    if _is_simple_query(req.message):
+        # Trivial conversational turns skip retrieval entirely — pulling
+        # irrelevant docs into every "hello" pollutes the answer.
+        brain_addendum, brain_ctx = "", {}
+    else:
+        brain_addendum, brain_ctx = brain_prompt_addendum(req.message, agent=plan.agent, limit=10, history=turn_history)
     self_addendum = self_prompt_addendum()
     if self_addendum:
         brain_addendum += "\n\n" + self_addendum
@@ -5071,6 +7752,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         requested_level="draft",
     )
     log_event("turn.start", route=plan.route, provider=plan.provider, model=plan.model, message=req.message, metadata={"session_id": session_id, "source": req.source})
+    _note_orchestrator_activity()
     yield _jsonl({
         "type": "meta",
         "session_id": session_id,
@@ -5090,7 +7772,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     # Privacy guard indicator
     if "privacy-guard" in plan.route:
         yield _jsonl({"type": "thought", "stage": "plan", "content": f"🔒 Privacy guard activated: sensitive data detected. Forced local processing. Mode: {req.privacy_mode}"})
-    elif plan.provider not in ("ollama", "local", "lmstudio", "huggingface"):
+    elif plan.provider not in ("ollama", "local", "lmstudio", "huggingface", "native", "vllm", "sglang", "aphrodite", "koboldcpp"):
         yield _jsonl({"type": "thought", "stage": "plan", "content": f"☁️ Cloud provider selected ({plan.provider}). Data will leave this machine."})
     else:
         yield _jsonl({"type": "thought", "stage": "plan", "content": f"🏠 Local provider selected. Data stays on this machine."})
@@ -5199,44 +7881,29 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     yield _jsonl({"type": "thought", "stage": "generate", "content": f"Generating response with {plan.provider}:{plan.model}..."})
     yield _jsonl({"type": "status", "content": f"Thinking with {plan.provider}:{plan.model}"})
     turn_history = history[-50:] if conversation_enabled else [{"role": "user", "content": req.message}]
-    messages = [{"role": "system", "content": _system_prompt() + "\n\n" + brain_addendum}] + turn_history
+    messages = [{"role": "system", "content": _system_prompt() + _live_context_block(_dynamic_system_context(), brain_addendum)}] + turn_history
 
     # Determine agent provider before the gate (local providers run the wave loop too, see below)
-    user_provider = (req.provider or plan.provider or "ollama").strip().lower()
-    if user_provider in ("anthropic", "openai", "gemini", "deepseek", "kimi"):
-        agent_provider = user_provider
-    elif user_provider in ("lmstudio", "huggingface"):
+    # Native-only: every local route (ollama/lmstudio/huggingface/local/auto) runs the
+    # agent loop on the native engine; only explicit cloud providers stay cloud.
+    user_provider = (req.provider or plan.provider or "native").strip().lower()
+    if user_provider in ("anthropic", "openai", "gemini", "deepseek", "kimi", "qwen"):
         agent_provider = user_provider
     else:
-        agent_provider = "ollama"
+        agent_provider = "native"
 
     # ---- Agentic tool-use loop: run/edit/code/web/self-modify on real machine ----
-    # Agent mode is the default for every provider, including local Ollama models.
-    # Local models stay fast by (a) using the compact ESSENTIAL_TOOLS set instead of
-    # the full 128-tool registry, and (b) auto-picking a tool-capable installed model
-    # via _agent_tool_model() instead of trusting an arbitrary requested model.
+    # Agent mode is the default for every provider. Local turns run on the native
+    # engine with the compact ESSENTIAL_TOOLS set instead of the full registry.
     if req.agent_mode:
         deep = _needs_deep_model(req.message)
         agent_model = req.model or plan.model or ""
-        if agent_provider == "ollama":
-            # Only keep the requested model if it's actually installed and tool-capable;
-            # otherwise pick a known tool-capable local model for the wave loop.
-            ollama_names = await _ollama_names()
-            if not agent_model or agent_model not in ollama_names or not is_tool_capable(agent_model):
-                agent_model = await _agent_tool_model(deep=deep) or PROVIDER_DEFAULTS.get(agent_provider, "")
-        elif agent_provider == "lmstudio":
-            # Same idea as Ollama: keep the requested model only if LM Studio actually
-            # has it and it's known tool-capable, otherwise pick the best available one
-            # (preferring an already-loaded model so we don't eat a cold-load delay).
-            lm_models = await _lmstudio_models_raw()
-            lm_names = [m["name"] for m in lm_models]
-            lm_caps = {m["name"]: m.get("tool_capable", False) for m in lm_models}
-            if not agent_model or agent_model not in lm_names or not lm_caps.get(agent_model, False):
-                capable = [m for m in lm_models if m.get("tool_capable")]
-                loaded_capable = [m for m in capable if m.get("loaded")]
-                pick_from = loaded_capable or capable or lm_models
-                agent_model = (sorted(pick_from, key=lambda m: m.get("size") or float("inf"))[0]["name"] if pick_from else "") or PROVIDER_DEFAULTS.get(agent_provider, "")
-        elif not agent_model or _looks_local_model(agent_model) or agent_model in (await _ollama_names()):
+        if agent_provider == "native":
+            # Keep the requested model only if the native engine can serve it;
+            # otherwise use the currently loaded native model.
+            if not agent_model or not _native_can_serve(agent_model):
+                agent_model = _native_loaded_model() or ""
+        elif not agent_model or _looks_local_model(agent_model):
             agent_model = PROVIDER_DEFAULTS.get(agent_provider, "")
 
         if agent_model:
@@ -5485,7 +8152,7 @@ async def _brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                         # Tiny models struggle with the full RAG-augmented prompt, so feed them
                         # a minimal prompt for the fallback answer.
                         minimal_fallback_messages = [
-                            {"role": "system", "content": _system_prompt()},
+                            {"role": "system", "content": _system_prompt() + _live_context_block(_dynamic_system_context())},
                             {"role": "user", "content": req.message},
                         ]
                         collect_task = asyncio.create_task(_collect_ollama_stream(
@@ -5673,16 +8340,6 @@ async def _safe_brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
         text = (req.message or "").strip()
         if text.startswith("/") or _agentic_intent(text):
             req.agent_mode = True
-    # Fast lane: simple chat bypasses planning, brain retrieval, and agent loop.
-    if _fast_chat_eligible(req):
-        try:
-            async for chunk in _fast_chat_stream(req):
-                yield chunk
-            return
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            pass  # fall through to robust full pipeline
     # Phase 2: graph-based agent stream behind feature flag
     if os.getenv("SHIMS_GRAPH_AGENT", "").strip().lower() in {"1", "true", "yes", "on"}:
         try:
@@ -5705,8 +8362,11 @@ async def _safe_brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
                 yield _jsonl({"type": "error", "error": msg2, "session_id": session_id, "route": "stream-error"})
                 yield _jsonl({"type": "done", "session_id": session_id, "model": req.model or "", "provider": req.provider or "auto", "route": "stream-error"})
         return
+    # All turns go through the unified model-driven pipeline. _brain_stream
+    # and _fast_chat_stream stay in place for reference/tests but are no
+    # longer dispatched from here.
     try:
-        async for chunk in _brain_stream(req):
+        async for chunk in _unified_chat_stream(req):
             yield chunk
     except asyncio.CancelledError:
         raise
@@ -5728,9 +8388,18 @@ async def _safe_brain_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
             missing_evidence=[f"Backend stream failed before normal completion: {msg}"],
             requested_level="unverified",
         )
+        # Name the real cause in the visible text — a generic apology hides
+        # whether this was a timeout (slow model), a dead engine, or a bug.
+        friendly = msg
+        if "timed out" in msg.lower() or "timeout" in msg.lower():
+            friendly = ("the model did not respond in time — it may be a large model still "
+                        "processing (normal for heavyweight models), or busy with another request")
+        elif "connect" in msg.lower() or "refused" in msg.lower():
+            friendly = "the native engine was unreachable — it may be restarting; retry in a minute"
         yield _jsonl({
             "type": "token",
-            "content": "\n\nI hit a backend streaming error before I could finish. Please retry, or switch to a faster installed local model in Settings.",
+            "content": f"\n\nI hit a backend streaming error before I could finish ({friendly}). "
+                       "Please retry, or switch to a faster installed local model in Settings.",
         })
         yield _jsonl({"type": "error", "error": msg, "session_id": session_id, "route": "stream-error", **_trust_fields(trust)})
         yield _jsonl({"type": "done", "session_id": session_id, "model": req.model or "", "provider": req.provider or "auto", "route": "stream-error", **_trust_fields(trust)})
@@ -5761,7 +8430,7 @@ async def _brain_graph_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     history = _sessions.setdefault(session_id, []) if conversation_enabled else []
 
     # System prompt (mirrors existing brain stream)
-    system_prompt = _system_prompt()
+    system_prompt = _system_prompt() + _live_context_block(_dynamic_system_context())
 
     # Build state
     state = new_agent_state(
@@ -5829,6 +8498,7 @@ async def _brain_graph_stream(req: ChatRequest) -> AsyncGenerator[bytes, None]:
     if conversation_enabled and final_answer:
         history.append({"role": "user", "content": req.message or ""})
         history.append({"role": "assistant", "content": final_answer})
+        _persist_session(session_id)
         remember_turn(session_id, req.message or "", final_answer, route="agent:graph", agent="graph", provider=provider, model=model, metadata={})
         _spawn_background(_auto_memory_after_turn(req.message or "", final_answer, tools_used=[]))
 
@@ -5986,6 +8656,110 @@ async def health() -> dict[str, Any]:
     }
 
 
+_LMSTUDIO_DEBUG_SESSION = None
+
+
+def _lmstudio_main_session():
+    global _LMSTUDIO_DEBUG_SESSION
+    if _LMSTUDIO_DEBUG_SESSION is None:
+        import requests
+        _LMSTUDIO_DEBUG_SESSION = requests.Session()
+    return _LMSTUDIO_DEBUG_SESSION
+
+
+@app.get("/debug/lmstudio-latency")
+async def debug_lmstudio_latency() -> dict[str, Any]:
+    session = _lmstudio_main_session()
+    payload = {
+        "model": "google/gemma-4-12b",
+        "messages": [
+            {"role": "system", "content": "You are SHIMS, a helpful assistant. Answer directly and concisely."},
+            {"role": "user", "content": "What is the capital of France?"}
+        ],
+        "stream": True,
+        "temperature": 0.2,
+        "max_tokens": 400,
+        "context_length": 4096,
+        "num_ctx": 4096,
+        "reasoning_effort": "none",
+    }
+    url = f"{LMSTUDIO_HOST}/v1/chat/completions"
+    start = time.perf_counter()
+    first = None
+    created_session = False
+    r = session.post(url, json=payload, stream=True, timeout=300)
+    for line in r.iter_lines():
+        if line:
+            try:
+                data_str = line.decode("utf-8").strip()
+                if data_str.startswith("data:"):
+                    data_str = data_str[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    delta = json.loads(data_str).get("choices", [{}])[0].get("delta", {}).get("content") or ""
+                    if delta and first is None:
+                        first = time.perf_counter()
+            except Exception:
+                pass
+    end = time.perf_counter()
+    return {"first_token_s": round(first - start, 2) if first else None, "total_s": round(end - start, 2), "new_session": created_session}
+
+
+@app.get("/debug/executor")
+async def debug_executor() -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    executor = loop._default_executor
+    info = {"executor_type": type(executor).__name__ if executor else None}
+    if executor:
+        info["max_workers"] = getattr(executor, "_max_workers", None)
+        info["threads"] = len(getattr(executor, "_threads", set()))
+        info["work_queue_size"] = executor._work_queue.qsize() if hasattr(executor, "_work_queue") else None
+    return info
+
+
+@app.get("/debug/lmstudio-thread")
+async def debug_lmstudio_thread() -> dict[str, Any]:
+    import requests
+    payload = {
+        "model": "google/gemma-4-12b",
+        "messages": [
+            {"role": "system", "content": "Answer directly and concisely."},
+            {"role": "user", "content": "What is the capital of France?"}
+        ],
+        "stream": True,
+        "temperature": 0.2,
+        "max_tokens": 400,
+        "context_length": 4096,
+        "num_ctx": 4096,
+        "reasoning_effort": "none",
+    }
+
+    def _call():
+        session = requests.Session()
+        start = time.perf_counter()
+        first = None
+        content = ""
+        r = session.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, stream=True, timeout=300)
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if line:
+                data_str = line.decode("utf-8").strip()
+                if data_str.startswith("data:"):
+                    ds = data_str[5:].strip()
+                    if ds == "[DONE]":
+                        break
+                    delta = json.loads(ds).get("choices", [{}])[0].get("delta", {}).get("content") or ""
+                    if delta:
+                        content += delta
+                        if first is None:
+                            first = time.perf_counter()
+        end = time.perf_counter()
+        return {"first_token_s": round(first - start, 2) if first else None, "total_s": round(end - start, 2), "content": content[:50]}
+
+    result = await asyncio.to_thread(_call)
+    return result
+
+
 @app.get("/launch/readiness")
 async def launch_readiness() -> dict[str, Any]:
     android_source = _ensure_android_omni_source()
@@ -6050,40 +8824,6 @@ async def launch_readiness() -> dict[str, Any]:
     }
 
 
-@app.post("/api/chat")
-async def api_chat(req: ChatRequest) -> dict[str, Any]:
-    """Backward-compatible non-streaming chat route for older Omni clients."""
-    answer_parts: list[str] = []
-    done: dict[str, Any] = {}
-    search_result: dict[str, Any] | None = None
-    media_result: dict[str, Any] | None = None
-    async for raw in _safe_brain_stream(req):
-        try:
-            event = json.loads(raw.decode("utf-8"))
-        except Exception:
-            continue
-        if event.get("type") == "token":
-            answer_parts.append(str(event.get("content") or ""))
-        elif event.get("type") == "search":
-            search_result = event.get("search_result")
-        elif event.get("type") == "media":
-            media_result = event.get("media_result")
-        elif event.get("type") == "done":
-            done = event
-    answer = "".join(answer_parts).strip()
-    return {
-        "ok": True,
-        "independent": True,
-        "answer": answer,
-        "provider": done.get("provider") or req.provider or "auto",
-        "model": done.get("model") or req.model or "",
-        "route": done.get("route") or "unknown",
-        "search_result": search_result or done.get("search_result"),
-        "media_result": media_result or done.get("media_result"),
-        **{k: done.get(k) for k in ("trust", "evidence", "confidence", "query_plan", "action_id", "ledger_hash") if k in done},
-    }
-
-
 @app.get("/chat/models")
 async def chat_models() -> dict[str, Any]:
     installed = await _ollama_models_raw()
@@ -6091,6 +8831,17 @@ async def chat_models() -> dict[str, Any]:
     lm_installed = await _lmstudio_models_raw()
     installed.extend(hf_installed)
     installed.extend(lm_installed)
+    # SHIMS native engine: installed GGUFs with the loaded one flagged, so the
+    # model menu shows the primary path first-class.
+    try:
+        from shared.native_engine import discovery as _native_discovery, get_engine as _get_native_engine
+        _native_loaded = _get_native_engine().loaded_model_id()
+        installed.extend({
+            "name": m["id"], "provider": "native", "loaded": m["id"] == _native_loaded,
+            "tool_capable": True, "size": m.get("size_bytes", 0),
+        } for m in _native_discovery.discover_models())
+    except Exception:
+        pass
     installed = mark_tool_capable(installed)
     names = {m["name"] for m in installed}
     # Default to LM Studio on this laptop: it is GPU-accelerated and lower latency.
@@ -6266,15 +9017,17 @@ async def api_feedback(request: Request) -> dict[str, Any]:
         return {"ok": False, "detail": "rating and message required"}
     try:
         from shared.omni_brain import remember
+        # Store a truncated topic summary + what was wrong — never the full
+        # question/answer text, which would be retrieved later as fake evidence.
+        topic = message[:60]
         if rating > 0:
-            remember("omni_feedback", f"pref:{message[:80]}",
-                     f"User liked this answer. Question: {message}." + (f" Note: {comment}" if comment else ""),
+            remember("omni_feedback", f"pref:{topic}",
+                     f"User liked an answer about: {topic}." + (f" Note: {comment}" if comment else ""),
                      tags=["feedback", "learned_preference"], weight=1.5, source="feedback")
         else:
-            remember("omni_feedback", f"avoid:{message[:80]}",
-                     f"User rejected an answer. Question: {message}."
-                     + (f" What was wrong: {comment}" if comment else "")
-                     + (f" Rejected answer began: {answer}" if answer else ""),
+            remember("omni_feedback", f"avoid:{topic}",
+                     f"User rejected an answer about: {topic}."
+                     + (f" What was wrong: {comment}" if comment else ""),
                      tags=["feedback", "anti_pattern"], weight=2.0, source="feedback")
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:160]}
@@ -6428,23 +9181,6 @@ async def lmstudio_pull(req: LmstudioPullRequest) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
-@app.post("/brain/turn")
-async def brain_turn(req: ChatRequest) -> StreamingResponse:
-    return StreamingResponse(_safe_brain_stream(req), media_type="application/x-ndjson")
-
-@app.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
-    return StreamingResponse(_safe_brain_stream(req), media_type="application/x-ndjson")
-
-@app.post("/chat/converse")
-async def chat_converse(req: ChatRequest) -> StreamingResponse:
-    req.conversation_mode = True
-    return StreamingResponse(_safe_brain_stream(req), media_type="application/x-ndjson")
-
-@app.post("/api/v11/chat/turn")
-async def api_v11_chat_turn(req: ChatRequest) -> StreamingResponse:
-    return StreamingResponse(_safe_brain_stream(req), media_type="application/x-ndjson")
-
 @app.get("/api/v11/models")
 async def api_v11_models() -> dict[str, Any]:
     return await chat_models()
@@ -6452,19 +9188,6 @@ async def api_v11_models() -> dict[str, Any]:
 @app.post("/api/v11/models/pull")
 async def api_v11_models_pull(req: OllamaPullRequest) -> StreamingResponse:
     return await ollama_pull(req)
-
-@app.websocket("/converse/ws")
-async def converse_ws(ws: WebSocket) -> None:
-    await ws.accept()
-    try:
-        while True:
-            data = await ws.receive_text()
-            try: payload = json.loads(data)
-            except Exception: payload = {"message": data}
-            async for chunk in _safe_brain_stream(ChatRequest(**payload)):
-                await ws.send_text(chunk.decode("utf-8"))
-    except WebSocketDisconnect:
-        return
 
 
 @app.websocket("/ws/enterprise")
@@ -6615,7 +9338,7 @@ async def self_boot_audit_endpoint() -> dict[str, Any]:
 @app.post("/improvement/run")
 async def improvement_run_endpoint() -> dict[str, Any]:
     from shared.improvement_loop import run_improvement_cycle
-    return await asyncio.to_thread(run_improvement_cycle, _system_prompt())
+    return await asyncio.to_thread(run_improvement_cycle, _system_prompt() + "\n\n" + _dynamic_system_context())
 
 @app.get("/improvement/runs")
 async def improvement_runs_endpoint(limit: int = 20) -> dict[str, Any]:
@@ -6697,7 +9420,7 @@ async def schedule_cancel_endpoint(req: ScheduleIdRequest) -> dict[str, Any]:
     return await asyncio.to_thread(agent_tools.run_tool, "schedule.cancel", {"task_id": req.task_id})
 
 
-class MemorySaveRequest(BaseModel):
+class MemorySaveContentRequest(BaseModel):
     content: str
     key: str = ""
     namespace: str = "agent"
@@ -6719,7 +9442,7 @@ class MemoryIngestMediaRequest(BaseModel):
 
 
 @app.post("/api/memory/save")
-async def memory_save_endpoint(req: MemorySaveRequest) -> dict[str, Any]:
+async def memory_save_endpoint(req: MemorySaveContentRequest) -> dict[str, Any]:
     return await asyncio.to_thread(agent_tools.run_tool, "memory.save", {
         "content": req.content,
         "key": req.key,
@@ -6873,6 +9596,68 @@ async def api_set_omnipotent(req: Request) -> dict[str, Any]:
     }
 
 
+# ── TTS engine (voice output) selection — visible + controllable in Settings ──
+_TTS_ENGINES = [
+    {"id": "auto", "label": "Auto (OpenAI if key, else local instant)", "needs": ""},
+    {"id": "pyttsx3", "label": "Local system voice (instant, robotic)", "needs": ""},
+    {"id": "openai", "label": "OpenAI cloud TTS (natural, needs key)", "needs": "OPENAI_API_KEY"},
+    {"id": "fish", "label": "Fish Speech 2 (clone) - VERY SLOW on this AMD GPU (~min/reply)", "needs": "not GPU-accelerated here"},
+]
+
+
+def _fish_reachable() -> bool:
+    try:
+        import urllib.request
+        url = (os.getenv("SHIMS_FISH_URL") or "http://127.0.0.1:8090/v1/tts").rsplit("/v1", 1)[0] + "/v1/models"
+        urllib.request.urlopen(url, timeout=1.5)
+        return True
+    except Exception:
+        # A listening socket (even without /v1/models) still counts as up.
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", 8090), timeout=1.0):
+                return True
+        except OSError:
+            return False
+
+
+@app.get("/api/settings/tts")
+async def api_get_tts() -> dict[str, Any]:
+    """Current TTS engine + availability, so Settings can show what voice is used."""
+    current = (_settings["media"].get("audio_backend") or "auto").lower()
+    return {
+        "ok": True,
+        "engine": current,
+        "engines": _TTS_ENGINES,
+        "fish_running": _fish_reachable(),
+        "openai_key": bool(os.getenv("OPENAI_API_KEY")),
+    }
+
+
+@app.post("/api/settings/tts")
+async def api_set_tts(req: Request) -> dict[str, Any]:
+    """Set the voice-output engine at runtime (no restart)."""
+    body = await req.json()
+    engine = str(body.get("engine") or "auto").strip().lower()
+    valid = {e["id"] for e in _TTS_ENGINES} | {"fish-speech", "fish-tts", "clone", "browser"}
+    if engine not in valid:
+        raise HTTPException(400, f"Unknown TTS engine: {engine}")
+    _settings["media"]["audio_backend"] = engine
+    _set_env_persistent("SHIMS_AUDIO_BACKEND", engine)
+    # Saving the choice is instant. Fish's server loads a heavy model (30-60s) —
+    # NEVER await it here or the request (and the UI) hangs on "switching...".
+    # Kick the warm-up off in the background and return immediately.
+    warming = False
+    if engine in {"fish", "fish-speech", "fish-tts", "clone"} and not _fish_reachable():
+        warming = True
+        try:
+            from shared.compute_orchestrator import get_orchestrator
+            asyncio.create_task(asyncio.to_thread(get_orchestrator().ensure_fish))
+        except Exception:
+            pass
+    return {"ok": True, "engine": engine, "fish_running": _fish_reachable(), "fish_warming": warming}
+
+
 # ── Browser Agent API (Kimi Claw) ──
 @app.post("/api/browser/visit")
 async def browser_visit(req: Request) -> dict[str, Any]:
@@ -6934,7 +9719,10 @@ async def browser_screenshot(req: Request) -> dict[str, Any]:
 
 # --- Desktop Bridge integration ---
 _BRIDGE_URI = os.environ.get("SHIMS_DESKTOP_BRIDGE_URI", "ws://localhost:9876/bridge")
-_BRIDGE_TOKEN = os.environ.get("SHIMS_DESKTOP_BRIDGE_TOKEN", "")
+# When a master password is set, every bridge shares the one derived secret;
+# otherwise the legacy explicit desktop-bridge token is used (unchanged behavior).
+from shared.bridge_auth import derived_bridge_token as _derived_bridge_token, is_password_set as _bridge_password_set
+_BRIDGE_TOKEN = _derived_bridge_token() if _bridge_password_set() else os.environ.get("SHIMS_DESKTOP_BRIDGE_TOKEN", "")
 
 async def _bridge_client():
     from desktop_bridge.bridge_client import DesktopBridge
@@ -7169,13 +9957,69 @@ async def agent_tool_run(req: AgentToolRequest) -> dict[str, Any]:
     return await asyncio.to_thread(agent_tools.run_tool, req.tool, req.args, allow_gated=False)
 
 
-@app.post("/agent/run")
-async def agent_run(req: ChatRequest) -> StreamingResponse:
-    """Force the agentic loop for this message (same stream as chat)."""
-    req.agent_mode = True
-    if not _agentic_intent(req.message):
-        req.message = "/do " + (req.message or "")
-    return StreamingResponse(_safe_brain_stream(req), media_type="application/x-ndjson")
+@app.post("/api/agents/assign")
+async def api_agents_assign(req: Request) -> dict[str, Any]:
+    """Assign a background specialist agent (domain-scoped tools + persona).
+
+    Body: {domain: mail|comms|media|desktop|web|skills, goal, name?, session_id?}
+    Returns the background job id; the specialist reports to the feed when done."""
+    from shared.agent_domains import known_domains
+    body = await req.json()
+    domain = str(body.get("domain") or "").strip().lower()
+    goal = str(body.get("goal") or "").strip()
+    if domain not in known_domains():
+        return {"ok": False, "error": f"unknown domain {domain!r}", "known_domains": known_domains()}
+    if not goal:
+        return {"ok": False, "error": "missing goal"}
+    return _assign_specialist(domain, goal, name=str(body.get("name") or ""),
+                              session_id=str(body.get("session_id") or ""))
+
+
+@app.get("/api/agents/domains")
+async def api_agents_domains() -> dict[str, Any]:
+    from shared.agent_domains import DOMAINS
+    return {"ok": True, "domains": {k: {"label": v["label"], "tools": v["tools"]}
+                                    for k, v in DOMAINS.items()}}
+
+
+@app.get("/api/taskboard")
+async def api_taskboard() -> dict[str, Any]:
+    """Latest comms-digest taskboard (Urgent / Needs reply / Waiting / FYI)."""
+    from shared.comms_digest import latest_taskboard
+    return {"ok": True, "taskboard": latest_taskboard()}
+
+
+@app.post("/api/taskboard/run")
+async def api_taskboard_run() -> dict[str, Any]:
+    """Run a comms digest now and return the fresh taskboard."""
+    from shared.comms_digest import latest_taskboard, run_comms_digest
+    result = await asyncio.to_thread(run_comms_digest)
+    return {**result, "taskboard": latest_taskboard()}
+
+
+@app.get("/api/inventory")
+async def api_inventory() -> dict[str, Any]:
+    """Latest vendor-wise supply index (products/equipment/services + rates)."""
+    from shared.chat_inventory import latest_inventory
+    return {"ok": True, "inventory": latest_inventory()}
+
+
+@app.post("/api/inventory/run")
+async def api_inventory_run() -> dict[str, Any]:
+    from shared.chat_inventory import build_inventory, latest_inventory
+    result = await asyncio.to_thread(build_inventory)
+    return {**result, "inventory": latest_inventory()}
+
+
+@app.get("/api/inventory/export.xlsx")
+async def api_inventory_export() -> Any:
+    """Download the vendor index as a 3-sheet Excel workbook."""
+    from shared.chat_inventory import export_xlsx
+    result = await asyncio.to_thread(export_xlsx)
+    if not result.get("ok"):
+        return result
+    return FileResponse(result["path"], filename=os.path.basename(result["path"]),
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.post("/agent/swarm")
@@ -7669,6 +10513,83 @@ async def mailbox_import(req: MailboxImportRequest) -> dict[str, Any]:
     return result
 
 
+class ChannelInboundRequest(BaseModel):
+    """One inbound message relayed from an external channel bridge."""
+    channel: str = "whatsapp"
+    message_id: str
+    body: str = ""
+    sender_id: str = ""
+    sender_name: str = ""
+    thread_id: str = ""
+    is_group: bool = False
+    received_at: float | None = None
+    metadata: dict[str, Any] | None = None
+
+
+@app.post("/api/channels/inbound")
+async def channels_inbound(req: ChannelInboundRequest, request: Request) -> dict[str, Any]:
+    """Receive one message from a channel bridge (e.g. the OpenClaw WhatsApp
+    plugin's ``message_received`` hook).
+
+    Token-gated: this accepts message content from another local process, so an
+    unset/short ``SHIMS_BRIDGE_TOKEN`` fails closed rather than trusting anything
+    that can reach the port. Duplicates are accepted as success — the relay
+    retries, and WhatsApp itself redelivers.
+    """
+    from shared import channels
+
+    supplied = request.headers.get("x-bridge-token") or ""
+    if not channels.token_ok(supplied):
+        return JSONResponse(status_code=401, content={
+            "ok": False,
+            "error": "invalid or missing x-bridge-token"
+                     if channels.bridge_token()
+                     else "SHIMS_BRIDGE_TOKEN is not configured on this server",
+        })
+    result = await asyncio.to_thread(
+        channels.record_inbound,
+        req.channel, req.message_id,
+        body=req.body, sender_id=req.sender_id, sender_name=req.sender_name,
+        thread_id=req.thread_id, is_group=req.is_group,
+        received_at=req.received_at, metadata=req.metadata,
+    )
+    return result
+
+
+@app.get("/api/channels/{channel}/recent")
+async def channels_recent(channel: str, limit: int = 20) -> dict[str, Any]:
+    """Newest inbound messages for a channel (read-only; drives the hub feed)."""
+    from shared import channels
+    return await asyncio.to_thread(channels.recent, channel, limit)
+
+
+_WHATSAPP_SIDECAR_URL = f"http://127.0.0.1:{os.getenv('SHIMS_WHATSAPP_PORT', '5116')}"
+
+
+@app.get("/api/whatsapp/status")
+async def whatsapp_status() -> dict[str, Any]:
+    """Proxy to the WhatsApp sidecar status endpoint."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{_WHATSAPP_SIDECAR_URL}/status")
+            return resp.json()
+    except Exception as exc:
+        return {"ok": False, "state": "sidecar_offline", "error": str(exc)[:200]}
+
+
+@app.get("/api/whatsapp/qr")
+async def whatsapp_qr() -> Response:
+    """Proxy the QR code PNG from the WhatsApp sidecar."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{_WHATSAPP_SIDECAR_URL}/qr")
+            if resp.headers.get("content-type", "").startswith("image/"):
+                return Response(content=resp.content, media_type="image/png")
+            return JSONResponse(content=resp.json())
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"ok": False, "error": str(exc)[:200]})
+
+
 @app.get("/mailbox/messages")
 async def mailbox_messages(limit: int = 50, provider: str | None = None) -> dict[str, Any]:
     return {"ok": True, "messages": list_mail_messages(limit=limit, provider=provider)}
@@ -7718,6 +10639,39 @@ async def mailbox_gmail_reply(req: GmailReplyRequest) -> dict[str, Any]:
     action = record_action("gmail_reply", f"Reply to message {req.message_id}"[:220], payload={"message_id": req.message_id}, result={"ok": True, "id": result.get("id")}, evidence=evidence, requested_level="L3", summary="Replied to a synced mailbox message through the user-authorized Gmail account.")
     trust = build_trust(route="mailbox:gmail_reply", evidence=merge_evidence(evidence, evidence_from_action(action.get("action"))), action_id=action.get("action_id", ""), ledger_hash=action.get("ledger_hash", ""))
     result.update(_trust_fields(trust))
+    return result
+
+
+@app.post("/mailbox/gmail/draft")
+async def mailbox_gmail_draft(req: GmailDraftRequest) -> dict[str, Any]:
+    result = await asyncio.to_thread(
+        create_gmail_draft, req.to, req.subject, req.body,
+        cc=req.cc, thread_id=req.thread_id, in_reply_to=req.in_reply_to,
+    )
+    if not result.get("ok"):
+        status_code = 428 if result.get("status") in {"needs_oauth", "scope_required"} else 400
+        return JSONResponse(status_code=status_code, content=result)
+    evidence = [{"kind": "mailbox", "title": f"Draft: {req.subject or '(no subject)'}", "source_uri": f"gmail:draft:{result.get('draft_id', '')}", "excerpt": req.body[:240], "score": 0.85, "metadata": {"to": req.to, "thread_id": result.get("thread_id")}}]
+    action = record_action("gmail_draft", f"Create draft to {req.to}"[:220], payload={"to": req.to, "subject": req.subject}, result={"ok": True, "draft_id": result.get("draft_id")}, evidence=evidence, requested_level="L3", summary="Created a Gmail draft for the user to review and send manually.")
+    trust = build_trust(route="mailbox:gmail_draft", evidence=merge_evidence(evidence, evidence_from_action(action.get("action"))), action_id=action.get("action_id", ""), ledger_hash=action.get("ledger_hash", ""))
+    result.update(_trust_fields(trust))
+    return result
+
+
+@app.get("/mailbox/gmail/message/{message_id}")
+async def mailbox_gmail_read_message(message_id: str) -> dict[str, Any]:
+    result = await asyncio.to_thread(gmail_read_message, message_id)
+    if not result.get("ok"):
+        status_code = 428 if result.get("status") == "needs_oauth" else 400
+        return JSONResponse(status_code=status_code, content=result)
+    return result
+
+
+@app.post("/mailbox/gmail/attachment")
+async def mailbox_gmail_download_attachment(req: GmailAttachmentRequest) -> dict[str, Any]:
+    result = await asyncio.to_thread(download_gmail_attachment, req.message_id, req.attachment_id, req.filename)
+    if not result.get("ok"):
+        return JSONResponse(status_code=400, content=result)
     return result
 
 
@@ -7781,7 +10735,7 @@ async def actions_pending(session_id: str | None = None, include_resolved: bool 
 @app.post("/actions/approve")
 @app.post("/approvals/decide")
 async def actions_approve(req: ApprovalDecisionRequest) -> dict[str, Any]:
-    pending = _load_pending_action(req.approval_id or "") if req.approval_id else _latest_pending_action()
+    pending = _load_pending_action(req.approval_id or "") if req.approval_id else _latest_pending_action_any()
     if not pending:
         return {"ok": False, "status": "not_found", "message": "No pending approval was found."}
     if not _decision_value(req.decision):
@@ -8424,6 +11378,32 @@ async def voice_speak(req: SpeakRequest) -> dict[str, Any]:
     backend = (_settings["media"].get("audio_backend") or "auto").lower()
     voice_mode = settings.voice_mode
 
+    # 0. Fish Speech 2 (OpenAudio S2-Pro) voice-clone TTS when selected in Settings
+    #    (audio_backend = "fish"). Only use it when its server is ALREADY up —
+    #    otherwise the model cold-load (30-60s) would make voice turns hang/"die".
+    #    If it's not up yet, kick off a background warm-up and speak with the fast
+    #    local voice this turn; Fish takes over once warm.
+    if backend in {"fish", "fish-speech", "fish-tts", "clone", "voice-clone"}:
+        if _fish_reachable():
+            try:
+                fish = await asyncio.wait_for(
+                    _fish_audio(text[:1200]),
+                    timeout=max(10.0, float(os.getenv("SHIMS_FISH_TIMEOUT_SECONDS", "45"))),
+                )
+                if fish and fish.get("ok"):
+                    fish["engine"] = "fish-speech"
+                    fish["spoken"] = True
+                    fish["voice_profile"] = selected_profile
+                    return fish
+            except Exception:
+                pass  # fall through to local TTS below
+        else:
+            try:
+                from shared.compute_orchestrator import get_orchestrator
+                asyncio.create_task(asyncio.to_thread(get_orchestrator().ensure_fish))
+            except Exception:
+                pass  # speak with local voice this turn; Fish warms in background
+
     # 1. Cloud / OpenAI TTS first when configured or in cloud voice mode.
     if voice_mode == "cloud" or backend in {"auto", "openai", "openai-tts", "cloud"}:
         if os.getenv("OPENAI_API_KEY"):
@@ -8537,7 +11517,7 @@ async def voice_approve(request: Request) -> dict[str, Any]:
     decision = _approval_decision_from_text(transcript)
     if decision is None:
         return {"ok": False, "error": "Could not parse approval decision from transcript", "transcript": transcript, "hints": "Say 'approve', 'yes', 'go ahead', 'cancel', or 'no'"}
-    pending = _latest_pending_action(session_id or None)
+    pending = _latest_pending_action(session_id) if session_id else _latest_pending_action_any()
     if not pending:
         return {"ok": False, "error": "No pending action to approve", "transcript": transcript, "decision": decision}
     if decision is False:
@@ -8769,7 +11749,9 @@ async def skills_save(req: SkillSaveRequest) -> dict[str, Any]:
     from shared import skills as skill_store
     return {"ok": True, "skill": skill_store.save_skill(
         req.name, req.summary, body=req.body, tags=req.tags or [], pinned=req.pinned,
-        source="user", skill_id=req.skill_id)}
+        source="user", skill_id=req.skill_id,
+        previous_version_id=req.previous_version_id,
+        created_from=req.created_from or "user")}
 
 
 @app.delete("/skills/{skill_id}")
@@ -8783,15 +11765,21 @@ async def tasks() -> dict[str, Any]:
 
 @app.get("/sessions")
 async def sessions() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": sid,
-            "title": (msgs[0]["content"][:60] if msgs else "New chat"),
-            "message_count": len(msgs),
-            "updated_index": idx,
-        }
-        for idx, (sid, msgs) in enumerate(reversed(list(_sessions.items())))
-    ]
+    """List past conversations, newest first — served from the durable on-disk
+    store so history survives restarts. Any RAM-only session not yet persisted
+    (a brand-new empty chat) is merged in after the persisted ones."""
+    from shared import chat_store
+    rows = chat_store.list_sessions()
+    seen = {r["id"] for r in rows if r.get("id")}
+    for sid, msgs in reversed(list(_sessions.items())):
+        if sid not in seen and msgs:
+            rows.append({
+                "id": sid,
+                "title": (msgs[0]["content"][:60] if msgs else "New chat"),
+                "message_count": len(msgs),
+                "updated_at": 0.0,
+            })
+    return rows
 
 @app.post("/sessions/new")
 async def sessions_new() -> dict[str, Any]:
@@ -8801,9 +11789,16 @@ async def sessions_new() -> dict[str, Any]:
 
 @app.get("/sessions/{session_id}")
 async def session_detail(session_id: str) -> dict[str, Any]:
-    if session_id not in _sessions:
-        raise HTTPException(404, "Session not found")
-    messages = _sessions.get(session_id) or []
+    # Prefer the live in-memory copy; fall back to the durable store and rehydrate
+    # it into memory so reopening a cold conversation continues with full context.
+    messages = _sessions.get(session_id)
+    if messages is None:
+        from shared import chat_store
+        stored = chat_store.get_session(session_id)
+        if not stored:
+            raise HTTPException(404, "Session not found")
+        messages = stored.get("messages") or []
+        _sessions[session_id] = messages
     return {
         "ok": True,
         "session_id": session_id,
@@ -8814,8 +11809,10 @@ async def session_detail(session_id: str) -> dict[str, Any]:
 
 @app.delete("/sessions/{session_id}")
 async def session_delete(session_id: str) -> dict[str, Any]:
-    existed = session_id in _sessions
+    from shared import chat_store
+    existed = session_id in _sessions or bool(chat_store.get_session(session_id))
     _sessions.pop(session_id, None)
+    chat_store.delete_session(session_id)
     return {"ok": existed, "deleted": session_id}
 
 @app.get("/system/providers")
@@ -8825,11 +11822,12 @@ async def providers() -> dict[str, Any]:
     hf_ready = bool(hf_names)
     lm_models = await _lmstudio_models_raw()
     lm_ready = bool(lm_models)
+    _LOCAL_ENGINE_LABELS = {"vllm": "vLLM Local", "sglang": "SGLang Local", "aphrodite": "Aphrodite Engine Local", "koboldcpp": "KoboldCPP Local"}
     return {"providers": [
         {"id":"lmstudio", "label":"LM Studio Local (GPU)", "configured": True, "status":"ready" if lm_ready else "offline", "model": (await _lmstudio_pick_default(lm_models) if lm_ready else DEFAULT_LMSTUDIO_MODEL)},
         {"id":"ollama", "label":"Ollama Local", "configured": True, "status":"ready" if installed else "offline", "model": _preferred_local_model([m["name"] for m in installed])},
         {"id":"huggingface", "label":"Hugging Face Local", "configured": True, "status":"ready" if hf_ready else "offline", "model": hf_names[0] if hf_ready else DEFAULT_HUGGINGFACE_MODEL},
-        *[{ "id":p, "label": p.title() if p != "anthropic" else "Anthropic / Claude", "configured": _provider_configured(p), "status":"ready" if _provider_configured(p) else "missing key", "model": PROVIDER_DEFAULTS[p]} for p in ["openai", "anthropic", "gemini", "kimi", "deepseek", "qwen"]]
+        *[{ "id":p, "label": _LOCAL_ENGINE_LABELS.get(p, p.title()), "configured": _provider_configured(p), "status":"ready" if _provider_configured(p) else "missing key", "model": PROVIDER_DEFAULTS[p]} for p in ["openai", "anthropic", "gemini", "kimi", "deepseek", "qwen", "vllm", "sglang", "aphrodite", "koboldcpp"]]
     ]}
 
 @app.post("/system/providers/{pid}/test")
@@ -9035,6 +12033,67 @@ async def enterprise_dashboard() -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "url": ENTERPRISE_URL, "detail": str(exc)[:220]}
 
+
+
+@app.get("/enterprise/control")
+async def enterprise_control_status() -> dict[str, Any]:
+    """Process status of the standalone SHIMS Enterprise app."""
+    from shared.shims_enterprise import status
+    return {"ok": True, **status()}
+
+
+@app.post("/enterprise/control")
+async def enterprise_control_action(request: Request) -> dict[str, Any]:
+    """Start, stop, or restart the standalone SHIMS Enterprise app.
+
+    Body: {"action": "start" | "stop" | "restart" | "status"}
+    """
+    from shared.shims_enterprise import start, stop, restart, status
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = str(body.get("action") or "status").strip().lower()
+    if action == "start":
+        result = await asyncio.to_thread(start, wait=True)
+    elif action == "stop":
+        result = await asyncio.to_thread(stop, wait=True)
+    elif action == "restart":
+        result = await asyncio.to_thread(restart, wait=True)
+    elif action == "status":
+        result = {"ok": True, **status()}
+    else:
+        return {"ok": False, "error": "action must be start|stop|restart|status"}
+    return result
+
+
+@app.get("/director/status")
+async def director_status() -> dict[str, Any]:
+    """Director Cockpit snapshot status."""
+    from shared.director_cockpit import status
+    return await asyncio.to_thread(status)
+
+
+@app.post("/director/control")
+async def director_control_action(request: Request) -> dict[str, Any]:
+    """Open or refresh the Director Cockpit.
+
+    Body: {"action": "open" | "refresh" | "status"}
+    """
+    from shared.director_cockpit import open_cockpit, refresh_snapshot, status
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = str(body.get("action") or "status").strip().lower()
+    if action == "open":
+        return await asyncio.to_thread(open_cockpit)
+    if action == "refresh":
+        return await asyncio.to_thread(refresh_snapshot)
+    if action == "status":
+        return {"ok": True, **await asyncio.to_thread(status)}
+    return {"ok": False, "error": "action must be open|refresh|status"}
+
 @app.get("/tasks/scheduled")
 async def scheduled_tasks() -> dict[str, Any]:
     """Return upcoming scheduled tasks from the Omni brain task queue."""
@@ -9131,7 +12190,11 @@ async def evolution_capability_check(req: EvolutionCapabilityCheckRequest) -> di
     if not targets:
         return {"ok": False, "status": "no_targets", "message": "No matching capability-check targets requested.", "available_targets": ["backend", "frontend", "feature"]}
     apply_requested = bool(req.apply)
-    if apply_requested and (req.approval_phrase or "").strip() != "I_APPROVE_SHIMS_PATCH":
+    if (
+        apply_requested
+        and (req.approval_phrase or "").strip() != "I_APPROVE_SHIMS_PATCH"
+        and not _pending_action_authorizes({"approval_id": req.approval_id})
+    ):
         return {
             "ok": False,
             "status": "approval_required",
@@ -9351,6 +12414,42 @@ async def plans_suggest(goal: str) -> dict[str, Any]:
 @app.get("/api/v13/health")
 async def api_v13_health() -> dict[str, Any]:
     return {"ok": True, "name": APP_NAME, "version": APP_VERSION, "brain": "unified-v13", "features": ["tool-first-routing", "mcp-style-manifest", "guarded-self-evolution", "autonomy-policy", "android-bridge", "enterprise-six-stack-foundation"]}
+
+
+@app.post("/api/nightly/run")
+async def api_nightly_run() -> dict[str, Any]:
+    """Manually trigger the nightly feedback + self-fix loop (day report →
+    app-doctor pass → improvement cycle on the big native model)."""
+    from shared.nightly_loop import run_nightly_cycle
+    return await asyncio.to_thread(run_nightly_cycle)
+
+
+@app.get("/api/nightly/runs")
+async def api_nightly_runs(limit: int = 20) -> dict[str, Any]:
+    from shared.nightly_loop import list_runs
+    return {"ok": True, "runs": list_runs(limit)}
+
+
+@app.get("/api/observer/today")
+async def api_observer_today() -> dict[str, Any]:
+    """Today's observer snapshots plus the day report if one was built."""
+    from shared import day_observer
+    day = day_observer._today()
+    snapshots: list[dict[str, Any]] = []
+    snap_path = day_observer.OBSERVER_DIR / f"{day}.jsonl"
+    if snap_path.exists():
+        for line in snap_path.read_text(encoding="utf-8").splitlines():
+            try:
+                snapshots.append(json.loads(line))
+            except Exception:
+                continue
+    report_path = day_observer.OBSERVER_DIR / f"{day}-report.md"
+    return {
+        "ok": True,
+        "day": day,
+        "snapshots": snapshots[-100:],
+        "report_path": str(report_path) if report_path.exists() else None,
+    }
 
 @app.post("/api/v13/chat/turn")
 async def api_v13_chat_turn(req: ChatRequest) -> StreamingResponse:
@@ -9584,6 +12683,15 @@ def _build_settings_models(ollama_models: list[dict[str, Any]], lmstudio_models:
     choose any known latest or older model for each provider.
     """
     models: dict[str, list[dict[str, Any]]] = {"ollama": ollama_models, "lmstudio": lmstudio_models or []}
+    # Native GGUFs — the primary path; listed so the Settings model select can
+    # pin a specific native model by id.
+    try:
+        from shared.native_engine import discovery as _native_discovery
+        models["native"] = [{"id": m["id"], "name": m["id"], "description": "Native GGUF",
+                             "ram_mb": 0, "tool_capable": True}
+                            for m in _native_discovery.discover_models()]
+    except Exception:
+        models["native"] = []
     for pid in ["openai", "anthropic", "gemini", "deepseek", "kimi", "qwen", "huggingface"]:
         entries: list[dict[str, Any]] = []
         for m in RECOMMENDED_MODELS:
@@ -9629,6 +12737,129 @@ async def api_settings_agent_models(req: AgentModelsRequest) -> dict[str, Any]:
             if cleaned:
                 saved.append(env_var)
     return {"ok": True, "saved": saved}
+
+
+@app.get("/api/settings/brain-model")
+async def api_get_brain_model() -> dict[str, Any]:
+    """Current chat brain model/provider plus installed local models for the picker."""
+    lm_raw, ol_raw = await asyncio.gather(
+        _lmstudio_models_raw(timeout=5.0),
+        _ollama_models_raw(timeout=1.5),
+        return_exceptions=True,
+    )
+    lmstudio_models = [
+        {"name": m["name"], "loaded": bool(m.get("loaded")), "tool_capable": bool(m.get("tool_capable"))}
+        for m in (lm_raw if isinstance(lm_raw, list) else [])
+    ]
+    ollama_models = [
+        m.get("name") for m in (ol_raw if isinstance(ol_raw, list) else []) if isinstance(m, dict) and m.get("name")
+    ]
+    return {
+        "ok": True,
+        "provider": (os.getenv("SHIMS_CHAT_PROVIDER") or "auto").strip() or "auto",
+        "model": (os.getenv("SHIMS_CHAT_MODEL") or "").strip(),
+        "lmstudio_default": DEFAULT_LMSTUDIO_MODEL,
+        "models": {"lmstudio": lmstudio_models, "ollama": ollama_models},
+    }
+
+
+@app.post("/api/settings/brain-model")
+async def api_set_brain_model(req: BrainModelRequest) -> dict[str, Any]:
+    """Persist the frontend-chosen brain model (SHIMS_CHAT_PROVIDER/SHIMS_CHAT_MODEL)."""
+    saved = []
+    if req.provider is not None:
+        _set_env_persistent("SHIMS_CHAT_PROVIDER", req.provider.strip())
+        saved.append("SHIMS_CHAT_PROVIDER")
+    if req.model is not None:
+        _set_env_persistent("SHIMS_CHAT_MODEL", req.model.strip())
+        saved.append("SHIMS_CHAT_MODEL")
+    return {
+        "ok": True,
+        "saved": saved,
+        "provider": (os.getenv("SHIMS_CHAT_PROVIDER") or "auto").strip() or "auto",
+        "model": (os.getenv("SHIMS_CHAT_MODEL") or "").strip(),
+    }
+
+
+def _llm_settings_state() -> dict[str, Any]:
+    """Effective LLM control values (env with defaults applied)."""
+    try:
+        temperature = float(os.getenv("SHIMS_CHAT_TEMPERATURE", "0.2"))
+    except ValueError:
+        temperature = 0.2
+    try:
+        chat_ctx = max(1024, int(os.getenv("SHIMS_CHAT_CTX", "8192")))
+    except ValueError:
+        chat_ctx = 8192
+    try:
+        slots = max(1, min(int(os.getenv("SHIMS_NATIVE_PARALLEL", "4")), 16))
+    except ValueError:
+        slots = 4
+    return {
+        "reasoning_effort": (os.getenv("SHIMS_REASONING_EFFORT") or "auto").strip().lower() or "auto",
+        "temperature": temperature,
+        "chat_ctx": chat_ctx,
+        "parallel_slots": slots,
+    }
+
+
+@app.get("/api/settings/llm")
+async def api_get_llm_settings() -> dict[str, Any]:
+    """Brain Controls: reasoning effort, temperature, context, parallel slots."""
+    return {"ok": True, **_llm_settings_state()}
+
+
+@app.post("/api/settings/llm")
+async def api_set_llm_settings(req: Request) -> dict[str, Any]:
+    """Persist Brain Controls. Changing parallel_slots needs an engine reload
+    to take effect — the response flags that so the UI can offer one."""
+    body = await req.json()
+    saved: list[str] = []
+    before = _llm_settings_state()
+
+    effort = body.get("reasoning_effort")
+    if effort is not None:
+        effort = str(effort).strip().lower()
+        if effort not in {"auto", "none", "low", "medium", "high"}:
+            return {"ok": False, "error": "reasoning_effort must be auto|none|low|medium|high"}
+        _set_env_persistent("SHIMS_REASONING_EFFORT", effort)
+        saved.append("SHIMS_REASONING_EFFORT")
+
+    if body.get("temperature") is not None:
+        try:
+            temp = float(body.get("temperature"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "temperature must be a number"}
+        if not 0.0 <= temp <= 1.5:
+            return {"ok": False, "error": "temperature must be between 0.0 and 1.5"}
+        _set_env_persistent("SHIMS_CHAT_TEMPERATURE", str(temp))
+        saved.append("SHIMS_CHAT_TEMPERATURE")
+
+    if body.get("chat_ctx") is not None:
+        try:
+            ctx = int(body.get("chat_ctx"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "chat_ctx must be an integer"}
+        if ctx not in {4096, 8192, 16384, 32768}:
+            return {"ok": False, "error": "chat_ctx must be one of 4096/8192/16384/32768"}
+        _set_env_persistent("SHIMS_CHAT_CTX", str(ctx))
+        saved.append("SHIMS_CHAT_CTX")
+
+    if body.get("parallel_slots") is not None:
+        try:
+            slots = int(body.get("parallel_slots"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "parallel_slots must be an integer"}
+        if not 1 <= slots <= 16:
+            return {"ok": False, "error": "parallel_slots must be between 1 and 16"}
+        _set_env_persistent("SHIMS_NATIVE_PARALLEL", str(slots))
+        saved.append("SHIMS_NATIVE_PARALLEL")
+
+    after = _llm_settings_state()
+    # chat_ctx is per-request (no reload); only parallel_slots changes the
+    # server launch flags.
+    return {"ok": True, "saved": saved, **after,
+            "needs_engine_reload": after["parallel_slots"] != before["parallel_slots"]}
 
 
 # ============================================================================
@@ -10938,4 +14169,11 @@ async def coder_v3_ai_iterate(project_id: str, req: CoderV3IterateRequest) -> di
         model=req.model,
         max_steps=req.max_steps,
     )
+
+
+# Public chat/agent-stream routes are maintained in a dedicated router so the
+# monolithic main.py can be split up incrementally. Imported at the very end to
+# avoid circular imports while keeping ChatRequest and the brain helpers here.
+from backend.app import routes_chat  # noqa: E402
+app.include_router(routes_chat.router)
 
