@@ -4807,7 +4807,7 @@ async def _comfyui_image(prompt: str) -> dict[str, Any] | None:
         path = IMAGE_DIR / filename
         result = await generate_comfy_image(prompt, output_path=path, width=1024, height=1024)
         if result.get("ok"):
-            file_url = f"/media/files/image/{filename}"
+            file_url = f"/media/files/images/{filename}"
             return {
                 "ok": True,
                 "provider": "comfyui",
@@ -4856,7 +4856,7 @@ async def _pollinations_image(prompt: str) -> dict[str, Any] | None:
             filename = _safe_name(prompt, "png")
             path = IMAGE_DIR / filename
             path.write_bytes(r.content)
-            file_url = f"/media/files/image/{filename}"
+            file_url = f"/media/files/images/{filename}"
             return {"ok": True, "provider": "pollinations", "type": "image", "kind": "image", "title": prompt[:80], "filename": filename, "url": file_url, "file_url": file_url, "download_url": file_url}
     except Exception as exc:
         return {"ok": False, "error": f"pollinations: {str(exc)[:200]}"}
