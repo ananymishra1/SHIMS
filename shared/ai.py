@@ -394,7 +394,7 @@ def extract_json_maybe(text: str) -> Any:
 
 # ── Voice / TTS helpers ────────────────────────────────────────────────
 
-def _create_audio(text: str, lang: str = "en-IN", backend: str | None = None) -> dict[str, Any]:
+def _create_audio(text: str, lang: str = "en-IN", backend: str | None = None, voice_id: str | None = None) -> dict[str, Any]:
     """Generate TTS audio and return a web-playable file URL.
 
     Backends (in priority order when ``backend`` is ``auto`` or unset):
@@ -447,24 +447,27 @@ def _create_audio(text: str, lang: str = "en-IN", backend: str | None = None) ->
                     return {"ok": False, "error": f"OpenAI TTS failed: {exc}", "file_url": None, "engine": "openai"}
         # fall through to local fallback unless explicitly openai-only
 
-    # -- fish-speech-2 (explicit only) --
-    if chosen_backend in {"fish", "fish-speech", "fishspeech"}:
+    # -- fish-speech-2 (explicit or auto when a voice_id is provided) --
+    if chosen_backend in {"fish", "fish-speech", "fishspeech"} or voice_id:
         try:
             from shared.compute_orchestrator import get_orchestrator
             orch = get_orchestrator()
             if orch.ensure_fish():
                 import httpx
                 base = orch._fish_base_url().rstrip("/")
+                payload: dict[str, Any] = {"text": text[:500], "format": "mp3"}
+                if voice_id:
+                    payload["reference_id"] = voice_id
                 r = httpx.post(
                     f"{base}/v1/tts",
-                    json={"text": text[:500], "format": "mp3"},
-                    timeout=120,
+                    json=payload,
+                    timeout=300,
                 )
                 r.raise_for_status()
                 out_path.write_bytes(r.content)
-                return {"ok": True, "file_url": file_url, "engine": "fish-speech", "path": str(out_path)}
+                return {"ok": True, "file_url": file_url, "engine": "fish-speech", "voice_id": voice_id, "path": str(out_path)}
         except Exception as exc:
-            if chosen_backend in {"fish", "fish-speech", "fishspeech"}:
+            if chosen_backend in {"fish", "fish-speech", "fishspeech"} or voice_id:
                 return {"ok": False, "error": f"fish-speech TTS failed: {exc}", "file_url": None, "engine": "fish-speech"}
 
     # -- edge-tts (preferred local/free) --
@@ -514,3 +517,29 @@ def _create_audio(text: str, lang: str = "en-IN", backend: str | None = None) ->
         return {"ok": False, "error": f"pyttsx3 fallback failed: {exc}", "file_url": None, "engine": "pyttsx3"}
 
     return {"ok": False, "error": "no TTS backend produced audio", "file_url": None, "engine": chosen_backend}
+
+
+def fish_add_reference(voice_id: str, audio_path: str | Path, text: str) -> dict[str, Any]:
+    """Upload a reference audio clip to the local Fish Speech server for voice cloning.
+
+    The server must be running (call ``ensure_fish`` first or set backend to fish).
+    ``text`` should be the exact transcript of the reference clip (a few seconds
+    of clean speech is enough).
+    """
+    from shared.compute_orchestrator import get_orchestrator
+    orch = get_orchestrator()
+    if not orch.ensure_fish():
+        return {"ok": False, "error": "Fish Speech server is not available", "engine": "fish-speech"}
+    try:
+        import httpx
+        from pathlib import Path
+        base = orch._fish_base_url().rstrip("/")
+        audio_path = Path(audio_path)
+        with audio_path.open("rb") as f:
+            files = {"audio": (audio_path.name, f, "audio/wav")}
+            data = {"id": voice_id, "text": text}
+            r = httpx.post(f"{base}/v1/references/add", data=data, files=files, timeout=60)
+        r.raise_for_status()
+        return {"ok": True, "engine": "fish-speech", "voice_id": voice_id, "response": r.json() if r.text else None}
+    except Exception as exc:
+        return {"ok": False, "error": f"fish-speech reference upload failed: {exc}", "engine": "fish-speech"}
