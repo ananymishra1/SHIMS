@@ -221,11 +221,17 @@ function persist(){
 }
 function escapeHtml(s){return String(s||'').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function md(s){
-  return escapeHtml(s||'')
-    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+  let html = escapeHtml(s||'');
+  // Markdown images and links (must run before bare URL linkify).
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;border-radius:8px;">');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Auto-link bare URLs.
+  html = html.replace(/(\bhttps?:\/\/[-A-Za-z0-9+&@#\/%?=~_|!:,.;]*[-A-Za-z0-9+&@#\/%=~_|])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/\n/g, '<br>');
+  return html;
 }
 function toast(msg, type='info'){
   const host = $('#toast-host'); if(!host) return;
@@ -322,7 +328,7 @@ function pushBubble(role, text='', opts={}){
   t.scrollTop = t.scrollHeight;
   return b;
 }
-function setBubble(b, text){ const c=b && b.querySelector('.content'); if(c) c.innerHTML=md(text||''); }
+function setBubble(b, text){ const c=b && b.querySelector('.content'); if(!c) return; const cards=Array.from(c.querySelectorAll('.media-card,.search-card,.trust-card')); c.innerHTML=md(text||''); cards.forEach(card=>c.appendChild(card)); }
 function appendBubble(b, text){ const c=b && b.querySelector('.content'); if(c) c.innerHTML += md(text||''); }
 function setBubbleMetaLegacy(b, meta){ const m=b && b.querySelector('.meta'); if(m) m.textContent = [meta.provider, meta.model, meta.route].filter(Boolean).join(' / '); }
 
