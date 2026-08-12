@@ -14,9 +14,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import GENERATED_DIR
+from .config import GENERATED_DIR, ROOT_DIR
 
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+IMAGE_DIR = ROOT_DIR / "data" / "media" / "images"
+IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _safe_filename(prompt: str, ext: str = "png") -> str:
@@ -35,9 +37,9 @@ def generate_image_pollinations(prompt: str, width: int = 1024, height: int = 10
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = resp.read()
         filename = _safe_filename(prompt, "png")
-        path = GENERATED_DIR / filename
+        path = IMAGE_DIR / filename
         path.write_bytes(data)
-        file_url = f"/media/files/image/{filename}"
+        file_url = f"/media/files/images/{filename}"
         return {
             "ok": True,
             "provider": "pollinations",
